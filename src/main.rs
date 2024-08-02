@@ -16,6 +16,7 @@ fn main() {
     match command {
         "help" => show_help(),
         "new" => new_task(args),
+        "del" => delete_task(args),
         "show" => show_task(args),
         "list" => list_tasks(),
         _ => unknown_command(),
@@ -23,7 +24,7 @@ fn main() {
 }
 
 fn show_help() {
-    println!("Available commands:\n\nnew\nshow\nlist\nhelp");
+    println!("Available commands:\n\nnew\ndel\nshow\nlist\nhelp");
 }
 
 fn unknown_command() {
@@ -44,6 +45,19 @@ fn new_task(args: Vec<String>) {
         Ok(id) => println!("Task id {id} created"),
         Err(e) => println!("ERROR: {e}"),
     };
+}
+
+fn delete_task(args: Vec<String>) {
+    let id = args.get(1);
+    match id {
+        Some(id) => {
+            match gittask::delete_task(id) {
+                Ok(_) => println!("Task id {id} deleted"),
+                Err(e) => println!("ERROR: {e}"),
+            }
+        },
+        _ => println!("Task id is required!"),
+    }
 }
 
 fn show_task(args: Vec<String>) {

@@ -114,6 +114,24 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
     Ok(result)
 }
 
+pub fn delete_task(id: &str) -> Result<(), String> {
+    let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
+    let task_ref = repo.find_reference("refs/tasks/tasks").map_err(|e| e.message().to_owned())?;
+    let task_tree = task_ref.peel_to_tree().map_err(|e| e.message().to_owned())?;
+
+    let mut treebuilder = repo.treebuilder(Some(&task_tree)).map_err(|e| e.message().to_owned())?;
+    treebuilder.remove(id).map_err(|e| e.message().to_owned())?;
+    let tree_oid = treebuilder.write().map_err(|e| e.message().to_owned())?;
+
+    let parent_commit = task_ref.peel_to_commit().map_err(|e| e.message().to_owned())?;
+    let parents = vec![parent_commit];
+    let me = &repo.signature().unwrap();
+
+    repo.commit(Some("refs/tasks/tasks"), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()).map_err(|e| e.message().to_owned())?;
+
+    Ok(())
+}
+
 pub fn create_task(task: Task) -> Result<String, String> {
     let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
     let task_ref_result = repo.find_reference("refs/tasks/tasks");
