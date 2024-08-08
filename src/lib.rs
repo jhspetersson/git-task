@@ -166,6 +166,26 @@ pub fn create_task(task: Task) -> Result<String, String> {
     Ok(task_id)
 }
 
+pub fn update_task(task: Task) -> Result<String, String> {
+    let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
+    let task_ref_result = repo.find_reference("refs/tasks/tasks").unwrap();
+    let parent_commit = task_ref_result.peel_to_commit().unwrap();
+    let source_tree = task_ref_result.peel_to_tree().unwrap();
+    let string_content = serde_json::to_string(task.get_all_properties()).unwrap();
+    let content = string_content.as_bytes();
+    let oid = repo.blob(content).unwrap();
+    let mut treebuilder = repo.treebuilder(Some(&source_tree)).map_err(|e| e.message().to_owned())?;
+    let task_id = task.get_id().unwrap();
+    treebuilder.insert(task_id.clone(), oid, FileMode::Blob.into()).map_err(|e| e.message().to_owned())?;
+    let tree_oid = treebuilder.write().map_err(|e| e.message().to_owned())?;
+
+    let me = &repo.signature().unwrap();
+    let parents = vec![parent_commit];
+    repo.commit(Some("refs/tasks/tasks"), me, me, "update task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()).map_err(|e| e.message().to_owned())?;
+
+    Ok(task_id)
+}
+
 fn get_next_id() -> Result<String, String> {
     let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
     let task_ref = repo.find_reference("refs/tasks/tasks").map_err(|e| e.message().to_owned())?;
