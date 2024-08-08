@@ -31,14 +31,14 @@ fn show_help() {
 }
 
 fn unknown_command() {
-    println!("Unknown command!\n");
+    eprintln!("Unknown command!\n");
     show_help();
 }
 
 fn new_task(args: Vec<String>) {
     let name: String = args.into_iter().skip(1).collect::<Vec<String>>().join(" ");
     if name.is_empty() {
-        println!("Task name is required!");
+        eprintln!("Task name is required!");
         return;
     }
 
@@ -46,7 +46,7 @@ fn new_task(args: Vec<String>) {
 
     match gittask::create_task(task.unwrap()) {
         Ok(id) => println!("Task id {id} created"),
-        Err(e) => println!("ERROR: {e}"),
+        Err(e) => eprintln!("ERROR: {e}"),
     };
 }
 
@@ -54,7 +54,7 @@ fn update_status(args: Vec<String>) {
     let id = args.get(1);
 
     if id.is_none() {
-        println!("Task id is required!");
+        eprintln!("Task id is required!");
         return;
     }
     let id = id.unwrap().to_string();
@@ -62,20 +62,20 @@ fn update_status(args: Vec<String>) {
     let status = args.get(2);
 
     if status.is_none() {
-        println!("Task status is required!");
+        eprintln!("Task status is required!");
         return;
     }
 
     let task = gittask::find_task(&id);
 
     if task.is_err() {
-        println!("ERROR: {}", task.err().unwrap());
+        eprintln!("ERROR: {}", task.err().unwrap());
         return;
     }
 
     let task = task.unwrap();
     if task.is_none() {
-        println!("Task id {id} not found");
+        eprintln!("Task id {id} not found");
         return;
     }
 
@@ -84,7 +84,7 @@ fn update_status(args: Vec<String>) {
 
     match gittask::update_task(task) {
         Ok(_) => println!("Task id {id} updated"),
-        Err(e) => println!("ERROR: {e}"),
+        Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 
@@ -92,7 +92,7 @@ fn get_prop(args: Vec<String>) {
     let id = args.get(1);
 
     if id.is_none() {
-        println!("Task id is required!");
+        eprintln!("Task id is required!");
         return;
     }
     let id = id.unwrap().to_string();
@@ -100,7 +100,7 @@ fn get_prop(args: Vec<String>) {
     let prop_name = args.get(2);
 
     if prop_name.is_none() {
-        println!("Task property name is required!");
+        eprintln!("Task property name is required!");
         return;
     }
     let prop_name = prop_name.unwrap();
@@ -108,13 +108,13 @@ fn get_prop(args: Vec<String>) {
     let task = gittask::find_task(&id);
 
     if task.is_err() {
-        println!("ERROR: {}", task.err().unwrap());
+        eprintln!("ERROR: {}", task.err().unwrap());
         return;
     }
 
     let task = task.unwrap();
     if task.is_none() {
-        println!("Task id {id} not found");
+        eprintln!("Task id {id} not found");
         return;
     }
 
@@ -173,10 +173,10 @@ fn delete_task(args: Vec<String>) {
         Some(id) => {
             match gittask::delete_task(id) {
                 Ok(_) => println!("Task id {id} deleted"),
-                Err(e) => println!("ERROR: {e}"),
+                Err(e) => eprintln!("ERROR: {e}"),
             }
         },
-        _ => println!("Task id is required!"),
+        _ => eprintln!("Task id is required!"),
     }
 }
 
@@ -192,11 +192,11 @@ fn show_task(args: Vec<String>) {
                              task.get_property(&"name".to_owned()).unwrap()
                     )
                 },
-                Ok(None) => println!("Task id {id} not found"),
-                Err(e) => println!("ERROR: {e}"),
+                Ok(None) => eprintln!("Task id {id} not found"),
+                Err(e) => eprintln!("ERROR: {e}"),
             }
         },
-        _ => println!("Task id is required!"),
+        _ => eprintln!("Task id is required!"),
     }
 }
 
@@ -212,7 +212,7 @@ fn list_tasks() {
             }
         },
         Err(e) => {
-            println!("ERROR: {e}");
+            eprintln!("ERROR: {e}");
         }
     }
 }
