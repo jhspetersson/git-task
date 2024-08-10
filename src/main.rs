@@ -1,50 +1,59 @@
 extern crate gittask;
 
-use std::env;
+use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{DarkGray, Green, LightBlue, LightGray, Yellow};
 use gittask::Task;
 
+#[derive(Parser)]
+#[command(arg_required_else_help(true))]
+struct Args {
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    List,
+    Show {
+        id: String,
+    },
+    Create {
+        name: String,
+    },
+    Status {
+        id: String,
+        status: String,
+    },
+    Get {
+        id: String,
+        prop_name: String,
+    },
+    Set {
+        id: String,
+        prop_name: String,
+        value: String,
+    },
+    Delete {
+        id: String,
+    }
+}
+
 fn main() {
-    let args: Vec<String> = env::args().skip(1).collect();
-
-    if args.is_empty() {
-        show_help();
-        return;
-    }
-
-    let command = args.first().unwrap().to_lowercase();
-    let command = command.as_str();
-
-    match command {
-        "help" => show_help(),
-        "new" => new_task(args),
-        "status" => update_status(args),
-        "get" => get_prop(args),
-        "set" => set_prop(args),
-        "del" => delete_task(args),
-        "show" => show_task(args),
-        "list" => list_tasks(),
-        _ => unknown_command(),
+    let args = Args::parse();
+    match args.command {
+        Some(Command::List) => list_tasks(),
+        Some(Command::Show { id }) => show_task(id),
+        Some(Command::Create { name }) => new_task(name),
+        Some(Command::Status { id, status }) => update_status(id, status),
+        Some(Command::Get { id, prop_name }) => get_prop(id, prop_name),
+        Some(Command::Set { id, prop_name, value }) => set_prop(id, prop_name, value),
+        Some(Command::Delete { id }) => delete_task(id),
+        None => { }
     }
 }
 
-fn show_help() {
-    println!("Available commands:\n\nnew\nstatus\nget\nset\ndel\nshow\nlist\nhelp");
-}
-
-fn unknown_command() {
-    eprintln!("Unknown command!\n");
-    show_help();
-}
-
-fn new_task(args: Vec<String>) {
-    let name: String = args.into_iter().skip(1).collect::<Vec<String>>().join(" ");
-    if name.is_empty() {
-        eprintln!("Task name is required!");
-        return;
-    }
-
+fn new_task(name: String) {
     let task = Task::new(name, String::from(""), "CREATED".to_owned());
 
     match gittask::create_task(task.unwrap()) {
@@ -53,22 +62,7 @@ fn new_task(args: Vec<String>) {
     };
 }
 
-fn update_status(args: Vec<String>) {
-    let id = args.get(1);
-
-    if id.is_none() {
-        eprintln!("Task id is required!");
-        return;
-    }
-    let id = id.unwrap().to_string();
-
-    let status = args.get(2);
-
-    if status.is_none() {
-        eprintln!("Task status is required!");
-        return;
-    }
-
+fn update_status(id: String, status: String) {
     let task = gittask::find_task(&id);
 
     if task.is_err() {
@@ -83,7 +77,7 @@ fn update_status(args: Vec<String>) {
     }
 
     let mut task = task.unwrap();
-    task.set_property("status".to_owned(), status.unwrap().to_owned());
+    task.set_property("status".to_owned(), status);
 
     match gittask::update_task(task) {
         Ok(_) => println!("Task id {id} updated"),
@@ -91,23 +85,7 @@ fn update_status(args: Vec<String>) {
     }
 }
 
-fn get_prop(args: Vec<String>) {
-    let id = args.get(1);
-
-    if id.is_none() {
-        eprintln!("Task id is required!");
-        return;
-    }
-    let id = id.unwrap().to_string();
-
-    let prop_name = args.get(2);
-
-    if prop_name.is_none() {
-        eprintln!("Task property name is required!");
-        return;
-    }
-    let prop_name = prop_name.unwrap();
-
+fn get_prop(id: String, prop_name: String) {
     let task = gittask::find_task(&id);
 
     if task.is_err() {
@@ -123,31 +101,13 @@ fn get_prop(args: Vec<String>) {
 
     let task = task.unwrap();
 
-    match task.get_property(prop_name) {
+    match task.get_property(&prop_name) {
         Some(value) => println!("{value}"),
         None => eprintln!("Task property {prop_name} not found")
     }
 }
 
-fn set_prop(args: Vec<String>) {
-    let id = args.get(1);
-
-    if id.is_none() {
-        eprintln!("Task id is required!");
-        return;
-    }
-    let id = id.unwrap().to_string();
-
-    let prop_name = args.get(2);
-
-    if prop_name.is_none() {
-        eprintln!("Task property name is required!");
-        return;
-    }
-    let prop_name = prop_name.unwrap().to_string();
-
-    let value: String = args.into_iter().skip(3).collect::<Vec<_>>().join(" ");
-
+fn set_prop(id: String, prop_name: String, value: String) {
     let task = gittask::find_task(&id);
 
     if task.is_err() {
@@ -170,30 +130,18 @@ fn set_prop(args: Vec<String>) {
     }
 }
 
-fn delete_task(args: Vec<String>) {
-    let id = args.get(1);
-    match id {
-        Some(id) => {
-            match gittask::delete_task(id) {
-                Ok(_) => println!("Task id {id} deleted"),
-                Err(e) => eprintln!("ERROR: {e}"),
-            }
-        },
-        _ => eprintln!("Task id is required!"),
+fn delete_task(id: String) {
+    match gittask::delete_task(&id) {
+        Ok(_) => println!("Task id {id} deleted"),
+        Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 
-fn show_task(args: Vec<String>) {
-    let id = args.get(1);
-    match id {
-        Some(id) => {
-            match gittask::find_task(id) {
-                Ok(Some(task)) => print_task(task),
-                Ok(None) => eprintln!("Task id {id} not found"),
-                Err(e) => eprintln!("ERROR: {e}"),
-            }
-        },
-        _ => eprintln!("Task id is required!"),
+fn show_task(id: String) {
+    match gittask::find_task(&id) {
+        Ok(Some(task)) => print_task(task),
+        Ok(None) => eprintln!("Task id {id} not found"),
+        Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 
@@ -222,7 +170,7 @@ fn print_task(task: Task) {
     }
 }
 
-pub fn capitalize(s: &str) -> String {
+fn capitalize(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
