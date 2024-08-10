@@ -1,9 +1,13 @@
 extern crate gittask;
 
+use std::collections::HashMap;
 use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{DarkGray, Green, LightBlue, LightGray, Yellow};
-use gittask::Task;
+use octocrab::models::IssueState::Open;
+use octocrab::params;
+use regex::Regex;
+use gittask::{create_task, list_remotes, Task};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -48,6 +52,10 @@ enum Command {
         /// property value
         value: String,
     },
+    /// Import tasks from a source
+    Import {
+        source: Option<String>,
+    },
     /// Delete a task or several tasks at once
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
@@ -65,6 +73,7 @@ fn main() {
         Some(Command::Status { id, status }) => update_status(id, status),
         Some(Command::Get { id, prop_name }) => get_prop(id, prop_name),
         Some(Command::Set { id, prop_name, value }) => set_prop(id, prop_name, value),
+        Some(Command::Import { source }) => import_tasks(source),
         Some(Command::Delete { ids }) => delete_task(ids),
         None => { }
     }
@@ -109,6 +118,75 @@ fn set_prop(id: String, prop_name: String, value: String) {
         Ok(None) => eprintln!("Task id {id} not found"),
         Err(e) => eprintln!("ERROR: {e}"),
     }
+}
+
+fn import_tasks(_source: Option<String>) {
+    match list_remotes() {
+        Ok(remotes) => {
+            let user_repo = remotes.into_iter().map(|ref remote| {
+                match Regex::new("https://github.com/([a-z0-9-]+)/([a-z0-9-]+)\\.git").unwrap().captures(&remote.to_lowercase()) {
+                    Some(caps) if caps.len() == 3 => {
+                        let user = caps.get(1).unwrap().as_str().to_string();
+                        let repo = caps.get(2).unwrap().as_str().to_string();
+                        Some((user, repo))
+                    },
+                    _ => None,
+                }
+            }).filter(|s| s.is_some()).collect::<Vec<_>>();
+            if user_repo.is_empty() {
+                eprintln!("No GitHub remotes");
+                return;
+            }
+            if user_repo.len() > 1 {
+                eprintln!("More than one GitHub remote found");
+                return;
+            }
+            let user_repo = user_repo.first().unwrap();
+            if let Some((user, repo)) = user_repo {
+                println!("Importing tasks from {user}/{repo}...");
+
+                let tasks = list_github_issues(user.to_string(), repo.to_string());
+                let tasks = tokio::runtime::Runtime::new().unwrap().block_on(tasks);
+
+                if tasks.is_empty() {
+                    println!("No tasks found");
+                } else {
+                    tasks.into_iter().for_each(|task| {
+                        match create_task(task) {
+                            Ok(id) => println!("Task id {id} imported"),
+                            Err(e) => eprintln!("ERROR: {e}"),
+                        };
+                    });
+                }
+            }
+        },
+        Err(e) => eprintln!("ERROR: {e}"),
+    }
+}
+
+async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
+    octocrab::instance().issues(user, repo)
+        .list()
+        .state(params::State::All)
+        .per_page(100)
+        .send()
+        .await.unwrap()
+        .take_items()
+        .into_iter()
+        .map(|issue| {
+            let mut props = HashMap::new();
+            props.insert(String::from("name"), issue.title);
+            props.insert(String::from("status"), if issue.state == Open { String::from("CREATED") } else { String::from("CLOSED") } );
+            props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
+            let id = match Regex::new("/issues/(\\d+)").unwrap().captures(issue.url.path()) {
+                Some(caps) if caps.len() == 2 => {
+                    caps.get(1).unwrap().as_str().to_string()
+                },
+                _ => String::new()
+            };
+            Task::from_properties(id, props).unwrap()
+        })
+        .collect()
 }
 
 fn delete_task(ids: Vec<String>) {

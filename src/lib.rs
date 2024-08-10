@@ -23,7 +23,7 @@ impl Task {
         }
     }
 
-    fn from_properties(id: String, map: HashMap<String, String>) -> Result<Task, &'static str> {
+    pub fn from_properties(id: String, map: HashMap<String, String>) -> Result<Task, &'static str> {
         let name = map.get(NAME).unwrap_or(&"".to_owned()).to_owned();
         let status = map.get(STATUS).unwrap_or(&"".to_owned()).to_owned();
 
@@ -148,8 +148,8 @@ pub fn create_task(task: Task) -> Result<String, String> {
     let content = string_content.as_bytes();
     let oid = repo.blob(content).unwrap();
     let mut treebuilder = repo.treebuilder(source_tree.as_ref()).map_err(|e| e.message().to_owned())?;
-    let task_id = get_next_id().unwrap_or("1".to_string());
-    treebuilder.insert(task_id.clone(), oid, FileMode::Blob.into()).map_err(|e| e.message().to_owned())?;
+    let task_id = if task.get_id().is_some() { task.get_id() } else { Some(get_next_id().unwrap_or("1".to_string())) };
+    treebuilder.insert(task_id.clone().unwrap(), oid, FileMode::Blob.into()).map_err(|e| e.message().to_owned())?;
     let tree_oid = treebuilder.write().map_err(|e| e.message().to_owned())?;
 
     let me = &repo.signature().unwrap();
@@ -162,7 +162,7 @@ pub fn create_task(task: Task) -> Result<String, String> {
     }
     repo.commit(Some("refs/tasks/tasks"), me, me, "create task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()).map_err(|e| e.message().to_owned())?;
 
-    Ok(task_id)
+    Ok(task_id.unwrap())
 }
 
 pub fn update_task(task: Task) -> Result<String, String> {
@@ -207,4 +207,10 @@ fn get_next_id() -> Result<String, String> {
     }).map_err(|e| e.message().to_owned())?;
 
     Ok((result + 1).to_string())
+}
+
+pub fn list_remotes() -> Result<Vec<String>, String> {
+    let repo = Repository::open(".").map_err(|e| e.message().to_owned())?;
+    let remotes = repo.remotes().map_err(|e| e.message().to_owned())?;
+    Ok(remotes.iter().map(|s| repo.find_remote(s.unwrap()).unwrap().url().unwrap().to_owned()).collect())
 }
