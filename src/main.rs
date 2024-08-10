@@ -14,27 +14,43 @@ struct Args {
 
 #[derive(Subcommand)]
 enum Command {
+    /// List all tasks
     List,
+    /// Show a task with all properties
     Show {
+        /// task id
         id: String,
     },
+    /// Create a new task
     Create {
         name: String,
     },
+    /// Update task status
     Status {
+        /// task id
         id: String,
+        /// status
         status: String,
     },
+    /// Get a property
     Get {
+        /// task id
         id: String,
+        /// property name
         prop_name: String,
     },
+    /// Set a property
     Set {
+        /// task id
         id: String,
+        /// property name
         prop_name: String,
+        /// property value
         value: String,
     },
+    /// Delete a task
     Delete {
+        /// task id
         id: String,
     }
 }
