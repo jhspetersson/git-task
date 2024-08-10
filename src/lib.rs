@@ -25,11 +25,10 @@ impl Task {
 
     fn from_properties(id: String, map: HashMap<String, String>) -> Result<Task, &'static str> {
         let name = map.get(NAME).unwrap_or(&"".to_owned()).to_owned();
-        let description = map.get(DESCRIPTION).unwrap_or(&"".to_owned()).to_owned();
         let status = map.get(STATUS).unwrap_or(&"".to_owned()).to_owned();
 
         if !name.is_empty() && !status.is_empty() {
-            Ok(Self::construct_task(Some(id), name, description, status))
+            Ok(Task{ id: Some(id), props: map})
         } else {
             Err("Name or status is empty")
         }
@@ -49,7 +48,7 @@ impl Task {
         }
     }
 
-    pub fn get_property(&self, prop: &String) -> Option<&String> {
+    pub fn get_property(&self, prop: &str) -> Option<&String> {
         self.props.get(prop)
     }
 

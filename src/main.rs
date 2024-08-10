@@ -1,6 +1,9 @@
 extern crate gittask;
 
 use std::env;
+use nu_ansi_term::AnsiString;
+use nu_ansi_term::Color::{DarkGray, Green, LightBlue, LightGray, Yellow};
+use gittask::Task;
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
@@ -42,7 +45,7 @@ fn new_task(args: Vec<String>) {
         return;
     }
 
-    let task = gittask::Task::new(name, String::from(""), "CREATED".to_owned());
+    let task = Task::new(name, String::from(""), "CREATED".to_owned());
 
     match gittask::create_task(task.unwrap()) {
         Ok(id) => println!("Task id {id} created"),
@@ -185,13 +188,7 @@ fn show_task(args: Vec<String>) {
     match id {
         Some(id) => {
             match gittask::find_task(id) {
-                Ok(Some(task)) => {
-                    println!("{} {} {}",
-                             task.get_id().unwrap_or("---".to_owned()),
-                             task.get_property(&"status".to_owned()).unwrap(),
-                             task.get_property(&"name".to_owned()).unwrap()
-                    )
-                },
+                Ok(Some(task)) => print_task(task),
                 Ok(None) => eprintln!("Task id {id} not found"),
                 Err(e) => eprintln!("ERROR: {e}"),
             }
@@ -200,19 +197,67 @@ fn show_task(args: Vec<String>) {
     }
 }
 
+fn print_task(task: Task) {
+    let id_title = DarkGray.paint("ID");
+    println!("{}: {}", id_title, task.get_id().unwrap_or("---".to_owned()));
+
+    let name_title = DarkGray.paint("Name");
+    println!("{}: {}", name_title, task.get_property("name").unwrap());
+
+    let status_title = DarkGray.paint("Status");
+    println!("{}: {}", status_title, format_status(task.get_property("status").unwrap()));
+
+    task.get_all_properties().iter().filter(|entry| {
+        entry.0 != "name" && entry.0 != "status" && entry.0 != "description"
+    }).for_each(|entry| {
+        let title = DarkGray.paint(capitalize(entry.0));
+        println!("{}: {}", title, entry.1);
+    });
+
+    let empty_string = String::new();
+    let description = task.get_property("description").unwrap_or(&empty_string);
+    if !description.is_empty() {
+        let description_title = DarkGray.paint("Description");
+        println!("{}: {}", description_title, description);
+    }
+}
+
+pub fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
+}
+
+fn format_status(status: &str) -> AnsiString {
+    match status {
+        "CREATED" => LightBlue.paint("CREATED"),
+        "IN_PROGRESS" => Yellow.paint("IN_PROGRESS"),
+        "DONE" => Green.paint("DONE"),
+        "CLOSED" => LightGray.paint("CLOSED"),
+        s => s.into()
+    }
+}
+
 fn list_tasks() {
     match gittask::list_tasks() {
-        Ok(tasks) => {
+        Ok(mut tasks) => {
+            tasks.sort_by_key(|task| task.get_id().unwrap().parse::<i64>().unwrap_or(0));
             for task in tasks {
-                println!("{} {} {}",
-                         task.get_id().unwrap_or("---".to_owned()),
-                         task.get_property(&"status".to_owned()).unwrap(),
-                         task.get_property(&"name".to_owned()).unwrap()
-                );
+                print_task_line(task);
             }
         },
         Err(e) => {
             eprintln!("ERROR: {e}");
         }
     }
+}
+
+fn print_task_line(task: Task) {
+    println!("{} {} {}",
+             task.get_id().unwrap_or(DarkGray.paint("---").to_string()),
+             format_status(task.get_property("status").unwrap()),
+             task.get_property("name").unwrap()
+    );
 }
