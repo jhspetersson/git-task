@@ -48,10 +48,11 @@ enum Command {
         /// property value
         value: String,
     },
-    /// Delete a task
+    /// Delete a task or several tasks at once
+    #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
-        /// task id
-        id: String,
+        /// space separated task ids
+        ids: Vec<String>,
     }
 }
 
@@ -64,7 +65,7 @@ fn main() {
         Some(Command::Status { id, status }) => update_status(id, status),
         Some(Command::Get { id, prop_name }) => get_prop(id, prop_name),
         Some(Command::Set { id, prop_name, value }) => set_prop(id, prop_name, value),
-        Some(Command::Delete { id }) => delete_task(id),
+        Some(Command::Delete { ids }) => delete_task(ids),
         None => { }
     }
 }
@@ -110,10 +111,12 @@ fn set_prop(id: String, prop_name: String, value: String) {
     }
 }
 
-fn delete_task(id: String) {
-    match gittask::delete_task(&id) {
-        Ok(_) => println!("Task id {id} deleted"),
-        Err(e) => eprintln!("ERROR: {e}"),
+fn delete_task(ids: Vec<String>) {
+    for id in ids {
+        match gittask::delete_task(&id) {
+            Ok(_) => println!("Task id {id} deleted"),
+            Err(e) => eprintln!("ERROR: {e}"),
+        }
     }
 }
 
