@@ -79,69 +79,33 @@ fn new_task(name: String) {
 }
 
 fn update_status(id: String, status: String) {
-    let task = gittask::find_task(&id);
+    set_prop(id, "status".to_string(), status);
+}
 
-    if task.is_err() {
-        eprintln!("ERROR: {}", task.err().unwrap());
-        return;
-    }
-
-    let task = task.unwrap();
-    if task.is_none() {
-        eprintln!("Task id {id} not found");
-        return;
-    }
-
-    let mut task = task.unwrap();
-    task.set_property("status".to_owned(), status);
-
-    match gittask::update_task(task) {
-        Ok(_) => println!("Task id {id} updated"),
+fn get_prop(id: String, prop_name: String) {
+    match gittask::find_task(&id) {
+        Ok(Some(task)) => {
+            match task.get_property(&prop_name) {
+                Some(value) => println!("{value}"),
+                None => eprintln!("Task property {prop_name} not found")
+            }
+        },
+        Ok(None) => eprintln!("Task id {id} not found"),
         Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 
-fn get_prop(id: String, prop_name: String) {
-    let task = gittask::find_task(&id);
-
-    if task.is_err() {
-        eprintln!("ERROR: {}", task.err().unwrap());
-        return;
-    }
-
-    let task = task.unwrap();
-    if task.is_none() {
-        eprintln!("Task id {id} not found");
-        return;
-    }
-
-    let task = task.unwrap();
-
-    match task.get_property(&prop_name) {
-        Some(value) => println!("{value}"),
-        None => eprintln!("Task property {prop_name} not found")
-    }
-}
-
 fn set_prop(id: String, prop_name: String, value: String) {
-    let task = gittask::find_task(&id);
+    match gittask::find_task(&id) {
+        Ok(Some(mut task)) => {
+            task.set_property(prop_name, value);
 
-    if task.is_err() {
-        eprintln!("ERROR: {}", task.err().unwrap());
-        return;
-    }
-
-    let task = task.unwrap();
-    if task.is_none() {
-        eprintln!("Task id {id} not found");
-        return;
-    }
-
-    let mut task = task.unwrap();
-    task.set_property(prop_name, value);
-
-    match gittask::update_task(task) {
-        Ok(_) => println!("Task id {id} updated"),
+            match gittask::update_task(task) {
+                Ok(_) => println!("Task id {id} updated"),
+                Err(e) => eprintln!("ERROR: {e}"),
+            }
+        },
+        Ok(None) => eprintln!("Task id {id} not found"),
         Err(e) => eprintln!("ERROR: {e}"),
     }
 }
