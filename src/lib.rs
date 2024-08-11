@@ -113,13 +113,15 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
     Ok(result)
 }
 
-pub fn delete_task(id: &str) -> Result<(), String> {
+pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
     let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
     let task_ref = repo.find_reference("refs/tasks/tasks").map_err(|e| e.message().to_owned())?;
     let task_tree = task_ref.peel_to_tree().map_err(|e| e.message().to_owned())?;
 
     let mut treebuilder = repo.treebuilder(Some(&task_tree)).map_err(|e| e.message().to_owned())?;
-    treebuilder.remove(id).map_err(|e| e.message().to_owned())?;
+    for id in ids {
+        treebuilder.remove(id).map_err(|e| e.message().to_owned())?;
+    }
     let tree_oid = treebuilder.write().map_err(|e| e.message().to_owned())?;
 
     let parent_commit = task_ref.peel_to_commit().map_err(|e| e.message().to_owned())?;

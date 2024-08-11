@@ -56,7 +56,7 @@ enum Command {
     Import {
         source: Option<String>,
     },
-    /// Delete a task or several tasks at once
+    /// Delete one or several tasks at once
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
         /// space separated task ids
@@ -69,20 +69,20 @@ enum Command {
 fn main() {
     let args = Args::parse();
     match args.command {
-        Some(Command::List) => list_tasks(),
-        Some(Command::Show { id }) => show_task(id),
-        Some(Command::Create { name }) => new_task(name),
-        Some(Command::Status { id, status }) => update_status(id, status),
-        Some(Command::Get { id, prop_name }) => get_prop(id, prop_name),
-        Some(Command::Set { id, prop_name, value }) => set_prop(id, prop_name, value),
-        Some(Command::Import { source }) => import_tasks(source),
-        Some(Command::Delete { ids }) => delete_task(ids),
-        Some(Command::Clear) => clear_all_tasks(),
+        Some(Command::List) => task_list(),
+        Some(Command::Show { id }) => task_show(id),
+        Some(Command::Create { name }) => task_create(name),
+        Some(Command::Status { id, status }) => task_status(id, status),
+        Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
+        Some(Command::Set { id, prop_name, value }) => task_set(id, prop_name, value),
+        Some(Command::Import { source }) => task_import(source),
+        Some(Command::Delete { ids }) => task_delete(ids),
+        Some(Command::Clear) => task_clear(),
         None => { }
     }
 }
 
-fn new_task(name: String) {
+fn task_create(name: String) {
     let task = Task::new(name, String::from(""), "CREATED".to_owned());
 
     match gittask::create_task(task.unwrap()) {
@@ -91,11 +91,11 @@ fn new_task(name: String) {
     };
 }
 
-fn update_status(id: String, status: String) {
-    set_prop(id, "status".to_string(), status);
+fn task_status(id: String, status: String) {
+    task_set(id, "status".to_string(), status);
 }
 
-fn get_prop(id: String, prop_name: String) {
+fn task_get(id: String, prop_name: String) {
     match gittask::find_task(&id) {
         Ok(Some(task)) => {
             match task.get_property(&prop_name) {
@@ -108,7 +108,7 @@ fn get_prop(id: String, prop_name: String) {
     }
 }
 
-fn set_prop(id: String, prop_name: String, value: String) {
+fn task_set(id: String, prop_name: String, value: String) {
     match gittask::find_task(&id) {
         Ok(Some(mut task)) => {
             task.set_property(prop_name, value);
@@ -123,7 +123,7 @@ fn set_prop(id: String, prop_name: String, value: String) {
     }
 }
 
-fn import_tasks(_source: Option<String>) {
+fn task_import(_source: Option<String>) {
     match list_remotes() {
         Ok(remotes) => {
             let user_repo = remotes.into_iter().map(|ref remote| {
@@ -192,23 +192,22 @@ async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
         .collect()
 }
 
-fn delete_task(ids: Vec<String>) {
-    for id in ids {
-        match gittask::delete_task(&id) {
-            Ok(_) => println!("Task id {id} deleted"),
-            Err(e) => eprintln!("ERROR: {e}"),
-        }
+fn task_delete(ids: Vec<String>) {
+    let ids = ids.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+    match gittask::delete_tasks(&ids) {
+        Ok(_) => println!("Task(s) {} deleted", ids.join(", ")),
+        Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 
-fn clear_all_tasks() {
+fn task_clear() {
     match gittask::clear_tasks() {
         Ok(task_count) => println!("{task_count} task(s) deleted"),
         Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 
-fn show_task(id: String) {
+fn task_show(id: String) {
     match gittask::find_task(&id) {
         Ok(Some(task)) => print_task(task),
         Ok(None) => eprintln!("Task id {id} not found"),
@@ -259,7 +258,7 @@ fn format_status(status: &str) -> AnsiString {
     }
 }
 
-fn list_tasks() {
+fn task_list() {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
             tasks.sort_by_key(|task| task.get_id().unwrap().parse::<i64>().unwrap_or(0));
