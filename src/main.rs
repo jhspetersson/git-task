@@ -61,7 +61,9 @@ enum Command {
     Delete {
         /// space separated task ids
         ids: Vec<String>,
-    }
+    },
+    /// Delete all tasks
+    Clear,
 }
 
 fn main() {
@@ -75,6 +77,7 @@ fn main() {
         Some(Command::Set { id, prop_name, value }) => set_prop(id, prop_name, value),
         Some(Command::Import { source }) => import_tasks(source),
         Some(Command::Delete { ids }) => delete_task(ids),
+        Some(Command::Clear) => clear_all_tasks(),
         None => { }
     }
 }
@@ -195,6 +198,13 @@ fn delete_task(ids: Vec<String>) {
             Ok(_) => println!("Task id {id} deleted"),
             Err(e) => eprintln!("ERROR: {e}"),
         }
+    }
+}
+
+fn clear_all_tasks() {
+    match gittask::clear_tasks() {
+        Ok(task_count) => println!("{task_count} task(s) deleted"),
+        Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 
