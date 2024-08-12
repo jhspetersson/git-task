@@ -61,14 +61,20 @@ impl Task {
     }
 }
 
+macro_rules! map_err {
+    ($expr:expr) => {
+        $expr.map_err(|e| e.message().to_owned())?
+    }
+}
+
 pub fn list_tasks() -> Result<Vec<Task>, String> {
-    let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
-    let task_ref = repo.find_reference("refs/tasks/tasks").map_err(|e| e.message().to_owned())?;
-    let task_tree = task_ref.peel_to_tree().map_err(|e| e.message().to_owned())?;
+    let repo = map_err!(Repository::open("."));
+    let task_ref = map_err!(repo.find_reference("refs/tasks/tasks"));
+    let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut result = vec![];
 
-    let _ = task_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
+    let _ = map_err!(task_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
         let entry_name = entry.name().unwrap().to_owned();
         let oid = entry.id();
         let blob = repo.find_blob(oid).unwrap();
@@ -80,19 +86,19 @@ pub fn list_tasks() -> Result<Vec<Task>, String> {
         result.push(task);
 
         TreeWalkResult::Ok
-    }).map_err(|e| e.message().to_owned())?;
+    }));
 
     Ok(result)
 }
 
 pub fn find_task(id: &str) -> Result<Option<Task>, String> {
-    let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
-    let task_ref = repo.find_reference("refs/tasks/tasks").map_err(|e| e.message().to_owned())?;
-    let task_tree = task_ref.peel_to_tree().map_err(|e| e.message().to_owned())?;
+    let repo = map_err!(Repository::open("."));
+    let task_ref = map_err!(repo.find_reference("refs/tasks/tasks"));
+    let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut result = None;
 
-    let _ = task_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
+    let _ = map_err!(task_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
         let entry_name = entry.name().unwrap();
         if entry_name != id {
             return TreeWalkResult::Skip
@@ -108,52 +114,52 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
         result = Some(task);
 
         TreeWalkResult::Abort
-    }).map_err(|e| e.message().to_owned())?;
+    }));
 
     Ok(result)
 }
 
 pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
-    let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
-    let task_ref = repo.find_reference("refs/tasks/tasks").map_err(|e| e.message().to_owned())?;
-    let task_tree = task_ref.peel_to_tree().map_err(|e| e.message().to_owned())?;
+    let repo = map_err!(Repository::open("."));
+    let task_ref = map_err!(repo.find_reference("refs/tasks/tasks"));
+    let task_tree = map_err!(task_ref.peel_to_tree());
 
-    let mut treebuilder = repo.treebuilder(Some(&task_tree)).map_err(|e| e.message().to_owned())?;
+    let mut treebuilder = map_err!(repo.treebuilder(Some(&task_tree)));
     for id in ids {
-        treebuilder.remove(id).map_err(|e| e.message().to_owned())?;
+        map_err!(treebuilder.remove(id));
     }
-    let tree_oid = treebuilder.write().map_err(|e| e.message().to_owned())?;
+    let tree_oid = map_err!(treebuilder.write());
 
-    let parent_commit = task_ref.peel_to_commit().map_err(|e| e.message().to_owned())?;
+    let parent_commit = map_err!(task_ref.peel_to_commit());
     let parents = vec![parent_commit];
     let me = &repo.signature().unwrap();
 
-    repo.commit(Some("refs/tasks/tasks"), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()).map_err(|e| e.message().to_owned())?;
+    map_err!(repo.commit(Some("refs/tasks/tasks"), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
     Ok(())
 }
 
 pub fn clear_tasks() -> Result<u64, String> {
-    let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
-    let task_ref = repo.find_reference("refs/tasks/tasks").map_err(|e| e.message().to_owned())?;
-    let task_tree = task_ref.peel_to_tree().map_err(|e| e.message().to_owned())?;
+    let repo = map_err!(Repository::open("."));
+    let task_ref = map_err!(repo.find_reference("refs/tasks/tasks"));
+    let task_tree = map_err!(task_ref.peel_to_tree());
 
-    let mut treebuilder = repo.treebuilder(Some(&task_tree)).map_err(|e| e.message().to_owned())?;
+    let mut treebuilder = map_err!(repo.treebuilder(Some(&task_tree)));
     let task_count = treebuilder.len() as u64;
-    treebuilder.clear().map_err(|e| e.message().to_owned())?;
-    let tree_oid = treebuilder.write().map_err(|e| e.message().to_owned())?;
+    map_err!(treebuilder.clear());
+    let tree_oid = map_err!(treebuilder.write());
 
-    let parent_commit = task_ref.peel_to_commit().map_err(|e| e.message().to_owned())?;
+    let parent_commit = map_err!(task_ref.peel_to_commit());
     let parents = vec![parent_commit];
     let me = &repo.signature().unwrap();
 
-    repo.commit(Some("refs/tasks/tasks"), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()).map_err(|e| e.message().to_owned())?;
+    map_err!(repo.commit(Some("refs/tasks/tasks"), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task_count)
 }
 
 pub fn create_task(task: Task) -> Result<String, String> {
-    let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
+    let repo = map_err!(Repository::open("."));
     let task_ref_result = repo.find_reference("refs/tasks/tasks");
     let source_tree = match task_ref_result {
         Ok(ref reference) => {
@@ -168,10 +174,10 @@ pub fn create_task(task: Task) -> Result<String, String> {
     let string_content = serde_json::to_string(task.get_all_properties()).unwrap();
     let content = string_content.as_bytes();
     let oid = repo.blob(content).unwrap();
-    let mut treebuilder = repo.treebuilder(source_tree.as_ref()).map_err(|e| e.message().to_owned())?;
+    let mut treebuilder = map_err!(repo.treebuilder(source_tree.as_ref()));
     let task_id = if task.get_id().is_some() { task.get_id() } else { Some(get_next_id().unwrap_or("1".to_string())) };
-    treebuilder.insert(task_id.clone().unwrap(), oid, FileMode::Blob.into()).map_err(|e| e.message().to_owned())?;
-    let tree_oid = treebuilder.write().map_err(|e| e.message().to_owned())?;
+    map_err!(treebuilder.insert(task_id.clone().unwrap(), oid, FileMode::Blob.into()));
+    let tree_oid = map_err!(treebuilder.write());
 
     let me = &repo.signature().unwrap();
     let mut parents = vec![];
@@ -181,39 +187,39 @@ pub fn create_task(task: Task) -> Result<String, String> {
             parents.push(parent_commit.unwrap());
         }
     }
-    repo.commit(Some("refs/tasks/tasks"), me, me, "create task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()).map_err(|e| e.message().to_owned())?;
+    map_err!(repo.commit(Some("refs/tasks/tasks"), me, me, "create task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task_id.unwrap())
 }
 
 pub fn update_task(task: Task) -> Result<String, String> {
-    let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
+    let repo = map_err!(Repository::open("."));
     let task_ref_result = repo.find_reference("refs/tasks/tasks").unwrap();
     let parent_commit = task_ref_result.peel_to_commit().unwrap();
     let source_tree = task_ref_result.peel_to_tree().unwrap();
     let string_content = serde_json::to_string(task.get_all_properties()).unwrap();
     let content = string_content.as_bytes();
     let oid = repo.blob(content).unwrap();
-    let mut treebuilder = repo.treebuilder(Some(&source_tree)).map_err(|e| e.message().to_owned())?;
+    let mut treebuilder = map_err!(repo.treebuilder(Some(&source_tree)));
     let task_id = task.get_id().unwrap();
-    treebuilder.insert(task_id.clone(), oid, FileMode::Blob.into()).map_err(|e| e.message().to_owned())?;
-    let tree_oid = treebuilder.write().map_err(|e| e.message().to_owned())?;
+    map_err!(treebuilder.insert(task_id.clone(), oid, FileMode::Blob.into()));
+    let tree_oid = map_err!(treebuilder.write());
 
     let me = &repo.signature().unwrap();
     let parents = vec![parent_commit];
-    repo.commit(Some("refs/tasks/tasks"), me, me, "update task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()).map_err(|e| e.message().to_owned())?;
+    map_err!(repo.commit(Some("refs/tasks/tasks"), me, me, "update task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task_id)
 }
 
 fn get_next_id() -> Result<String, String> {
-    let repo = git2::Repository::open(".").map_err(|e| e.message().to_owned())?;
-    let task_ref = repo.find_reference("refs/tasks/tasks").map_err(|e| e.message().to_owned())?;
-    let task_tree = task_ref.peel_to_tree().map_err(|e| e.message().to_owned())?;
+    let repo = map_err!(Repository::open("."));
+    let task_ref = map_err!(repo.find_reference("refs/tasks/tasks"));
+    let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut result = 0;
 
-    let _ = task_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
+    let _ = map_err!(task_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
         let entry_name = entry.name().unwrap();
         match entry_name.parse::<i64>() {
             Ok(id) => {
@@ -225,13 +231,13 @@ fn get_next_id() -> Result<String, String> {
         };
 
         TreeWalkResult::Ok
-    }).map_err(|e| e.message().to_owned())?;
+    }));
 
     Ok((result + 1).to_string())
 }
 
 pub fn list_remotes() -> Result<Vec<String>, String> {
-    let repo = Repository::open(".").map_err(|e| e.message().to_owned())?;
-    let remotes = repo.remotes().map_err(|e| e.message().to_owned())?;
+    let repo = map_err!(Repository::open("."));
+    let remotes = map_err!(repo.remotes());
     Ok(remotes.iter().map(|s| repo.find_remote(s.unwrap()).unwrap().url().unwrap().to_owned()).collect())
 }
