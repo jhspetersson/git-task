@@ -3,7 +3,7 @@ extern crate gittask;
 use std::collections::HashMap;
 use std::io::{IsTerminal, Read};
 use std::time::{Duration, UNIX_EPOCH};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{DarkGray, Green, Red, Yellow};
@@ -30,6 +30,12 @@ enum Command {
         /// filter by keyword
         #[arg(short, long)]
         keyword: Option<String>,
+        /// newer than date, YYYY-MM-DD, inclusive
+        #[arg(short, long)]
+        from: Option<String>,
+        /// older than date, YYYY-MM-DD, inclusive
+        #[arg(short, long)]
+        until: Option<String>,
     },
     /// Show a task with all properties
     Show {
@@ -91,7 +97,7 @@ enum Command {
 fn main() {
     let args = Args::parse();
     match args.command {
-        Some(Command::List { status, keyword }) => task_list(status, keyword),
+        Some(Command::List { status, keyword, from, until }) => task_list(status, keyword, from, until),
         Some(Command::Show { id }) => task_show(id),
         Some(Command::Create { name }) => task_create(name),
         Some(Command::Status { id, status }) => task_status(id, status),
@@ -379,10 +385,27 @@ fn format_status(status: &str) -> AnsiString {
     }
 }
 
-fn task_list(status: Option<String>, keyword: Option<String>) {
+fn task_list(status: Option<String>, keyword: Option<String>, from: Option<String>, until: Option<String>) {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
             tasks.sort_by_key(|task| std::cmp::Reverse(task.get_id().unwrap().parse::<u64>().unwrap_or(0)));
+
+            let from = match from {
+                Some(from) => {
+                    let naive_date = NaiveDate::parse_from_str(&from, "%Y-%m-%d").unwrap();
+                    Some(Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap()))
+                }
+                None => None
+            };
+
+            let until = match until {
+                Some(until) => {
+                    let naive_date = NaiveDate::parse_from_str(&until, "%Y-%m-%d").unwrap();
+                    Some(Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap()))
+                }
+                None => None
+            };
+
             for task in tasks {
                 if status.as_ref().is_some() {
                     let task_status = task.get_property("status").unwrap();
@@ -396,6 +419,25 @@ fn task_list(status: Option<String>, keyword: Option<String>) {
                     let props = task.get_all_properties();
                     if !props.iter().any(|entry| entry.1.contains(keyword)) {
                         continue;
+                    }
+                }
+
+                if from.is_some() || until.is_some() {
+                    let created = task.get_property("created");
+                    if let Some(created) = created {
+                        let created = Local.timestamp_opt(created.parse().unwrap(), 0).unwrap();
+
+                        if from.is_some() {
+                            if created < from.unwrap().earliest().unwrap() {
+                                continue;
+                            }
+                        }
+
+                        if until.is_some() {
+                            if created > until.unwrap().latest().unwrap() {
+                                continue;
+                            }
+                        }
                     }
                 }
 

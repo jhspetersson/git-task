@@ -39,6 +39,11 @@ Filter by keyword:
 
     git task list -k linux
 
+Filter by date:
+
+    git task list --from 2024-01-01
+    git task list --until 2023-12-31
+
 ### show
 
 Shows one task with all the properties (like id, name, status, description and a bunch of custom ones, actually, you can add whatever you like).
