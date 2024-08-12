@@ -3,13 +3,12 @@ use std::collections::HashMap;
 
 use git2::*;
 use serde_json;
-use serde::Deserialize;
 
 const NAME: &'static str = "name";
 const DESCRIPTION: &'static str = "description";
 const STATUS: &'static str = "status";
 
-#[derive(Deserialize, Debug)]
+//#[derive(Deserialize, Debug)]
 pub struct Task {
     id: Option<String>,
     props: HashMap<String, String>,

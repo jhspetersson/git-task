@@ -2,13 +2,15 @@ extern crate gittask;
 
 use std::collections::HashMap;
 use std::io::{IsTerminal, Read};
+
 use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
-use nu_ansi_term::Color::{DarkGray, Green, LightBlue, LightGray, Yellow};
+use nu_ansi_term::Color::{DarkGray, Green, Red, Yellow};
 use octocrab::models::IssueState::Open;
 use octocrab::params;
 use regex::Regex;
-use gittask::{create_task, list_remotes, Task};
+
+use gittask::Task;
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -96,7 +98,7 @@ fn main() {
 }
 
 fn task_create(name: String) {
-    let task = Task::new(name, String::from(""), "CREATED".to_owned());
+    let task = Task::new(name, String::from(""), "OPEN".to_owned());
 
     match gittask::create_task(task.unwrap()) {
         Ok(id) => println!("Task id {id} created"),
@@ -165,7 +167,7 @@ fn import_from_input(input: &String) {
 
             match Task::from_properties(id, task) {
                 Ok(task) => {
-                    match create_task(task) {
+                    match gittask::create_task(task) {
                         Ok(id) => println!("Task id {id} imported"),
                         Err(e) => eprintln!("ERROR: {e}"),
                     }
@@ -179,7 +181,7 @@ fn import_from_input(input: &String) {
 }
 
 fn import_from_remote() {
-    match list_remotes() {
+    match gittask::list_remotes() {
         Ok(remotes) => {
             let user_repo = remotes.into_iter().map(|ref remote| {
                 match Regex::new("https://github.com/([a-z0-9-]+)/([a-z0-9-]+)\\.git").unwrap().captures(&remote.to_lowercase()) {
@@ -210,7 +212,7 @@ fn import_from_remote() {
                     println!("No tasks found");
                 } else {
                     tasks.into_iter().for_each(|task| {
-                        match create_task(task) {
+                        match gittask::create_task(task) {
                             Ok(id) => println!("Task id {id} imported"),
                             Err(e) => eprintln!("ERROR: {e}"),
                         };
@@ -234,7 +236,7 @@ async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
         .map(|issue| {
             let mut props = HashMap::new();
             props.insert(String::from("name"), issue.title);
-            props.insert(String::from("status"), if issue.state == Open { String::from("CREATED") } else { String::from("CLOSED") } );
+            props.insert(String::from("status"), if issue.state == Open { String::from("OPEN") } else { String::from("CLOSED") } );
             props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
             let id = match Regex::new("/issues/(\\d+)").unwrap().captures(issue.url.path()) {
                 Some(caps) if caps.len() == 2 => {
@@ -344,10 +346,9 @@ fn capitalize(s: &str) -> String {
 
 fn format_status(status: &str) -> AnsiString {
     match status {
-        "CREATED" => LightBlue.paint("CREATED"),
+        "OPEN" => Red.paint("OPEN"),
         "IN_PROGRESS" => Yellow.paint("IN_PROGRESS"),
-        "DONE" => Green.paint("DONE"),
-        "CLOSED" => LightGray.paint("CLOSED"),
+        "CLOSED" => Green.paint("CLOSED"),
         s => s.into()
     }
 }
