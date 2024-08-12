@@ -27,6 +27,9 @@ enum Command {
         /// filter by status (o - OPEN, i - IN_PROGRESS, c - CLOSED)
         #[arg(short, long)]
         status: Option<String>,
+        /// filter by keyword
+        #[arg(short, long)]
+        keyword: Option<String>,
     },
     /// Show a task with all properties
     Show {
@@ -88,7 +91,7 @@ enum Command {
 fn main() {
     let args = Args::parse();
     match args.command {
-        Some(Command::List { status }) => task_list(status),
+        Some(Command::List { status, keyword }) => task_list(status, keyword),
         Some(Command::Show { id }) => task_show(id),
         Some(Command::Create { name }) => task_create(name),
         Some(Command::Status { id, status }) => task_status(id, status),
@@ -376,7 +379,7 @@ fn format_status(status: &str) -> AnsiString {
     }
 }
 
-fn task_list(status: Option<String>) {
+fn task_list(status: Option<String>, keyword: Option<String>) {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
             tasks.sort_by_key(|task| std::cmp::Reverse(task.get_id().unwrap().parse::<u64>().unwrap_or(0)));
@@ -384,6 +387,14 @@ fn task_list(status: Option<String>) {
                 if status.as_ref().is_some() {
                     let task_status = task.get_property("status").unwrap();
                     if get_full_status(status.as_ref().unwrap()).as_str() != task_status {
+                        continue;
+                    }
+                }
+
+                if keyword.as_ref().is_some() {
+                    let keyword = keyword.as_ref().unwrap().as_str();
+                    let props = task.get_all_properties();
+                    if !props.iter().any(|entry| entry.1.contains(keyword)) {
                         continue;
                     }
                 }

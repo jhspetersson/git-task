@@ -30,6 +30,15 @@ Lists all tasks.
 
     git task list
 
+Show only open tasks:
+
+    git task list -s o
+    git task list --status o
+
+Filter by keyword:
+
+    git task list -k linux
+
 ### show
 
 Shows one task with all the properties (like id, name, status, description and a bunch of custom ones, actually, you can add whatever you like).
