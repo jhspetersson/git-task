@@ -36,6 +36,9 @@ enum Command {
         /// older than date, YYYY-MM-DD, inclusive
         #[arg(short, long)]
         until: Option<String>,
+        /// comma-separated list of columns
+        #[arg(short, long, value_delimiter = ',')]
+        columns: Option<Vec<String>>,
     },
     /// Show a task with all properties
     Show {
@@ -97,7 +100,7 @@ enum Command {
 fn main() {
     let args = Args::parse();
     match args.command {
-        Some(Command::List { status, keyword, from, until }) => task_list(status, keyword, from, until),
+        Some(Command::List { status, keyword, from, until, columns }) => task_list(status, keyword, from, until, columns),
         Some(Command::Show { id }) => task_show(id),
         Some(Command::Create { name }) => task_create(name),
         Some(Command::Status { id, status }) => task_status(id, status),
@@ -385,7 +388,7 @@ fn format_status(status: &str) -> AnsiString {
     }
 }
 
-fn task_list(status: Option<String>, keyword: Option<String>, from: Option<String>, until: Option<String>) {
+fn task_list(status: Option<String>, keyword: Option<String>, from: Option<String>, until: Option<String>, columns: Option<Vec<String>>) {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
             tasks.sort_by_key(|task| std::cmp::Reverse(task.get_id().unwrap().parse::<u64>().unwrap_or(0)));
@@ -441,7 +444,7 @@ fn task_list(status: Option<String>, keyword: Option<String>, from: Option<Strin
                     }
                 }
 
-                print_task_line(task);
+                print_task_line(task, &columns);
             }
         },
         Err(e) => {
@@ -450,16 +453,35 @@ fn task_list(status: Option<String>, keyword: Option<String>, from: Option<Strin
     }
 }
 
-fn print_task_line(task: Task) {
-    println!("{} {} {} {}",
-             DarkGray.paint(task.get_id().unwrap_or("---".to_string())),
-             format_datetime(task.get_property("created").unwrap_or(&String::from("---")).parse().unwrap()),
-             format_status(task.get_property("status").unwrap()),
-             task.get_property("name").unwrap()
-    );
+fn print_task_line(task: Task, columns: &Option<Vec<String>>) {
+    let columns = match columns {
+        Some(columns) => columns,
+        _ => &vec![String::from("id"), String::from("created"), String::from("status"), String::from("name")]
+    };
+
+    let empty_string = String::new();
+
+    columns.iter().for_each(|column| {
+        let value = if column == "id" { &task.get_id().unwrap() } else { task.get_property(column).unwrap_or(&empty_string) };
+        print_column(column, &value);
+    });
+    println!();
+}
+
+fn print_column(column: &String, value: &String) {
+    match column.as_str() {
+        "id" => print!("{} ", DarkGray.paint(value)),
+        "created" => print!("{} ", format_datetime(value.parse().unwrap_or(0))),
+        "status" => print!("{} ", format_status(value)),
+        _ => print!("{} ", value),
+    }
 }
 
 fn format_datetime(seconds: u64) -> String {
+    if seconds == 0 {
+        return String::new();
+    }
+
     let seconds = UNIX_EPOCH + Duration::from_secs(seconds);
     let datetime = DateTime::<Local>::from(seconds);
     datetime.format("%Y-%m-%d %H:%M").to_string()
