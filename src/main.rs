@@ -56,6 +56,17 @@ enum Command {
     Import {
         source: Option<String>,
     },
+    /// Export tasks
+    Export {
+        /// space separated task ids
+        ids: Option<Vec<String>>,
+        /// Output format (only JSON is currently supported)
+        #[arg(short, long)]
+        format: Option<String>,
+        /// Prettify output
+        #[arg(short, long)]
+        pretty: bool,
+    },
     /// Delete one or several tasks at once
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
@@ -76,6 +87,7 @@ fn main() {
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
         Some(Command::Set { id, prop_name, value }) => task_set(id, prop_name, value),
         Some(Command::Import { source }) => task_import(source),
+        Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
         Some(Command::Delete { ids }) => task_delete(ids),
         Some(Command::Clear) => task_clear(),
         None => { }
@@ -190,6 +202,45 @@ async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
             Task::from_properties(id, props).unwrap()
         })
         .collect()
+}
+
+fn task_export(ids: Option<Vec<String>>, format: Option<String>, pretty: bool) {
+    if let Some(format) = format {
+        if format.to_lowercase() != "json" {
+            eprintln!("Only JSON format is supported");
+            return;
+        }
+    }
+
+    match gittask::list_tasks() {
+        Ok(mut tasks) => {
+            let mut result = vec![];
+            tasks.sort_by_key(|task| task.get_id().unwrap().parse::<u64>().unwrap_or(0));
+
+            for task in tasks {
+                if let Some(ids) = &ids {
+                    if !ids.contains(&task.get_id().unwrap()) {
+                        continue;
+                    }
+                }
+
+                let mut task_props = task.get_all_properties().to_owned();
+                task_props.insert("id".to_string(), task.get_id().unwrap());
+                result.push(task_props);
+            }
+
+            let func = if pretty { serde_json::to_string_pretty } else { serde_json::to_string };
+
+            if let Ok(result) = func(&result) {
+                println!("{}", result);
+            } else {
+                eprintln!("ERROR serializing task list");
+            }
+        },
+        Err(e) => {
+            eprintln!("ERROR: {e}");
+        }
+    }
 }
 
 fn task_delete(ids: Vec<String>) {

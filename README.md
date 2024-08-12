@@ -66,6 +66,13 @@ Import tasks from external source. Currently only GitHub is supported.
 
     git task import
 
+### export
+
+Export all or selected tasks, only JSON output format is currently supported.
+
+    git task export
+    git task export --pretty 2 3 5
+
 ### delete
 
 Deletes one or more tasks by their IDs.
