@@ -36,7 +36,7 @@ enum Command {
     Status {
         /// task id
         id: String,
-        /// status
+        /// status (o - OPEN, i - IN_PROGRESS, c - CLOSED)
         status: String,
     },
     /// Get a property
@@ -107,6 +107,12 @@ fn task_create(name: String) {
 }
 
 fn task_status(id: String, status: String) {
+    let status = match status.as_str() {
+        "o" => String::from("OPEN"),
+        "i" => String::from("IN_PROGRESS"),
+        "c" => String::from("CLOSED"),
+        status => String::from(status)
+    };
     task_set(id, "status".to_string(), status);
 }
 
@@ -369,7 +375,7 @@ fn task_list() {
 
 fn print_task_line(task: Task) {
     println!("{} {} {}",
-             task.get_id().unwrap_or(DarkGray.paint("---").to_string()),
+             DarkGray.paint(task.get_id().unwrap_or("---".to_string())),
              format_status(task.get_property("status").unwrap()),
              task.get_property("name").unwrap()
     );
