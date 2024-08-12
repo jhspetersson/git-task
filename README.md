@@ -11,8 +11,8 @@ Build a binary, then place it somewhere and add it as a git command:
     git clone https://github.com/jhspetersson/git-task
     cd git-task
     cargo build --release
-    cp target/release/git-task /usr/local/bin/git-task
-    git config --global alias.task "!/usr/local/bin/git-task"
+    sudo cp target/release/git-task /usr/local/bin/git-task
+    git config --global alias.task '!/usr/local/bin/git-task'
 
 Now you can switch to some git repo and run it as:
 
