@@ -22,7 +22,11 @@ struct Args {
 #[derive(Subcommand)]
 enum Command {
     /// List all tasks
-    List,
+    List {
+        /// filter by status (o - OPEN, i - IN_PROGRESS, c - CLOSED)
+        #[arg(short, long)]
+        status: Option<String>,
+    },
     /// Show a task with all properties
     Show {
         /// task id
@@ -83,7 +87,7 @@ enum Command {
 fn main() {
     let args = Args::parse();
     match args.command {
-        Some(Command::List) => task_list(),
+        Some(Command::List { status }) => task_list(status),
         Some(Command::Show { id }) => task_show(id),
         Some(Command::Create { name }) => task_create(name),
         Some(Command::Status { id, status }) => task_status(id, status),
@@ -107,13 +111,17 @@ fn task_create(name: String) {
 }
 
 fn task_status(id: String, status: String) {
-    let status = match status.as_str() {
+    let status = get_full_status(&status);
+    task_set(id, "status".to_string(), status);
+}
+
+fn get_full_status(status: &String) -> String {
+    match status.as_str() {
         "o" => String::from("OPEN"),
         "i" => String::from("IN_PROGRESS"),
         "c" => String::from("CLOSED"),
         status => String::from(status)
-    };
-    task_set(id, "status".to_string(), status);
+    }
 }
 
 fn task_get(id: String, prop_name: String) {
@@ -359,11 +367,18 @@ fn format_status(status: &str) -> AnsiString {
     }
 }
 
-fn task_list() {
+fn task_list(status: Option<String>) {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
-            tasks.sort_by_key(|task| task.get_id().unwrap().parse::<i64>().unwrap_or(0));
+            tasks.sort_by_key(|task| std::cmp::Reverse(task.get_id().unwrap().parse::<u64>().unwrap_or(0)));
             for task in tasks {
+                if status.as_ref().is_some() {
+                    let task_status = task.get_property("status").unwrap();
+                    if get_full_status(status.as_ref().unwrap()).as_str() != task_status {
+                        continue;
+                    }
+                }
+
                 print_task_line(task);
             }
         },
