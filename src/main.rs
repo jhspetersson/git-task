@@ -2,7 +2,8 @@ extern crate gittask;
 
 use std::collections::HashMap;
 use std::io::{IsTerminal, Read};
-
+use std::time::{Duration, UNIX_EPOCH};
+use chrono::{DateTime, Local};
 use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{DarkGray, Green, Red, Yellow};
@@ -252,6 +253,7 @@ async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
             props.insert(String::from("name"), issue.title);
             props.insert(String::from("status"), if issue.state == Open { String::from("OPEN") } else { String::from("CLOSED") } );
             props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
+            props.insert(String::from("created"), issue.created_at.timestamp().to_string());
             let id = match Regex::new("/issues/(\\d+)").unwrap().captures(issue.url.path()) {
                 Some(caps) if caps.len() == 2 => {
                     caps.get(1).unwrap().as_str().to_string()
@@ -329,6 +331,14 @@ fn print_task(task: Task) {
     let id_title = DarkGray.paint("ID");
     println!("{}: {}", id_title, task.get_id().unwrap_or("---".to_owned()));
 
+    let empty_string = String::new();
+
+    let created = task.get_property("created").unwrap_or(&empty_string);
+    if !created.is_empty() {
+        let created_title = DarkGray.paint("Created");
+        println!("{}: {}", created_title, format_datetime(created.parse().unwrap()));
+    }
+
     let name_title = DarkGray.paint("Name");
     println!("{}: {}", name_title, task.get_property("name").unwrap());
 
@@ -336,13 +346,12 @@ fn print_task(task: Task) {
     println!("{}: {}", status_title, format_status(task.get_property("status").unwrap()));
 
     task.get_all_properties().iter().filter(|entry| {
-        entry.0 != "name" && entry.0 != "status" && entry.0 != "description"
+        entry.0 != "name" && entry.0 != "status" && entry.0 != "description" && entry.0 != "created"
     }).for_each(|entry| {
         let title = DarkGray.paint(capitalize(entry.0));
         println!("{}: {}", title, entry.1);
     });
 
-    let empty_string = String::new();
     let description = task.get_property("description").unwrap_or(&empty_string);
     if !description.is_empty() {
         let description_title = DarkGray.paint("Description");
@@ -389,9 +398,16 @@ fn task_list(status: Option<String>) {
 }
 
 fn print_task_line(task: Task) {
-    println!("{} {} {}",
+    println!("{} {} {} {}",
              DarkGray.paint(task.get_id().unwrap_or("---".to_string())),
+             format_datetime(task.get_property("created").unwrap_or(&String::from("---")).parse().unwrap()),
              format_status(task.get_property("status").unwrap()),
              task.get_property("name").unwrap()
     );
+}
+
+fn format_datetime(seconds: u64) -> String {
+    let seconds = UNIX_EPOCH + Duration::from_secs(seconds);
+    let datetime = DateTime::<Local>::from(seconds);
+    datetime.format("%Y-%m-%d %H:%M").to_string()
 }

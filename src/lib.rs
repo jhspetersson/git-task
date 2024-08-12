@@ -1,14 +1,14 @@
 use std::borrow::ToOwned;
 use std::collections::HashMap;
-
+use std::time::{SystemTime, UNIX_EPOCH};
 use git2::*;
 use serde_json;
 
 const NAME: &'static str = "name";
 const DESCRIPTION: &'static str = "description";
 const STATUS: &'static str = "status";
+const CREATED: &'static str = "created";
 
-//#[derive(Deserialize, Debug)]
 pub struct Task {
     id: Option<String>,
     props: HashMap<String, String>,
@@ -17,27 +17,36 @@ pub struct Task {
 impl Task {
     pub fn new(name: String, description: String, status: String) -> Result<Task, &'static str> {
         if !name.is_empty() && !status.is_empty() {
-            Ok(Self::construct_task(None, name, description, status))
+            Ok(Self::construct_task(None, name, description, status, None))
         } else {
             Err("Name or status is empty")
         }
     }
 
-    pub fn from_properties(id: String, map: HashMap<String, String>) -> Result<Task, &'static str> {
+    pub fn from_properties(id: String, mut map: HashMap<String, String>) -> Result<Task, &'static str> {
         let name = map.get(NAME).unwrap_or(&"".to_owned()).to_owned();
         let status = map.get(STATUS).unwrap_or(&"".to_owned()).to_owned();
 
         if !name.is_empty() && !status.is_empty() {
+            if !map.contains_key("created") {
+                map.insert("created".to_string(), get_current_timestamp().to_string());
+            }
+
             Ok(Task{ id: Some(id), props: map})
         } else {
             Err("Name or status is empty")
         }
     }
 
-    fn construct_task(id: Option<String>, name: String, description: String, status: String) -> Task {
+    fn construct_task(id: Option<String>, name: String, description: String, status: String, created: Option<u64>) -> Task {
         Task {
             id,
-            props: HashMap::from([(NAME.to_owned(), name), (DESCRIPTION.to_owned(), description), (STATUS.to_owned(), status)])
+            props: HashMap::from([
+                (NAME.to_owned(), name),
+                (DESCRIPTION.to_owned(), description),
+                (STATUS.to_owned(), status),
+                (CREATED.to_owned(), created.unwrap_or(get_current_timestamp()).to_string()),
+            ])
         }
     }
 
@@ -248,4 +257,8 @@ pub fn list_remotes() -> Result<Vec<String>, String> {
     let repo = map_err!(Repository::open("."));
     let remotes = map_err!(repo.remotes());
     Ok(remotes.iter().map(|s| repo.find_remote(s.unwrap()).unwrap().url().unwrap().to_owned()).collect())
+}
+
+fn get_current_timestamp() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
 }
