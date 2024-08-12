@@ -3,12 +3,13 @@ use std::collections::HashMap;
 
 use git2::*;
 use serde_json;
+use serde::Deserialize;
 
 const NAME: &'static str = "name";
 const DESCRIPTION: &'static str = "description";
 const STATUS: &'static str = "status";
 
-#[derive(Debug)]
+#[derive(Deserialize, Debug)]
 pub struct Task {
     id: Option<String>,
     props: HashMap<String, String>,
@@ -48,6 +49,10 @@ impl Task {
         }
     }
 
+    pub fn set_id(&mut self, id: String) {
+        self.id = Some(id);
+    }
+
     pub fn get_property(&self, prop: &str) -> Option<&String> {
         self.props.get(prop)
     }
@@ -58,6 +63,10 @@ impl Task {
 
     pub fn set_property(&mut self, prop: String, value: String) {
         self.props.insert(prop, value);
+    }
+
+    pub fn delete_property(&mut self, prop: &str) {
+        self.props.remove(prop);
     }
 }
 

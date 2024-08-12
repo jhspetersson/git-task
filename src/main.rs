@@ -1,6 +1,7 @@
 extern crate gittask;
 
 use std::collections::HashMap;
+use std::io::{IsTerminal, Read};
 use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{DarkGray, Green, LightBlue, LightGray, Yellow};
@@ -135,7 +136,49 @@ fn task_set(id: String, prop_name: String, value: String) {
     }
 }
 
-fn task_import(_source: Option<String>) {
+fn task_import(source: Option<String>) {
+    if let Some(input) = read_from_pipe() {
+        import_from_input(&input);
+    } else if source.is_none() || source.unwrap().to_lowercase() == "github" {
+        import_from_remote();
+    } else {
+        eprintln!("Unknown import source");
+    }
+}
+
+pub fn read_from_pipe() -> Option<String> {
+    let mut buf = String::new();
+    match std::io::stdin().is_terminal() {
+        false => {
+            std::io::stdin().read_to_string(&mut buf).ok()?;
+            Some(buf)
+        },
+        true => None
+    }
+}
+
+fn import_from_input(input: &String) {
+    if let Ok(tasks) = serde_json::from_str::<Vec<HashMap<String, String>>>(input) {
+        for mut task in tasks {
+            let id = task.get("id").unwrap().to_string();
+            task.remove("id");
+
+            match Task::from_properties(id, task) {
+                Ok(task) => {
+                    match create_task(task) {
+                        Ok(id) => println!("Task id {id} imported"),
+                        Err(e) => eprintln!("ERROR: {e}"),
+                    }
+                },
+                Err(e) => eprintln!("ERROR: {e}"),
+            }
+        }
+    } else {
+        eprintln!("Can't deserialize input");
+    }
+}
+
+fn import_from_remote() {
     match list_remotes() {
         Ok(remotes) => {
             let user_repo = remotes.into_iter().map(|ref remote| {

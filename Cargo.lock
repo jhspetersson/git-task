@@ -396,6 +396,7 @@ dependencies = [
  "nu-ansi-term",
  "octocrab",
  "regex",
+ "serde",
  "serde_json",
  "tokio",
 ]

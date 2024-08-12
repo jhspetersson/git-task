@@ -62,16 +62,17 @@ Sets task property
 
 ### import
 
-Import tasks from external source. Currently only GitHub is supported.
+Import tasks from external source. Currently only JSON input and GitHub are supported.
 
     git task import
+    git task import <my_tasks.json
 
 ### export
 
 Export all or selected tasks, only JSON output format is currently supported.
 
     git task export
-    git task export --pretty 2 3 5
+    git task export --pretty 2 3 5 >my_tasks.json
 
 ### delete
 
