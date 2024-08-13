@@ -94,6 +94,12 @@ Export all or selected tasks, only JSON output format is currently supported.
     git task export
     git task export --pretty 2 3 5 >my_tasks.json
 
+### stats
+
+Show total task count and count by status.
+
+    git task stats
+
 ### delete
 
 Deletes one or more tasks by their IDs.

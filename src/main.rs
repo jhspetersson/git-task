@@ -91,6 +91,8 @@ enum Command {
         #[arg(short, long)]
         pretty: bool,
     },
+    /// Show total task count and count by status
+    Stats,
     /// Delete one or several tasks at once
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
@@ -112,6 +114,7 @@ fn main() {
         Some(Command::Set { id, prop_name, value }) => task_set(id, prop_name, value),
         Some(Command::Import { source }) => task_import(source),
         Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
+        Some(Command::Stats) => task_stats(),
         Some(Command::Delete { ids }) => task_delete(ids),
         Some(Command::Clear) => task_clear(),
         None => { }
@@ -502,4 +505,43 @@ fn format_datetime(seconds: u64) -> String {
     let seconds = UNIX_EPOCH + Duration::from_secs(seconds);
     let datetime = DateTime::<Local>::from(seconds);
     datetime.format("%Y-%m-%d %H:%M").to_string()
+}
+
+fn task_stats() {
+    match gittask::list_tasks() {
+        Ok(tasks) => {
+            let mut total = 0;
+            let mut status_stats = HashMap::<String, i32>::new();
+            for task in tasks {
+                total += 1;
+                match task.get_property("status") {
+                    Some(status) => {
+                        let current_value = match status_stats.get(status) {
+                            Some(&value) => value,
+                            _ => 0
+                        };
+                        let key = status.clone();
+                        status_stats.insert(key, current_value + 1);
+                    },
+                    _ => {}
+                }
+            }
+
+            println!("Total tasks: {total}");
+            println!();
+            match status_stats.get("OPEN") {
+                Some(count) => println!("{}: {}", format_status("OPEN"), count),
+                _ => {}
+            };
+            match status_stats.get("IN_PROGRESS") {
+                Some(count) => println!("{}: {}", format_status("IN_PROGRESS"), count),
+                _ => {}
+            };
+            match status_stats.get("CLOSED") {
+                Some(count) => println!("{}: {}", format_status("CLOSED"), count),
+                _ => {}
+            };
+        },
+        Err(e) => eprintln!("ERROR: {e}")
+    }
 }
