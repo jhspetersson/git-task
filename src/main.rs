@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
-use nu_ansi_term::Color::{DarkGray, Green, Red, Yellow};
+use nu_ansi_term::Color::{DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::Open;
 use octocrab::{params, Octocrab};
 use regex::Regex;
@@ -480,7 +480,7 @@ fn print_task_line(task: Task, columns: &Option<Vec<String>>) {
 fn print_column(column: &String, value: &String) {
     match column.as_str() {
         "id" => print!("{} ", DarkGray.paint(value)),
-        "created" => print!("{} ", format_datetime(value.parse().unwrap_or(0))),
+        "created" => print!("{} ", Fixed(239).paint(format_datetime(value.parse().unwrap_or(0)))),
         "status" => print!("{} ", format_status(value)),
         _ => print!("{} ", value),
     }
