@@ -2,13 +2,15 @@ extern crate gittask;
 
 use std::collections::HashMap;
 use std::io::{IsTerminal, Read};
+use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
+
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{DarkGray, Green, Red, Yellow};
 use octocrab::models::IssueState::Open;
-use octocrab::params;
+use octocrab::{params, Octocrab};
 use regex::Regex;
 
 use gittask::Task;
@@ -252,7 +254,7 @@ fn import_from_remote() {
 }
 
 async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
-    octocrab::instance().issues(user, repo)
+    get_octocrab_instance().await.issues(user, repo)
         .list()
         .state(params::State::All)
         .per_page(100)
@@ -275,6 +277,13 @@ async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
             Task::from_properties(id, props).unwrap()
         })
         .collect()
+}
+
+async fn get_octocrab_instance() -> Arc<Octocrab> {
+    match std::env::var("GITHUB_TOKEN") {
+        Ok(token) => Arc::new(Octocrab::builder().personal_token(token).build().unwrap()),
+        _ => octocrab::instance()
+    }
 }
 
 fn task_export(ids: Option<Vec<String>>, format: Option<String>, pretty: bool) {

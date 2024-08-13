@@ -85,6 +85,8 @@ Import tasks from external source. Currently only JSON input and GitHub are supp
     git task import
     git task import <my_tasks.json
 
+For private repositories you have to set up `GITHUB_TOKEN` environment variable.
+
 ### export
 
 Export all or selected tasks, only JSON output format is currently supported.
