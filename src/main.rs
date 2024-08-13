@@ -16,7 +16,7 @@ use octocrab::models::IssueState;
 use regex::Regex;
 use tokio::pin;
 
-use gittask::{find_task, Task};
+use gittask::Task;
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -79,7 +79,11 @@ enum Command {
     },
     /// Import tasks from a source
     Import {
-        source: Option<String>,
+        /// space separated task IDs
+        ids: Option<Vec<String>>,
+        /// Input format (only JSON is currently supported)
+        #[arg(short, long)]
+        format: Option<String>,
     },
     /// Export tasks
     Export {
@@ -96,6 +100,11 @@ enum Command {
     Push {
         /// space separated task IDs
         ids: Vec<String>,
+    },
+    /// Push task status to the remote source (e.g., GitHub)
+    Pull {
+        /// space separated task IDs
+        ids: Option<Vec<String>>,
     },
     /// Show total task count and count by status
     Stats,
@@ -118,9 +127,10 @@ fn main() {
         Some(Command::Status { id, status }) => task_status(id, status),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
         Some(Command::Set { id, prop_name, value }) => task_set(id, prop_name, value),
-        Some(Command::Import { source }) => task_import(source),
+        Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
         Some(Command::Push { ids }) => task_push(ids),
+        Some(Command::Pull { ids }) => task_pull(ids),
         Some(Command::Stats) => task_stats(),
         Some(Command::Delete { ids }) => task_delete(ids),
         Some(Command::Clear) => task_clear(),
@@ -179,11 +189,16 @@ fn task_set(id: String, prop_name: String, value: String) {
     }
 }
 
-fn task_import(source: Option<String>) {
+fn task_import(ids: Option<Vec<String>>, format: Option<String>) {
+    if let Some(format) = format {
+        if format.to_lowercase() != "json" {
+            eprintln!("Only JSON format is supported");
+            return;
+        }
+    }
+
     if let Some(input) = read_from_pipe() {
-        import_from_input(&input);
-    } else if source.is_none() || source.unwrap().to_lowercase() == "github" {
-        import_from_remote();
+        import_from_input(ids, &input);
     } else {
         eprintln!("Unknown import source");
     }
@@ -200,10 +215,17 @@ pub fn read_from_pipe() -> Option<String> {
     }
 }
 
-fn import_from_input(input: &String) {
+fn import_from_input(ids: Option<Vec<String>>, input: &String) {
     if let Ok(tasks) = serde_json::from_str::<Vec<HashMap<String, String>>>(input) {
         for mut task in tasks {
             let id = task.get("id").unwrap().to_string();
+
+            if let Some(ids) = &ids {
+                if !ids.contains(&id) {
+                    continue;
+                }
+            }
+
             task.remove("id");
 
             match Task::from_properties(id, task) {
@@ -221,7 +243,7 @@ fn import_from_input(input: &String) {
     }
 }
 
-fn import_from_remote() {
+fn task_pull(ids: Option<Vec<String>>) {
     match get_user_repo() {
         Ok((user, repo)) => {
             println!("Importing tasks from {user}/{repo}...");
@@ -232,7 +254,9 @@ fn import_from_remote() {
             if tasks.is_empty() {
                 println!("No tasks found");
             } else {
-                tasks.into_iter().for_each(|task| {
+                tasks.into_iter().filter(|task| {
+                    ids.is_none() || ids.as_ref().unwrap().contains(&task.get_id().unwrap())
+                }).for_each(|task| {
                     match gittask::create_task(task) {
                         Ok(id) => println!("Task ID {id} imported"),
                         Err(e) => eprintln!("ERROR: {e}"),
@@ -358,7 +382,7 @@ fn task_push(ids: Vec<String>) {
             let runtime = tokio::runtime::Runtime::new().unwrap();
             for id in ids {
                 println!("Sync: task ID {id}");
-                if let Ok(Some(local_task)) = find_task(&id) {
+                if let Ok(Some(local_task)) = gittask::find_task(&id) {
                     println!("Sync: LOCAL task ID {id} found");
                     let remote_task = runtime.block_on(get_issue(&user, &repo, id.parse().unwrap()));
                     if let Some(remote_task) = remote_task {
@@ -373,9 +397,13 @@ fn task_push(ids: Vec<String>) {
                                 println!("Sync: REMOTE task ID {id} has been updated");
                             }
                         } else {
-                            println!("Nothing to sync");
+                            eprintln!("Nothing to sync");
                         }
+                    } else {
+                        eprintln!("Sync: REMOTE task ID {id} NOT found");
                     }
+                } else {
+                    eprintln!("Sync: LOCAL task ID {id} NOT found");
                 }
             }
         },

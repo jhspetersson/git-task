@@ -80,12 +80,10 @@ Sets task property
 
 ### import
 
-Import tasks from external source. Currently only JSON input and GitHub are supported.
+Import all or selected tasks from JSON file.
 
-    git task import
     git task import <my_tasks.json
-
-For private repositories you have to set up `GITHUB_TOKEN` environment variable.
+    git task import 2 3 5 <my_tasks.json
 
 ### export
 
@@ -96,9 +94,18 @@ Export all or selected tasks, only JSON output format is currently supported.
 
 ### push
 
-Push task status to the remote source (e.g., GitHub)
+Push status of the selected tasks to the remote source (e.g., GitHub).
+You have to set up `GITHUB_TOKEN` environment variable.
 
     git task push 2 3 5
+
+### pull
+
+Grab issues from remote source (currently, only GitHub is supported).
+For private repositories you have to set up `GITHUB_TOKEN` environment variable.
+
+    git task pull
+    git task pull 2 3 5
 
 ### stats
 
