@@ -18,9 +18,9 @@ Now you can switch to some git repo and run it as:
 
     git task create "My first task"
 
-Or import issues from GitHub if you have a public project with issues accessible:
+Or import issues from GitHub (`GITHUB_TOKEN` env variable might be needed to be set up if you have a private repository):
 
-    git task import
+    git task pull
 
 ## Commands
 
