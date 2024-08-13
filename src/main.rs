@@ -200,7 +200,7 @@ fn task_import(ids: Option<Vec<String>>, format: Option<String>) {
     if let Some(input) = read_from_pipe() {
         import_from_input(ids, &input);
     } else {
-        eprintln!("Unknown import source");
+        eprintln!("Can't read from pipe");
     }
 }
 
