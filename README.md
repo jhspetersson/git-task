@@ -94,6 +94,12 @@ Export all or selected tasks, only JSON output format is currently supported.
     git task export
     git task export --pretty 2 3 5 >my_tasks.json
 
+### push
+
+Push task status to the remote source (e.g., GitHub)
+
+    git task push 2 3 5
+
 ### stats
 
 Show total task count and count by status.
