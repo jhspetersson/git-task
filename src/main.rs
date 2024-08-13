@@ -7,11 +7,13 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use clap::{Parser, Subcommand};
+use futures_util::TryStreamExt;
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::Open;
 use octocrab::{params, Octocrab};
 use regex::Regex;
+use tokio::pin;
 
 use gittask::Task;
 
@@ -254,30 +256,34 @@ fn import_from_remote() {
 }
 
 async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
-    get_octocrab_instance().await.issues(user, repo)
+    let mut result = vec![];
+    let crab = get_octocrab_instance().await;
+    let stream = crab.issues(user, repo)
         .list()
         .state(params::State::All)
         .per_page(100)
         .send()
         .await.unwrap()
-        .take_items()
-        .into_iter()
-        .map(|issue| {
-            let mut props = HashMap::new();
-            props.insert(String::from("name"), issue.title);
-            props.insert(String::from("status"), if issue.state == Open { String::from("OPEN") } else { String::from("CLOSED") } );
-            props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
-            props.insert(String::from("created"), issue.created_at.timestamp().to_string());
-            props.insert(String::from("author"), issue.user.login);
-            let id = match Regex::new("/issues/(\\d+)").unwrap().captures(issue.url.path()) {
-                Some(caps) if caps.len() == 2 => {
-                    caps.get(1).unwrap().as_str().to_string()
-                },
-                _ => String::new()
-            };
-            Task::from_properties(id, props).unwrap()
-        })
-        .collect()
+        .into_stream(&crab);
+    pin!(stream);
+    while let Some(issue) = stream.try_next().await.unwrap() {
+        let mut props = HashMap::new();
+        props.insert(String::from("name"), issue.title);
+        props.insert(String::from("status"), if issue.state == Open { String::from("OPEN") } else { String::from("CLOSED") } );
+        props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
+        props.insert(String::from("created"), issue.created_at.timestamp().to_string());
+        props.insert(String::from("author"), issue.user.login);
+        let id = match Regex::new("/issues/(\\d+)").unwrap().captures(issue.url.path()) {
+            Some(caps) if caps.len() == 2 => {
+                caps.get(1).unwrap().as_str().to_string()
+            },
+            _ => String::new()
+        };
+        let task = Task::from_properties(id, props).unwrap();
+        result.push(task);
+    }
+
+    result
 }
 
 async fn get_octocrab_instance() -> Arc<Octocrab> {

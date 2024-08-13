@@ -395,6 +395,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "clap",
+ "futures-util",
  "git2",
  "nu-ansi-term",
  "octocrab",
@@ -774,6 +775,7 @@ dependencies = [
  "chrono",
  "either",
  "futures",
+ "futures-core",
  "futures-util",
  "http",
  "http-body",
