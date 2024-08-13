@@ -8,7 +8,7 @@ use std::time::{Duration, UNIX_EPOCH};
 use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
-use nu_ansi_term::Color::{DarkGray, Fixed, Green, Red, Yellow};
+use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::Open;
 use octocrab::{params, Octocrab};
 use regex::Regex;
@@ -268,6 +268,7 @@ async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
             props.insert(String::from("status"), if issue.state == Open { String::from("OPEN") } else { String::from("CLOSED") } );
             props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
             props.insert(String::from("created"), issue.created_at.timestamp().to_string());
+            props.insert(String::from("author"), issue.user.login);
             let id = match Regex::new("/issues/(\\d+)").unwrap().captures(issue.url.path()) {
                 Some(caps) if caps.len() == 2 => {
                     caps.get(1).unwrap().as_str().to_string()
@@ -482,6 +483,7 @@ fn print_column(column: &String, value: &String) {
         "id" => print!("{} ", DarkGray.paint(value)),
         "created" => print!("{} ", Fixed(239).paint(format_datetime(value.parse().unwrap_or(0)))),
         "status" => print!("{} ", format_status(value)),
+        "author" => print!("{} ", Cyan.paint(value)),
         _ => print!("{} ", value),
     }
 }
