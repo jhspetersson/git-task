@@ -468,6 +468,12 @@ fn print_task(task: Task) {
         println!("{}: {}", created_title, format_datetime(created.parse().unwrap()));
     }
 
+    let author = task.get_property("author").unwrap_or(&empty_string);
+    if !author.is_empty() {
+        let author_title = DarkGray.paint("Author");
+        println!("{}: {}", author_title, format_author(author));
+    }
+
     let name_title = DarkGray.paint("Name");
     println!("{}: {}", name_title, task.get_property("name").unwrap());
 
@@ -475,7 +481,7 @@ fn print_task(task: Task) {
     println!("{}: {}", status_title, format_status(task.get_property("status").unwrap()));
 
     task.get_all_properties().iter().filter(|entry| {
-        entry.0 != "name" && entry.0 != "status" && entry.0 != "description" && entry.0 != "created"
+        entry.0 != "name" && entry.0 != "status" && entry.0 != "description" && entry.0 != "created" && entry.0 != "author"
     }).for_each(|entry| {
         let title = DarkGray.paint(capitalize(entry.0));
         println!("{}: {}", title, entry.1);
@@ -503,6 +509,10 @@ fn format_status(status: &str) -> AnsiString {
         "CLOSED" => Green.paint("CLOSED"),
         s => s.into()
     }
+}
+
+fn format_author(author: &str) -> AnsiString {
+    Cyan.paint(author)
 }
 
 fn task_list(status: Option<String>, keyword: Option<String>, from: Option<String>, until: Option<String>, columns: Option<Vec<String>>) {
@@ -590,7 +600,7 @@ fn print_column(column: &String, value: &String) {
         "id" => print!("{} ", DarkGray.paint(value)),
         "created" => print!("{} ", Fixed(239).paint(format_datetime(value.parse().unwrap_or(0)))),
         "status" => print!("{} ", format_status(value)),
-        "author" => print!("{} ", Cyan.paint(value)),
+        "author" => print!("{} ", format_author(value)),
         _ => print!("{} ", value),
     }
 }
