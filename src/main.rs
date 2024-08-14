@@ -16,7 +16,7 @@ use octocrab::models::IssueState;
 use regex::Regex;
 use tokio::pin;
 
-use gittask::Task;
+use gittask::{Comment, Task};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -77,6 +77,11 @@ enum Command {
         /// property value
         value: String,
     },
+    /// Add or delete comments
+    Comment {
+        #[command(subcommand)]
+        subcommand: CommentCommand,
+    },
     /// Import tasks from a source
     Import {
         /// space separated task IDs
@@ -118,6 +123,25 @@ enum Command {
     Clear,
 }
 
+#[derive(Subcommand)]
+enum CommentCommand {
+    /// Add a comment
+    Add {
+        /// task ID
+        id: String,
+        /// comment text
+        text: String,
+    },
+    /// Delete a comment
+    #[clap(visible_aliases(["del", "remove", "rem"]))]
+    Delete {
+        /// task ID
+        id: String,
+        /// comment ID
+        comment_id: String,
+    },
+}
+
 fn main() {
     let args = Args::parse();
     match args.command {
@@ -127,6 +151,7 @@ fn main() {
         Some(Command::Status { id, status }) => task_status(id, status),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
         Some(Command::Set { id, prop_name, value }) => task_set(id, prop_name, value),
+        Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
         Some(Command::Push { ids }) => task_push(ids),
@@ -189,6 +214,45 @@ fn task_set(id: String, prop_name: String, value: String) {
     }
 }
 
+fn task_comment(subcommand: CommentCommand) {
+    match subcommand {
+        CommentCommand::Add { id, text } => task_comment_add(id, text),
+        CommentCommand::Delete { id, comment_id } => task_comment_delete(id, comment_id),
+    }
+}
+
+fn task_comment_add(id: String, text: String) {
+    match gittask::find_task(&id) {
+        Ok(Some(mut task)) => {
+            task.add_comment(None, HashMap::new(), text);
+            match gittask::update_task(task) {
+                Ok(_) => println!("Task ID {id} updated"),
+                Err(e) => eprintln!("ERROR: {e}"),
+            }
+        },
+        Ok(None) => eprintln!("Task ID {id} not found"),
+        Err(e) => eprintln!("ERROR: {e}"),
+    }
+}
+
+fn task_comment_delete(id: String, comment_id: String) {
+    match gittask::find_task(&id) {
+        Ok(Some(mut task)) => {
+            match task.delete_comment(comment_id) {
+                Ok(_) => {
+                    match gittask::update_task(task) {
+                        Ok(_) => println!("Task ID {id} updated"),
+                        Err(e) => eprintln!("ERROR: {e}"),
+                    }
+                },
+                Err(e) => eprintln!("ERROR: {e}"),
+            }
+        },
+        Ok(None) => eprintln!("Task ID {id} not found"),
+        Err(e) => eprintln!("ERROR: {e}"),
+    }
+}
+
 fn task_import(ids: Option<Vec<String>>, format: Option<String>) {
     if let Some(format) = format {
         if format.to_lowercase() != "json" {
@@ -216,9 +280,9 @@ pub fn read_from_pipe() -> Option<String> {
 }
 
 fn import_from_input(ids: Option<Vec<String>>, input: &String) {
-    if let Ok(tasks) = serde_json::from_str::<Vec<HashMap<String, String>>>(input) {
-        for mut task in tasks {
-            let id = task.get("id").unwrap().to_string();
+    if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(input) {
+        for task in tasks {
+            let id = task.get_id().unwrap().to_string();
 
             if let Some(ids) = &ids {
                 if !ids.contains(&id) {
@@ -226,15 +290,8 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) {
                 }
             }
 
-            task.remove("id");
-
-            match Task::from_properties(id, task) {
-                Ok(task) => {
-                    match gittask::create_task(task) {
-                        Ok(id) => println!("Task ID {id} imported"),
-                        Err(e) => eprintln!("ERROR: {e}"),
-                    }
-                },
+            match gittask::create_task(task) {
+                Ok(id) => println!("Task ID {id} imported"),
                 Err(e) => eprintln!("ERROR: {e}"),
             }
         }
@@ -299,7 +356,7 @@ fn get_user_repo() -> Result<(String, String), String> {
 async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
-    let stream = crab.issues(user, repo)
+    let stream = crab.issues(&user, &repo)
         .list()
         .state(params::State::All)
         .per_page(100)
@@ -320,8 +377,31 @@ async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
             },
             _ => String::new()
         };
-        let task = Task::from_properties(id, props).unwrap();
+        let mut task = Task::from_properties(id, props).unwrap();
+        let task_comments = list_github_issue_comments(&user, &repo, issue.number).await;
+        task.set_comments(task_comments);
         result.push(task);
+    }
+
+    result
+}
+
+async fn list_github_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Comment> {
+    let mut result = vec![];
+    let crab = get_octocrab_instance().await;
+    let stream = crab.issues(user, repo)
+        .list_comments(n)
+        .per_page(100)
+        .send()
+        .await.unwrap()
+        .into_stream(&crab);
+    pin!(stream);
+    while let Some(comment) = stream.try_next().await.unwrap() {
+        let comment = Comment::new(comment.id.to_string(), HashMap::from([
+            ("author".to_string(), comment.user.login),
+            ("created".to_string(), comment.created_at.timestamp().to_string()),
+        ]), comment.body.unwrap());
+        result.push(comment);
     }
 
     result
@@ -354,9 +434,7 @@ fn task_export(ids: Option<Vec<String>>, format: Option<String>, pretty: bool) {
                     }
                 }
 
-                let mut task_props = task.get_all_properties().to_owned();
-                task_props.insert("id".to_string(), task.get_id().unwrap());
-                result.push(task_props);
+                result.push(task);
             }
 
             let func = if pretty { serde_json::to_string_pretty } else { serde_json::to_string };
@@ -492,6 +570,38 @@ fn print_task(task: Task) {
         let description_title = DarkGray.paint("Description");
         println!("{}: {}", description_title, description);
     }
+
+    if let Some(comments) = task.get_comments() {
+        for comment in comments {
+            print_comment(comment);
+        }
+    }
+}
+
+fn print_comment(comment: &Comment) {
+    println!("{}", DarkGray.paint("---------------"));
+
+    if let Some(id) = comment.get_id() {
+        let id_title = DarkGray.paint("Comment ID");
+        println!("{}: {}", id_title, id);
+    }
+
+    let empty_string = String::new();
+    let comment_properties = comment.get_all_properties();
+
+    let created = comment_properties.get("created").unwrap_or(&empty_string);
+    if !created.is_empty() {
+        let created_title = DarkGray.paint("Created");
+        println!("{}: {}", created_title, format_datetime(created.parse().unwrap()));
+    }
+
+    let author = comment_properties.get("author").unwrap_or(&empty_string);
+    if !author.is_empty() {
+        let author_title = DarkGray.paint("Author");
+        println!("{}: {}", author_title, format_author(author));
+    }
+
+    println!("{}", comment.get_text());
 }
 
 fn capitalize(s: &str) -> String {

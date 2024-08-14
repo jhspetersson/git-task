@@ -3,50 +3,67 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use git2::*;
 use serde_json;
+use serde::{Deserialize, Serialize};
 
 const NAME: &'static str = "name";
 const DESCRIPTION: &'static str = "description";
 const STATUS: &'static str = "status";
 const CREATED: &'static str = "created";
 
+#[derive(Serialize, Deserialize)]
 pub struct Task {
     id: Option<String>,
     props: HashMap<String, String>,
+    comments: Option<Vec<Comment>>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Comment {
+    id: Option<String>,
+    props: HashMap<String, String>,
+    text: String,
 }
 
 impl Task {
     pub fn new(name: String, description: String, status: String) -> Result<Task, &'static str> {
         if !name.is_empty() && !status.is_empty() {
-            Ok(Self::construct_task(None, name, description, status, None))
+            Ok(Self::construct_task(name, description, status, None))
         } else {
             Err("Name or status is empty")
         }
     }
 
-    pub fn from_properties(id: String, mut map: HashMap<String, String>) -> Result<Task, &'static str> {
-        let name = map.get(NAME).unwrap_or(&"".to_owned()).to_owned();
-        let status = map.get(STATUS).unwrap_or(&"".to_owned()).to_owned();
+    pub fn from_properties(id: String, mut props: HashMap<String, String>) -> Result<Task, &'static str> {
+        let name = props.get(NAME).unwrap_or(&"".to_owned()).to_owned();
+        let status = props.get(STATUS).unwrap_or(&"".to_owned()).to_owned();
 
         if !name.is_empty() && !status.is_empty() {
-            if !map.contains_key("created") {
-                map.insert("created".to_string(), get_current_timestamp().to_string());
+            if !props.contains_key("created") {
+                props.insert("created".to_string(), get_current_timestamp().to_string());
             }
 
-            Ok(Task{ id: Some(id), props: map})
+            Ok(Task{ id: Some(id), props, comments: None })
         } else {
             Err("Name or status is empty")
         }
     }
 
-    fn construct_task(id: Option<String>, name: String, description: String, status: String, created: Option<u64>) -> Task {
+    fn construct_task(name: String, description: String, status: String, created: Option<u64>) -> Task {
+        let mut props = HashMap::from([
+            (NAME.to_owned(), name),
+            (DESCRIPTION.to_owned(), description),
+            (STATUS.to_owned(), status),
+            (CREATED.to_owned(), created.unwrap_or(get_current_timestamp()).to_string()),
+        ]);
+
+        if let Ok(Some(current_user)) = get_current_user() {
+            props.insert("author".to_string(), current_user);
+        }
+
         Task {
-            id,
-            props: HashMap::from([
-                (NAME.to_owned(), name),
-                (DESCRIPTION.to_owned(), description),
-                (STATUS.to_owned(), status),
-                (CREATED.to_owned(), created.unwrap_or(get_current_timestamp()).to_string()),
-            ])
+            id: None,
+            props,
+            comments: None,
         }
     }
 
@@ -76,6 +93,79 @@ impl Task {
     pub fn delete_property(&mut self, prop: &str) {
         self.props.remove(prop);
     }
+
+    pub fn get_comments(&self) -> &Option<Vec<Comment>> {
+        &self.comments
+    }
+
+    pub fn add_comment(&mut self, id: Option<String>, mut props: HashMap<String, String>, text: String) {
+        if self.comments.is_none() {
+            self.comments = Some(vec![]);
+        }
+
+        let id = Some(id.unwrap_or_else(|| (self.comments.as_ref().unwrap().len() + 1).to_string()));
+
+        if !props.contains_key("created") {
+            props.insert("created".to_string(), get_current_timestamp().to_string());
+        }
+
+        if !props.contains_key("author") {
+            if let Ok(Some(current_user)) = get_current_user() {
+                props.insert("author".to_string(), current_user);
+            }
+        }
+
+        self.comments.as_mut().unwrap().push(Comment {
+            id,
+            props,
+            text,
+        });
+    }
+
+    pub fn set_comments(&mut self, comments: Vec<Comment>) {
+        self.comments = Some(comments);
+    }
+
+    pub fn delete_comment(&mut self, id: String) -> Result<(), String> {
+        if self.comments.is_none() {
+            return Err("Task has no comments".to_string());
+        }
+
+        let index = self.comments.as_ref().unwrap().iter().position(|comment| comment.get_id().unwrap() == id);
+
+        if index.is_none() {
+            return Err(format!("Comment ID {} not found", id.clone()));
+        }
+
+        self.comments.as_mut().unwrap().remove(index.unwrap());
+
+        Ok(())
+    }
+}
+
+impl Comment {
+    pub fn new(id: String, props: HashMap<String, String>, text: String) -> Comment {
+        Comment {
+            id: Some(id),
+            props,
+            text,
+        }
+    }
+
+    pub fn get_id(&self) -> Option<String> {
+        match &self.id {
+            Some(id) => Some(id.clone()),
+            _ => None
+        }
+    }
+
+    pub fn get_all_properties(&self) -> &HashMap<String, String> {
+        &self.props
+    }
+
+    pub fn get_text(&self) -> String {
+        self.text.to_string()
+    }
 }
 
 macro_rules! map_err {
@@ -92,14 +182,11 @@ pub fn list_tasks() -> Result<Vec<Task>, String> {
     let mut result = vec![];
 
     let _ = map_err!(task_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
-        let entry_name = entry.name().unwrap().to_owned();
         let oid = entry.id();
         let blob = repo.find_blob(oid).unwrap();
         let content = blob.content();
 
-        let map: HashMap<String, String> = serde_json::from_slice(content).unwrap();
-
-        let task = Task::from_properties(entry_name, map).unwrap();
+        let task = serde_json::from_slice(content).unwrap();
         result.push(task);
 
         TreeWalkResult::Ok
@@ -125,9 +212,7 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
         let blob = repo.find_blob(oid).unwrap();
         let content = blob.content();
 
-        let map: HashMap<String, String> = serde_json::from_slice(content).unwrap();
-
-        let task = Task::from_properties(entry_name.to_string(), map).unwrap();
+        let task = serde_json::from_slice(content).unwrap();
         result = Some(task);
 
         TreeWalkResult::Abort
@@ -175,7 +260,7 @@ pub fn clear_tasks() -> Result<u64, String> {
     Ok(task_count)
 }
 
-pub fn create_task(task: Task) -> Result<String, String> {
+pub fn create_task(mut task: Task) -> Result<String, String> {
     let repo = map_err!(Repository::open("."));
     let task_ref_result = repo.find_reference("refs/tasks/tasks");
     let source_tree = match task_ref_result {
@@ -188,11 +273,15 @@ pub fn create_task(task: Task) -> Result<String, String> {
         _ => { None }
     };
 
-    let string_content = serde_json::to_string(task.get_all_properties()).unwrap();
+    let task_id = if task.get_id().is_some() { task.get_id() } else {
+        let id = get_next_id().unwrap_or("1".to_string());
+        task.set_id(id.clone());
+        Some(id)
+    };
+    let string_content = serde_json::to_string(&task).unwrap();
     let content = string_content.as_bytes();
     let oid = repo.blob(content).unwrap();
     let mut treebuilder = map_err!(repo.treebuilder(source_tree.as_ref()));
-    let task_id = if task.get_id().is_some() { task.get_id() } else { Some(get_next_id().unwrap_or("1".to_string())) };
     map_err!(treebuilder.insert(task_id.clone().unwrap(), oid, FileMode::Blob.into()));
     let tree_oid = map_err!(treebuilder.write());
 
@@ -214,7 +303,7 @@ pub fn update_task(task: Task) -> Result<String, String> {
     let task_ref_result = repo.find_reference("refs/tasks/tasks").unwrap();
     let parent_commit = task_ref_result.peel_to_commit().unwrap();
     let source_tree = task_ref_result.peel_to_tree().unwrap();
-    let string_content = serde_json::to_string(task.get_all_properties()).unwrap();
+    let string_content = serde_json::to_string(&task).unwrap();
     let content = string_content.as_bytes();
     let oid = repo.blob(content).unwrap();
     let mut treebuilder = map_err!(repo.treebuilder(Some(&source_tree)));
@@ -261,4 +350,16 @@ pub fn list_remotes() -> Result<Vec<String>, String> {
 
 fn get_current_timestamp() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs()
+}
+
+fn get_current_user() -> Result<Option<String>, String> {
+    let repo = map_err!(Repository::open("."));
+    let me = &repo.signature().unwrap();
+    match me.name() {
+        Some(name) => Ok(Some(String::from(name))),
+        _ => match me.email() {
+            Some(email) => Ok(Some(String::from(email))),
+            _ => Ok(None),
+        }
+    }
 }

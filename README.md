@@ -74,9 +74,16 @@ Prints task property.
 
 ### set
 
-Sets task property
+Sets task property.
 
     git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!"
+
+### comment
+
+Add or remove comments:
+
+    git task comment add 1 "This is a comment to my first task"
+    git task comment del 1 1
 
 ### import
 
