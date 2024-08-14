@@ -128,7 +128,7 @@ enum CommentCommand {
     /// Add a comment
     Add {
         /// task ID
-        id: String,
+        task_id: String,
         /// comment text
         text: String,
     },
@@ -136,7 +136,7 @@ enum CommentCommand {
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
         /// task ID
-        id: String,
+        task_id: String,
         /// comment ID
         comment_id: String,
     },
@@ -216,39 +216,39 @@ fn task_set(id: String, prop_name: String, value: String) {
 
 fn task_comment(subcommand: CommentCommand) {
     match subcommand {
-        CommentCommand::Add { id, text } => task_comment_add(id, text),
-        CommentCommand::Delete { id, comment_id } => task_comment_delete(id, comment_id),
+        CommentCommand::Add { task_id, text } => task_comment_add(task_id, text),
+        CommentCommand::Delete { task_id, comment_id } => task_comment_delete(task_id, comment_id),
     }
 }
 
-fn task_comment_add(id: String, text: String) {
-    match gittask::find_task(&id) {
+fn task_comment_add(task_id: String, text: String) {
+    match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             task.add_comment(None, HashMap::new(), text);
             match gittask::update_task(task) {
-                Ok(_) => println!("Task ID {id} updated"),
+                Ok(_) => println!("Task ID {task_id} updated"),
                 Err(e) => eprintln!("ERROR: {e}"),
             }
         },
-        Ok(None) => eprintln!("Task ID {id} not found"),
+        Ok(None) => eprintln!("Task ID {task_id} not found"),
         Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 
-fn task_comment_delete(id: String, comment_id: String) {
-    match gittask::find_task(&id) {
+fn task_comment_delete(task_id: String, comment_id: String) {
+    match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             match task.delete_comment(comment_id) {
                 Ok(_) => {
                     match gittask::update_task(task) {
-                        Ok(_) => println!("Task ID {id} updated"),
+                        Ok(_) => println!("Task ID {task_id} updated"),
                         Err(e) => eprintln!("ERROR: {e}"),
                     }
                 },
                 Err(e) => eprintln!("ERROR: {e}"),
             }
         },
-        Ok(None) => eprintln!("Task ID {id} not found"),
+        Ok(None) => eprintln!("Task ID {task_id} not found"),
         Err(e) => eprintln!("ERROR: {e}"),
     }
 }
