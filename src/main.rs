@@ -1,22 +1,20 @@
+mod util;
+mod github;
+
 extern crate gittask;
 
 use std::collections::HashMap;
-use std::io::{IsTerminal, Read};
-use std::sync::Arc;
-use std::time::{Duration, UNIX_EPOCH};
 
-use chrono::{DateTime, Local, NaiveDate, TimeZone};
+use chrono::{Local, NaiveDate, TimeZone};
 use clap::{Parser, Subcommand};
-use futures_util::TryStreamExt;
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::{Open, Closed};
-use octocrab::{params, Octocrab};
-use octocrab::models::IssueState;
 use regex::Regex;
-use tokio::pin;
 
 use gittask::{Comment, Task};
+use crate::github::{get_github_issue, get_runtime, list_github_issues, update_github_issue_status};
+use crate::util::{capitalize, format_datetime, read_from_pipe};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -268,17 +266,6 @@ fn task_import(ids: Option<Vec<String>>, format: Option<String>) {
     }
 }
 
-pub fn read_from_pipe() -> Option<String> {
-    let mut buf = String::new();
-    match std::io::stdin().is_terminal() {
-        false => {
-            std::io::stdin().read_to_string(&mut buf).ok()?;
-            Some(buf)
-        },
-        true => None
-    }
-}
-
 fn import_from_input(ids: Option<Vec<String>>, input: &String) {
     if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(input) {
         for task in tasks {
@@ -306,7 +293,6 @@ fn task_pull(ids: Option<Vec<String>>) {
             println!("Importing tasks from {user}/{repo}...");
 
             let tasks = list_github_issues(user.to_string(), repo.to_string());
-            let tasks = tokio::runtime::Runtime::new().unwrap().block_on(tasks);
 
             if tasks.is_empty() {
                 println!("No tasks found");
@@ -353,67 +339,6 @@ fn get_user_repo() -> Result<(String, String), String> {
     }
 }
 
-async fn list_github_issues(user: String, repo: String) -> Vec<Task> {
-    let mut result = vec![];
-    let crab = get_octocrab_instance().await;
-    let stream = crab.issues(&user, &repo)
-        .list()
-        .state(params::State::All)
-        .per_page(100)
-        .send()
-        .await.unwrap()
-        .into_stream(&crab);
-    pin!(stream);
-    while let Some(issue) = stream.try_next().await.unwrap() {
-        let mut props = HashMap::new();
-        props.insert(String::from("name"), issue.title);
-        props.insert(String::from("status"), if issue.state == Open { String::from("OPEN") } else { String::from("CLOSED") } );
-        props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
-        props.insert(String::from("created"), issue.created_at.timestamp().to_string());
-        props.insert(String::from("author"), issue.user.login);
-        let id = match Regex::new("/issues/(\\d+)").unwrap().captures(issue.url.path()) {
-            Some(caps) if caps.len() == 2 => {
-                caps.get(1).unwrap().as_str().to_string()
-            },
-            _ => String::new()
-        };
-        let mut task = Task::from_properties(id, props).unwrap();
-        let task_comments = list_github_issue_comments(&user, &repo, issue.number).await;
-        task.set_comments(task_comments);
-        result.push(task);
-    }
-
-    result
-}
-
-async fn list_github_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Comment> {
-    let mut result = vec![];
-    let crab = get_octocrab_instance().await;
-    let stream = crab.issues(user, repo)
-        .list_comments(n)
-        .per_page(100)
-        .send()
-        .await.unwrap()
-        .into_stream(&crab);
-    pin!(stream);
-    while let Some(comment) = stream.try_next().await.unwrap() {
-        let comment = Comment::new(comment.id.to_string(), HashMap::from([
-            ("author".to_string(), comment.user.login),
-            ("created".to_string(), comment.created_at.timestamp().to_string()),
-        ]), comment.body.unwrap());
-        result.push(comment);
-    }
-
-    result
-}
-
-async fn get_octocrab_instance() -> Arc<Octocrab> {
-    match std::env::var("GITHUB_TOKEN") {
-        Ok(token) => Arc::new(Octocrab::builder().personal_token(token).build().unwrap()),
-        _ => octocrab::instance()
-    }
-}
-
 fn task_export(ids: Option<Vec<String>>, format: Option<String>, pretty: bool) {
     if let Some(format) = format {
         if format.to_lowercase() != "json" {
@@ -457,12 +382,12 @@ fn task_push(ids: Vec<String>) {
 
     match get_user_repo() {
         Ok((user, repo)) => {
-            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let runtime = get_runtime();
             for id in ids {
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
                     println!("Sync: LOCAL task ID {id} found");
-                    let remote_task = runtime.block_on(get_issue(&user, &repo, id.parse().unwrap()));
+                    let remote_task = get_github_issue(&runtime, &user, &repo, id.parse().unwrap());
                     if let Some(remote_task) = remote_task {
                         println!("Sync: REMOTE task ID {id} found");
                         let local_status = local_task.get_property("status").unwrap();
@@ -470,7 +395,7 @@ fn task_push(ids: Vec<String>) {
                         if local_status != remote_status {
                             println!("{}: {} -> {}", id, format_status(remote_status), format_status(local_status));
                             let state = if local_status == "CLOSED" { Closed } else { Open };
-                            let result = runtime.block_on(update_issue_status(&user, &repo, id.parse().unwrap(), state));
+                            let result = update_github_issue_status(&runtime, &user, &repo, id.parse().unwrap(), state);
                             if result {
                                 println!("Sync: REMOTE task ID {id} has been updated");
                             }
@@ -487,28 +412,6 @@ fn task_push(ids: Vec<String>) {
         },
         Err(e) => eprintln!("ERROR: {e}")
     }
-}
-
-async fn get_issue(user: &str, repo: &str, n: u64) -> Option<Task> {
-    let crab = get_octocrab_instance().await;
-    let issue = crab.issues(user, repo).get(n).await;
-    match issue {
-        Ok(issue) => {
-            let mut props = HashMap::new();
-            props.insert(String::from("name"), issue.title);
-            props.insert(String::from("status"), if issue.state == Open { String::from("OPEN") } else { String::from("CLOSED") } );
-            props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
-            props.insert(String::from("created"), issue.created_at.timestamp().to_string());
-            props.insert(String::from("author"), issue.user.login);
-            Some(Task::from_properties(n.to_string(), props).unwrap())
-        },
-        _ => None
-    }
-}
-
-async fn update_issue_status(user: &str, repo: &str, n: u64, state: IssueState) -> bool {
-    let crab = get_octocrab_instance().await;
-    crab.issues(user, repo).update(n).state(state).send().await.is_ok()
 }
 
 fn task_delete(ids: Vec<String>) {
@@ -602,14 +505,6 @@ fn print_comment(comment: &Comment) {
     }
 
     println!("{}", comment.get_text());
-}
-
-fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
-        None => String::new(),
-    }
 }
 
 fn format_status(status: &str) -> AnsiString {
@@ -713,16 +608,6 @@ fn print_column(column: &String, value: &String) {
         "author" => print!("{} ", format_author(value)),
         _ => print!("{} ", value),
     }
-}
-
-fn format_datetime(seconds: u64) -> String {
-    if seconds == 0 {
-        return String::new();
-    }
-
-    let seconds = UNIX_EPOCH + Duration::from_secs(seconds);
-    let datetime = DateTime::<Local>::from(seconds);
-    datetime.format("%Y-%m-%d %H:%M").to_string()
 }
 
 fn task_stats() {
