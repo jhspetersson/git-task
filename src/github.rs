@@ -5,7 +5,6 @@ use futures_util::TryStreamExt;
 use octocrab::models::IssueState::Open;
 use octocrab::{params, Octocrab};
 use octocrab::models::IssueState;
-use regex::Regex;
 use tokio::pin;
 use tokio::runtime::Runtime;
 use gittask::{Comment, Task};
@@ -36,15 +35,12 @@ async fn list_github_issues_async(user: String, repo: String) -> Vec<Task> {
         props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
         props.insert(String::from("created"), issue.created_at.timestamp().to_string());
         props.insert(String::from("author"), issue.user.login);
-        let id = match Regex::new("/issues/(\\d+)").unwrap().captures(issue.url.path()) {
-            Some(caps) if caps.len() == 2 => {
-                caps.get(1).unwrap().as_str().to_string()
-            },
-            _ => String::new()
-        };
-        let mut task = Task::from_properties(id, props).unwrap();
+
+        let mut task = Task::from_properties(issue.number.to_string(), props).unwrap();
+
         let task_comments = list_github_issue_comments(&user, &repo, issue.number).await;
         task.set_comments(task_comments);
+
         result.push(task);
     }
 
