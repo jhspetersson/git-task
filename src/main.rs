@@ -144,6 +144,7 @@ enum CommentCommand {
 }
 
 fn main() {
+    let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
     match args.command {
         Some(Command::List { status, keyword, from, until, columns }) => task_list(status, keyword, from, until, columns),
