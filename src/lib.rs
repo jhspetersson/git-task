@@ -46,7 +46,6 @@ impl Task {
                 (DESCRIPTION.to_owned(), description),
                 (STATUS.to_owned(), status),
                 (CREATED.to_owned(), created.unwrap_or(get_current_timestamp()).to_string()),
-                //(STATUS.to_owned(), status),
             ])
         }
     }
