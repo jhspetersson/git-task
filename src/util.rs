@@ -1,6 +1,6 @@
 use std::io::{IsTerminal, Read};
 use std::time::{Duration, UNIX_EPOCH};
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
 
 pub fn capitalize(s: &str) -> String {
     let mut c = s.chars();
@@ -18,6 +18,16 @@ pub fn format_datetime(seconds: u64) -> String {
     let seconds = UNIX_EPOCH + Duration::from_secs(seconds);
     let datetime = DateTime::<Local>::from(seconds);
     datetime.format("%Y-%m-%d %H:%M").to_string()
+}
+
+pub fn parse_date(date: Option<String>) -> Option<MappedLocalTime<DateTime<Local>>> {
+    match date {
+        Some(date) => {
+            let naive_date = NaiveDate::parse_from_str(&date, "%Y-%m-%d").unwrap();
+            Some(Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap()))
+        }
+        None => None
+    }
 }
 
 pub fn read_from_pipe() -> Option<String> {

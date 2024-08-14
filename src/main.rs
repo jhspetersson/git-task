@@ -5,7 +5,7 @@ extern crate gittask;
 
 use std::collections::HashMap;
 
-use chrono::{Local, NaiveDate, TimeZone};
+use chrono::{Local, TimeZone};
 use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
@@ -14,7 +14,7 @@ use regex::Regex;
 
 use gittask::{Comment, Task};
 use crate::github::{get_github_issue, get_runtime, list_github_issues, update_github_issue_status};
-use crate::util::{capitalize, format_datetime, read_from_pipe};
+use crate::util::{capitalize, format_datetime, parse_date, read_from_pipe};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -541,21 +541,8 @@ fn task_list(status: Option<String>, keyword: Option<String>, from: Option<Strin
         Ok(mut tasks) => {
             tasks.sort_by_key(|task| std::cmp::Reverse(task.get_id().unwrap().parse::<u64>().unwrap_or(0)));
 
-            let from = match from {
-                Some(from) => {
-                    let naive_date = NaiveDate::parse_from_str(&from, "%Y-%m-%d").unwrap();
-                    Some(Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap()))
-                }
-                None => None
-            };
-
-            let until = match until {
-                Some(until) => {
-                    let naive_date = NaiveDate::parse_from_str(&until, "%Y-%m-%d").unwrap();
-                    Some(Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap()))
-                }
-                None => None
-            };
+            let from = parse_date(from);
+            let until = parse_date(until);
 
             for task in tasks {
                 if status.as_ref().is_some() {
