@@ -101,7 +101,7 @@ enum Command {
         /// space separated task IDs
         ids: Vec<String>,
     },
-    /// Push task status to the remote source (e.g., GitHub)
+    /// Import tasks from a remote source (e.g., GitHub)
     Pull {
         /// space separated task IDs
         ids: Option<Vec<String>>,
