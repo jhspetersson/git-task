@@ -112,6 +112,7 @@ Grab issues from remote source (currently, only GitHub is supported).
 For private repositories you have to set up `GITHUB_TOKEN` environment variable.
 
     git task pull
+    git task pull --no-comments
     git task pull 2 3 5
 
 ### stats

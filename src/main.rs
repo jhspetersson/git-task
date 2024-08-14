@@ -108,6 +108,9 @@ enum Command {
     Pull {
         /// space separated task IDs
         ids: Option<Vec<String>>,
+        /// Don't import task comments
+        #[arg(short, long)]
+        no_comments: bool,
     },
     /// Show total task count and count by status
     Stats,
@@ -153,7 +156,7 @@ fn main() {
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
         Some(Command::Push { ids }) => task_push(ids),
-        Some(Command::Pull { ids }) => task_pull(ids),
+        Some(Command::Pull { ids, no_comments }) => task_pull(ids, no_comments),
         Some(Command::Stats) => task_stats(),
         Some(Command::Delete { ids }) => task_delete(ids),
         Some(Command::Clear) => task_clear(),
@@ -287,24 +290,37 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) {
     }
 }
 
-fn task_pull(ids: Option<Vec<String>>) {
+fn task_pull(ids: Option<Vec<String>>, no_comments: bool) {
     match get_user_repo() {
         Ok((user, repo)) => {
             println!("Importing tasks from {user}/{repo}...");
 
-            let tasks = list_github_issues(user.to_string(), repo.to_string());
-
-            if tasks.is_empty() {
-                println!("No tasks found");
+            if ids.is_some() {
+                let runtime = get_runtime();
+                for id in ids.unwrap() {
+                    match get_github_issue(&runtime, &user, &repo, id.parse().unwrap(), !no_comments) {
+                        Some(task) => {
+                            match gittask::create_task(task) {
+                                Ok(id) => println!("Task ID {id} imported"),
+                                Err(e) => eprintln!("ERROR: {e}"),
+                            }
+                        },
+                        None => eprintln!("Task ID {id} not found")
+                    }
+                }
             } else {
-                tasks.into_iter().filter(|task| {
-                    ids.is_none() || ids.as_ref().unwrap().contains(&task.get_id().unwrap())
-                }).for_each(|task| {
-                    match gittask::create_task(task) {
-                        Ok(id) => println!("Task ID {id} imported"),
-                        Err(e) => eprintln!("ERROR: {e}"),
-                    };
-                });
+                let tasks = list_github_issues(user.to_string(), repo.to_string(), !no_comments);
+
+                if tasks.is_empty() {
+                    println!("No tasks found");
+                } else {
+                    for task in tasks {
+                        match gittask::create_task(task) {
+                            Ok(id) => println!("Task ID {id} imported"),
+                            Err(e) => eprintln!("ERROR: {e}"),
+                        }
+                    }
+                }
             }
         },
         Err(e) => eprintln!("ERROR: {e}")
@@ -387,7 +403,7 @@ fn task_push(ids: Vec<String>) {
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
                     println!("Sync: LOCAL task ID {id} found");
-                    let remote_task = get_github_issue(&runtime, &user, &repo, id.parse().unwrap());
+                    let remote_task = get_github_issue(&runtime, &user, &repo, id.parse().unwrap(), false);
                     if let Some(remote_task) = remote_task {
                         println!("Sync: REMOTE task ID {id} found");
                         let local_status = local_task.get_property("status").unwrap();

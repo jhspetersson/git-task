@@ -13,11 +13,11 @@ pub fn get_runtime() -> Runtime {
     Runtime::new().unwrap()
 }
 
-pub fn list_github_issues(user: String, repo: String) -> Vec<Task> {
-    Runtime::new().unwrap().block_on(list_github_issues_async(user, repo))
+pub fn list_github_issues(user: String, repo: String, with_comments: bool) -> Vec<Task> {
+    Runtime::new().unwrap().block_on(list_github_issues_async(user, repo, with_comments))
 }
 
-async fn list_github_issues_async(user: String, repo: String) -> Vec<Task> {
+async fn list_github_issues_async(user: String, repo: String, with_comments: bool) -> Vec<Task> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
     let stream = crab.issues(&user, &repo)
@@ -38,8 +38,10 @@ async fn list_github_issues_async(user: String, repo: String) -> Vec<Task> {
 
         let mut task = Task::from_properties(issue.number.to_string(), props).unwrap();
 
-        let task_comments = list_github_issue_comments(&user, &repo, issue.number).await;
-        task.set_comments(task_comments);
+        if with_comments {
+            let task_comments = list_github_issue_comments(&user, &repo, issue.number).await;
+            task.set_comments(task_comments);
+        }
 
         result.push(task);
     }
@@ -68,11 +70,11 @@ async fn list_github_issue_comments(user: &String, repo: &String, n: u64) -> Vec
     result
 }
 
-pub fn get_github_issue(runtime: &Runtime, user: &str, repo: &str, n: u64) -> Option<Task> {
-    runtime.block_on(get_issue(&user, &repo, n))
+pub fn get_github_issue(runtime: &Runtime, user: &String, repo: &String, n: u64, with_comments: bool) -> Option<Task> {
+    runtime.block_on(get_issue(&user, &repo, n, with_comments))
 }
 
-async fn get_issue(user: &str, repo: &str, n: u64) -> Option<Task> {
+async fn get_issue(user: &String, repo: &String, n: u64, with_comments: bool) -> Option<Task> {
     let crab = get_octocrab_instance().await;
     let issue = crab.issues(user, repo).get(n).await;
     match issue {
@@ -83,7 +85,15 @@ async fn get_issue(user: &str, repo: &str, n: u64) -> Option<Task> {
             props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
             props.insert(String::from("created"), issue.created_at.timestamp().to_string());
             props.insert(String::from("author"), issue.user.login);
-            Some(Task::from_properties(n.to_string(), props).unwrap())
+
+            let mut task = Task::from_properties(n.to_string(), props).unwrap();
+
+            if with_comments {
+                let task_comments = list_github_issue_comments(user, repo, issue.number).await;
+                task.set_comments(task_comments);
+            }
+
+            Some(task)
         },
         _ => None
     }
