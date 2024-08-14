@@ -331,7 +331,7 @@ fn get_user_repo() -> Result<(String, String), String> {
     match gittask::list_remotes() {
         Ok(remotes) => {
             let user_repo = remotes.into_iter().map(|ref remote| {
-                match Regex::new("https://github.com/([a-z0-9-]+)/([a-z0-9-]+)\\.git").unwrap().captures(&remote.to_lowercase()) {
+                match Regex::new("https://github.com/([a-z0-9-]+)/([a-z0-9-]+)\\.?").unwrap().captures(&remote.to_lowercase()) {
                     Some(caps) if caps.len() == 3 => {
                         let user = caps.get(1).unwrap().as_str().to_string();
                         let repo = caps.get(2).unwrap().as_str().to_string();
