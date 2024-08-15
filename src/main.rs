@@ -7,14 +7,14 @@ use std::collections::HashMap;
 
 use chrono::{Local, TimeZone};
 use clap::{Parser, Subcommand};
-use nu_ansi_term::{AnsiString, Color};
+use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::{Open, Closed};
 use regex::Regex;
 
 use gittask::{Comment, Task};
 use crate::github::{get_github_issue, get_runtime, list_github_issues, update_github_issue_status};
-use crate::util::{capitalize, format_datetime, parse_date, read_from_pipe};
+use crate::util::{capitalize, colorize_string, format_datetime, parse_date, read_from_pipe};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -467,10 +467,6 @@ fn task_show(id: String, no_color: bool) {
     }
 }
 
-fn colorize_string(s: &str, color: Color, no_color: bool) -> String {
-    if no_color { s.to_string() } else { color.paint(s).to_string() }
-}
-
 fn print_task(task: Task, no_color: bool) {
     let id_title = colorize_string("ID", DarkGray, no_color);
     println!("{}: {}", id_title, task.get_id().unwrap_or("---".to_owned()));
@@ -554,7 +550,6 @@ fn format_status(status: &str, no_color: bool) -> AnsiString {
         },
         true => status.into()
     }
-
 }
 
 fn format_author(author: &str, no_color: bool) -> AnsiString {

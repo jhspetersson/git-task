@@ -1,6 +1,7 @@
 use std::io::{IsTerminal, Read};
 use std::time::{Duration, UNIX_EPOCH};
 use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
+use nu_ansi_term::Color;
 
 pub fn capitalize(s: &str) -> String {
     let mut c = s.chars();
@@ -8,6 +9,10 @@ pub fn capitalize(s: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
     }
+}
+
+pub fn colorize_string(s: &str, color: Color, no_color: bool) -> String {
+    if no_color { s.to_string() } else { color.paint(s).to_string() }
 }
 
 pub fn format_datetime(seconds: u64) -> String {
