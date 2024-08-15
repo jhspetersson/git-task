@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use chrono::{Local, TimeZone};
 use clap::{Parser, Subcommand};
-use nu_ansi_term::AnsiString;
+use nu_ansi_term::{AnsiString, Color};
 use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::{Open, Closed};
 use regex::Regex;
@@ -42,11 +42,17 @@ enum Command {
         /// comma-separated list of columns
         #[arg(short, long, value_delimiter = ',')]
         columns: Option<Vec<String>>,
+        /// disable colors
+        #[arg(long)]
+        no_color: bool,
     },
     /// Show a task with all properties
     Show {
         /// task ID
         id: String,
+        /// disable colors
+        #[arg(long)]
+        no_color: bool,
     },
     /// Create a new task
     Create {
@@ -103,6 +109,9 @@ enum Command {
     Push {
         /// space separated task IDs
         ids: Vec<String>,
+        /// disable colors
+        #[arg(long)]
+        no_color: bool,
     },
     /// Import tasks from a remote source (e.g., GitHub)
     Pull {
@@ -113,7 +122,11 @@ enum Command {
         no_comments: bool,
     },
     /// Show total task count and count by status
-    Stats,
+    Stats {
+        /// disable colors
+        #[arg(long)]
+        no_color: bool,
+    },
     /// Delete one or several tasks at once
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
@@ -147,8 +160,8 @@ fn main() {
     let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
     match args.command {
-        Some(Command::List { status, keyword, from, until, columns }) => task_list(status, keyword, from, until, columns),
-        Some(Command::Show { id }) => task_show(id),
+        Some(Command::List { status, keyword, from, until, columns, no_color }) => task_list(status, keyword, from, until, columns, no_color),
+        Some(Command::Show { id, no_color }) => task_show(id, no_color),
         Some(Command::Create { name }) => task_create(name),
         Some(Command::Status { id, status }) => task_status(id, status),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
@@ -156,9 +169,9 @@ fn main() {
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
-        Some(Command::Push { ids }) => task_push(ids),
+        Some(Command::Push { ids, no_color }) => task_push(ids, no_color),
         Some(Command::Pull { ids, no_comments }) => task_pull(ids, no_comments),
-        Some(Command::Stats) => task_stats(),
+        Some(Command::Stats { no_color }) => task_stats(no_color),
         Some(Command::Delete { ids }) => task_delete(ids),
         Some(Command::Clear) => task_clear(),
         None => { }
@@ -391,7 +404,7 @@ fn task_export(ids: Option<Vec<String>>, format: Option<String>, pretty: bool) {
     }
 }
 
-fn task_push(ids: Vec<String>) {
+fn task_push(ids: Vec<String>, no_color: bool) {
     if ids.is_empty() {
         eprintln!("Select one or more task IDs");
         return;
@@ -410,7 +423,7 @@ fn task_push(ids: Vec<String>) {
                         let local_status = local_task.get_property("status").unwrap();
                         let remote_status = remote_task.get_property("status").unwrap();
                         if local_status != remote_status {
-                            println!("{}: {} -> {}", id, format_status(remote_status), format_status(local_status));
+                            println!("{}: {} -> {}", id, format_status(remote_status, no_color), format_status(local_status, no_color));
                             let state = if local_status == "CLOSED" { Closed } else { Open };
                             let result = update_github_issue_status(&runtime, &user, &repo, id.parse().unwrap(), state);
                             if result {
@@ -446,63 +459,68 @@ fn task_clear() {
     }
 }
 
-fn task_show(id: String) {
+fn task_show(id: String, no_color: bool) {
     match gittask::find_task(&id) {
-        Ok(Some(task)) => print_task(task),
+        Ok(Some(task)) => print_task(task, no_color),
         Ok(None) => eprintln!("Task ID {id} not found"),
         Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 
-fn print_task(task: Task) {
-    let id_title = DarkGray.paint("ID");
+fn colorize_string(s: &str, color: Color, no_color: bool) -> String {
+    if no_color { s.to_string() } else { color.paint(s).to_string() }
+}
+
+fn print_task(task: Task, no_color: bool) {
+    let id_title = colorize_string("ID", DarkGray, no_color);
     println!("{}: {}", id_title, task.get_id().unwrap_or("---".to_owned()));
 
     let empty_string = String::new();
 
     let created = task.get_property("created").unwrap_or(&empty_string);
     if !created.is_empty() {
-        let created_title = DarkGray.paint("Created");
+        let created_title = colorize_string("Created", DarkGray, no_color);
         println!("{}: {}", created_title, format_datetime(created.parse().unwrap()));
     }
 
     let author = task.get_property("author").unwrap_or(&empty_string);
     if !author.is_empty() {
-        let author_title = DarkGray.paint("Author");
-        println!("{}: {}", author_title, format_author(author));
+        let author_title = colorize_string("Author", DarkGray, no_color);
+        println!("{}: {}", author_title, format_author(author, no_color));
     }
 
-    let name_title = DarkGray.paint("Name");
+    let name_title = colorize_string("Name", DarkGray, no_color);
     println!("{}: {}", name_title, task.get_property("name").unwrap());
 
-    let status_title = DarkGray.paint("Status");
-    println!("{}: {}", status_title, format_status(task.get_property("status").unwrap()));
+    let status_title = colorize_string("Status", DarkGray, no_color);
+    println!("{}: {}", status_title, format_status(task.get_property("status").unwrap(), no_color));
 
     task.get_all_properties().iter().filter(|entry| {
         entry.0 != "name" && entry.0 != "status" && entry.0 != "description" && entry.0 != "created" && entry.0 != "author"
     }).for_each(|entry| {
-        let title = DarkGray.paint(capitalize(entry.0));
+        let title = colorize_string(&capitalize(entry.0), DarkGray, no_color);
         println!("{}: {}", title, entry.1);
     });
 
     let description = task.get_property("description").unwrap_or(&empty_string);
     if !description.is_empty() {
-        let description_title = DarkGray.paint("Description");
+        let description_title = colorize_string("Description", DarkGray, no_color);
         println!("{}: {}", description_title, description);
     }
 
     if let Some(comments) = task.get_comments() {
         for comment in comments {
-            print_comment(comment);
+            print_comment(comment, no_color);
         }
     }
 }
 
-fn print_comment(comment: &Comment) {
-    println!("{}", DarkGray.paint("---------------"));
+fn print_comment(comment: &Comment, no_color: bool) {
+    let separator = colorize_string("---------------", DarkGray, no_color);
+    println!("{}", separator);
 
     if let Some(id) = comment.get_id() {
-        let id_title = DarkGray.paint("Comment ID");
+        let id_title = colorize_string("Comment ID", DarkGray, no_color);
         println!("{}: {}", id_title, id);
     }
 
@@ -511,33 +529,39 @@ fn print_comment(comment: &Comment) {
 
     let created = comment_properties.get("created").unwrap_or(&empty_string);
     if !created.is_empty() {
-        let created_title = DarkGray.paint("Created");
+        let created_title = colorize_string("Created", DarkGray, no_color);
         println!("{}: {}", created_title, format_datetime(created.parse().unwrap()));
     }
 
     let author = comment_properties.get("author").unwrap_or(&empty_string);
     if !author.is_empty() {
-        let author_title = DarkGray.paint("Author");
-        println!("{}: {}", author_title, format_author(author));
+        let author_title = colorize_string("Author", DarkGray, no_color);
+        println!("{}: {}", author_title, format_author(author, no_color));
     }
 
     println!("{}", comment.get_text());
 }
 
-fn format_status(status: &str) -> AnsiString {
-    match status {
-        "OPEN" => Red.paint("OPEN"),
-        "IN_PROGRESS" => Yellow.paint("IN_PROGRESS"),
-        "CLOSED" => Green.paint("CLOSED"),
-        s => s.into()
+fn format_status(status: &str, no_color: bool) -> AnsiString {
+    match no_color {
+        false => {
+            match status {
+                "OPEN" => Red.paint("OPEN"),
+                "IN_PROGRESS" => Yellow.paint("IN_PROGRESS"),
+                "CLOSED" => Green.paint("CLOSED"),
+                s => s.into()
+            }
+        },
+        true => status.into()
     }
+
 }
 
-fn format_author(author: &str) -> AnsiString {
-    Cyan.paint(author)
+fn format_author(author: &str, no_color: bool) -> AnsiString {
+    if no_color { author.into() } else { Cyan.paint(author) }
 }
 
-fn task_list(status: Option<String>, keyword: Option<String>, from: Option<String>, until: Option<String>, columns: Option<Vec<String>>) {
+fn task_list(status: Option<String>, keyword: Option<String>, from: Option<String>, until: Option<String>, columns: Option<Vec<String>>, no_color: bool) {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
             tasks.sort_by_key(|task| std::cmp::Reverse(task.get_id().unwrap().parse::<u64>().unwrap_or(0)));
@@ -580,7 +604,7 @@ fn task_list(status: Option<String>, keyword: Option<String>, from: Option<Strin
                     }
                 }
 
-                print_task_line(task, &columns);
+                print_task_line(task, &columns, no_color);
             }
         },
         Err(e) => {
@@ -589,7 +613,7 @@ fn task_list(status: Option<String>, keyword: Option<String>, from: Option<Strin
     }
 }
 
-fn print_task_line(task: Task, columns: &Option<Vec<String>>) {
+fn print_task_line(task: Task, columns: &Option<Vec<String>>, no_color: bool) {
     let columns = match columns {
         Some(columns) => columns,
         _ => &vec![String::from("id"), String::from("created"), String::from("status"), String::from("name")]
@@ -599,22 +623,32 @@ fn print_task_line(task: Task, columns: &Option<Vec<String>>) {
 
     columns.iter().for_each(|column| {
         let value = if column == "id" { &task.get_id().unwrap() } else { task.get_property(column).unwrap_or(&empty_string) };
-        print_column(column, &value);
+        print_column(column, &value, no_color);
     });
     println!();
 }
 
-fn print_column(column: &String, value: &String) {
-    match column.as_str() {
-        "id" => print!("{} ", DarkGray.paint(value)),
-        "created" => print!("{} ", Fixed(239).paint(format_datetime(value.parse().unwrap_or(0)))),
-        "status" => print!("{} ", format_status(value)),
-        "author" => print!("{} ", format_author(value)),
-        _ => print!("{} ", value),
+fn print_column(column: &String, value: &String, no_color: bool) {
+    match no_color {
+        false => {
+            match column.as_str() {
+                "id" => print!("{} ", DarkGray.paint(value)),
+                "created" => print!("{} ", Fixed(239).paint(format_datetime(value.parse().unwrap_or(0)))),
+                "status" => print!("{} ", format_status(value, no_color)),
+                "author" => print!("{} ", format_author(value, no_color)),
+                _ => print!("{} ", value),
+            }
+        },
+        true => {
+            match column.as_str() {
+                "created" => print!("{} ", format_datetime(value.parse().unwrap_or(0))),
+                _ => print!("{} ", value),
+            }
+        }
     }
 }
 
-fn task_stats() {
+fn task_stats(no_color: bool) {
     match gittask::list_tasks() {
         Ok(tasks) => {
             let mut total = 0;
@@ -637,15 +671,15 @@ fn task_stats() {
             println!("Total tasks: {total}");
             println!();
             match status_stats.get("OPEN") {
-                Some(count) => println!("{}: {}", format_status("OPEN"), count),
+                Some(count) => println!("{}: {}", format_status("OPEN", no_color), count),
                 _ => {}
             };
             match status_stats.get("IN_PROGRESS") {
-                Some(count) => println!("{}: {}", format_status("IN_PROGRESS"), count),
+                Some(count) => println!("{}: {}", format_status("IN_PROGRESS", no_color), count),
                 _ => {}
             };
             match status_stats.get("CLOSED") {
-                Some(count) => println!("{}: {}", format_status("CLOSED"), count),
+                Some(count) => println!("{}: {}", format_status("CLOSED", no_color), count),
                 _ => {}
             };
         },
