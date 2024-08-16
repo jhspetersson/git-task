@@ -381,7 +381,13 @@ fn get_ref_path_from_repo(repo: &Repository) -> String {
 
 pub fn set_ref_path(ref_path: &str) -> Result<(), String> {
     let repo = map_err!(Repository::open("."));
+
+    let current_reference = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
+    let commit = current_reference.peel_to_commit().unwrap();
+    map_err!(repo.reference(ref_path, commit.id(), true, "task.ref migrated"));
+
     let mut config = map_err!(repo.config());
-    let result = map_err!(config.set_str("task.ref", ref_path));
-    Ok(result)
+    map_err!(config.set_str("task.ref", ref_path));
+
+    Ok(())
 }
