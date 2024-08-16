@@ -135,6 +135,11 @@ enum Command {
     },
     /// Delete all tasks
     Clear,
+    /// Set configuration parameters
+    Config {
+        #[command(subcommand)]
+        subcommand: ConfigCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -156,6 +161,24 @@ enum CommentCommand {
     },
 }
 
+#[derive(Subcommand)]
+enum ConfigCommand {
+    /// Get configuration parameter
+    Get {
+        /// parameter name
+        param: String,
+    },
+    /// Set configuration parameter
+    Set {
+        /// parameter name
+        param: String,
+        /// parameter value
+        value: String,
+    },
+    /// List configuration parameters
+    List,
+}
+
 fn main() {
     let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
@@ -174,6 +197,7 @@ fn main() {
         Some(Command::Stats { no_color }) => task_stats(no_color),
         Some(Command::Delete { ids }) => task_delete(ids),
         Some(Command::Clear) => task_clear(),
+        Some(Command::Config { subcommand }) => task_config(subcommand),
         None => { }
     }
 }
@@ -680,4 +704,40 @@ fn task_stats(no_color: bool) {
         },
         Err(e) => eprintln!("ERROR: {e}")
     }
+}
+
+fn task_config(subcommand: ConfigCommand) {
+    match subcommand {
+        ConfigCommand::Get { param } => task_config_get(param),
+        ConfigCommand::Set { param, value } => task_config_set(param, value),
+        ConfigCommand::List => task_config_list(),
+    }
+}
+
+fn task_config_get(param: String) {
+    match param.as_str() {
+        "task.ref" => {
+            match gittask::get_ref_path() {
+                Ok(ref_path) => println!("{ref_path}"),
+                Err(e) => eprintln!("ERROR: {e}")
+            }
+        },
+        _ => eprintln!("Unknown parameter: {}", param)
+    }
+}
+
+fn task_config_set(param: String, value: String) {
+    match param.as_str() {
+        "task.ref" => {
+            match gittask::set_ref_path(&value) {
+                Ok(_) => println!("{param} has been updated"),
+                Err(e) => eprintln!("ERROR: {e}")
+            }
+        },
+        _ => eprintln!("Unknown parameter: {}", param)
+    }
+}
+
+fn task_config_list() {
+    println!("task.ref");
 }

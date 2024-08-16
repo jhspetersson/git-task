@@ -176,7 +176,7 @@ macro_rules! map_err {
 
 pub fn list_tasks() -> Result<Vec<Task>, String> {
     let repo = map_err!(Repository::open("."));
-    let task_ref = map_err!(repo.find_reference(get_ref_path()));
+    let task_ref = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut result = vec![];
@@ -197,7 +197,7 @@ pub fn list_tasks() -> Result<Vec<Task>, String> {
 
 pub fn find_task(id: &str) -> Result<Option<Task>, String> {
     let repo = map_err!(Repository::open("."));
-    let task_ref = map_err!(repo.find_reference(get_ref_path()));
+    let task_ref = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut result = None;
@@ -223,7 +223,7 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
 
 pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
     let repo = map_err!(Repository::open("."));
-    let task_ref = map_err!(repo.find_reference(get_ref_path()));
+    let task_ref = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut treebuilder = map_err!(repo.treebuilder(Some(&task_tree)));
@@ -236,14 +236,14 @@ pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
     let parents = vec![parent_commit];
     let me = &repo.signature().unwrap();
 
-    map_err!(repo.commit(Some(get_ref_path()), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
     Ok(())
 }
 
 pub fn clear_tasks() -> Result<u64, String> {
     let repo = map_err!(Repository::open("."));
-    let task_ref = map_err!(repo.find_reference(get_ref_path()));
+    let task_ref = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut treebuilder = map_err!(repo.treebuilder(Some(&task_tree)));
@@ -255,14 +255,14 @@ pub fn clear_tasks() -> Result<u64, String> {
     let parents = vec![parent_commit];
     let me = &repo.signature().unwrap();
 
-    map_err!(repo.commit(Some(get_ref_path()), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task_count)
 }
 
 pub fn create_task(mut task: Task) -> Result<String, String> {
     let repo = map_err!(Repository::open("."));
-    let task_ref_result = repo.find_reference(get_ref_path());
+    let task_ref_result = repo.find_reference(&get_ref_path_from_repo(&repo));
     let source_tree = match task_ref_result {
         Ok(ref reference) => {
             match reference.peel_to_tree() {
@@ -293,14 +293,14 @@ pub fn create_task(mut task: Task) -> Result<String, String> {
             parents.push(parent_commit.unwrap());
         }
     }
-    map_err!(repo.commit(Some(get_ref_path()), me, me, "create task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "create task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task_id.unwrap())
 }
 
 pub fn update_task(task: Task) -> Result<String, String> {
     let repo = map_err!(Repository::open("."));
-    let task_ref_result = repo.find_reference(get_ref_path()).unwrap();
+    let task_ref_result = repo.find_reference(&get_ref_path_from_repo(&repo)).unwrap();
     let parent_commit = task_ref_result.peel_to_commit().unwrap();
     let source_tree = task_ref_result.peel_to_tree().unwrap();
     let string_content = serde_json::to_string(&task).unwrap();
@@ -313,14 +313,14 @@ pub fn update_task(task: Task) -> Result<String, String> {
 
     let me = &repo.signature().unwrap();
     let parents = vec![parent_commit];
-    map_err!(repo.commit(Some(get_ref_path()), me, me, "update task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "update task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task_id)
 }
 
 fn get_next_id() -> Result<String, String> {
     let repo = map_err!(Repository::open("."));
-    let task_ref = map_err!(repo.find_reference(get_ref_path()));
+    let task_ref = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut result = 0;
@@ -364,6 +364,24 @@ fn get_current_user() -> Result<Option<String>, String> {
     }
 }
 
-fn get_ref_path<'a>() -> &'a str {
-    "refs/tasks/tasks"
+pub fn get_ref_path() -> Result<String, String> {
+    let repo = map_err!(Repository::open("."));
+    Ok(get_ref_path_from_repo(&repo))
+}
+
+fn get_ref_path_from_repo(repo: &Repository) -> String {
+    if let Ok(config) = repo.config() {
+        if let Ok(ref_path) = config.get_string("task.ref") {
+            return ref_path;
+        }
+    }
+
+    "refs/tasks/tasks".to_string()
+}
+
+pub fn set_ref_path(ref_path: &str) -> Result<(), String> {
+    let repo = map_err!(Repository::open("."));
+    let mut config = map_err!(repo.config());
+    let result = map_err!(config.set_str("task.ref", ref_path));
+    Ok(result)
 }

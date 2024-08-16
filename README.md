@@ -134,6 +134,17 @@ Deletes all tasks.
 
     git task clear
 
+### config
+
+Maintain configuration parameters.
+
+    git task config list
+    git task config get task.ref
+
+By default `git-task` saves everything under a custom ref. You can change that to a regular branch like this:
+
+    git task config set task.ref refs/heads/tasks
+
 ### help
 
 Show available commands or their arguments.
