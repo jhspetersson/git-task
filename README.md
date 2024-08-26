@@ -48,6 +48,11 @@ Show specific columns:
 
     git task list --columns id,status,name
 
+Sorting by one or more task properties:
+
+    git task list --sort author
+    git task list --sort "status, created desc"
+
 ### show
 
 Shows one task with all the properties (like id, name, status, description and a bunch of custom ones, actually, you can add whatever you like).

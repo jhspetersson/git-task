@@ -42,6 +42,9 @@ enum Command {
         /// comma-separated list of columns
         #[arg(short, long, value_delimiter = ',')]
         columns: Option<Vec<String>>,
+        /// soring by one or more task properties, e.g. --sort "author, created desc"
+        #[arg(long, value_delimiter = ',')]
+        sort: Option<Vec<String>>,
         /// disable colors
         #[arg(long)]
         no_color: bool,
@@ -183,7 +186,7 @@ fn main() {
     let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
     match args.command {
-        Some(Command::List { status, keyword, from, until, columns, no_color }) => task_list(status, keyword, from, until, columns, no_color),
+        Some(Command::List { status, keyword, from, until, columns, sort, no_color }) => task_list(status, keyword, from, until, columns, sort, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
         Some(Command::Create { name }) => task_create(name),
         Some(Command::Status { id, status }) => task_status(id, status),
@@ -580,10 +583,47 @@ fn format_author(author: &str, no_color: bool) -> AnsiString {
     if no_color { author.into() } else { Cyan.paint(author) }
 }
 
-fn task_list(status: Option<String>, keyword: Option<String>, from: Option<String>, until: Option<String>, columns: Option<Vec<String>>, no_color: bool) {
+fn task_list(status: Option<String>,
+             keyword: Option<String>,
+             from: Option<String>,
+             until: Option<String>,
+             columns: Option<Vec<String>>,
+             sort: Option<Vec<String>>,
+             no_color: bool) {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
-            tasks.sort_by_key(|task| std::cmp::Reverse(task.get_id().unwrap().parse::<u64>().unwrap_or(0)));
+            tasks.sort_by(|a, b| {
+                match &sort {
+                    Some(sort) if !sort.is_empty() => {
+                        let mut ordering = None;
+                        for s in sort {
+                            let mut s = s.trim();
+                            let comparison;
+                            if s.to_lowercase().ends_with(" desc") {
+                                s = s[..(s.len() - "desc".len())].trim();
+                                comparison = b.get_property(&s).unwrap_or(&String::new()).to_lowercase().cmp(&a.get_property(&s).unwrap_or(&String::new()).to_lowercase());
+                            } else {
+                                if s.to_lowercase().ends_with(" asc") {
+                                    s = s[..(s.len() - "asc".len())].trim();
+                                }
+                                comparison = a.get_property(&s).unwrap_or(&String::new()).to_lowercase().cmp(&b.get_property(&s).unwrap_or(&String::new()).to_lowercase());
+                            }
+
+                            if ordering.is_none() {
+                                ordering = Some(comparison);
+                            } else {
+                                ordering = Some(ordering.unwrap().then(comparison));
+                            }
+                        }
+
+                        ordering.unwrap()
+                    },
+                    _ => a.get_id().unwrap().parse::<u64>().unwrap_or(0).cmp(&b.get_id().unwrap().parse::<u64>().unwrap_or(0))
+                }
+            });
+            // tasks.sort_by_key(|task| {
+            //     std::cmp::Reverse()
+            // });
 
             let from = parse_date(from);
             let until = parse_date(until);
