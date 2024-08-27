@@ -10,10 +10,9 @@ use clap::{Parser, Subcommand};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::{Open, Closed};
-use regex::Regex;
 
 use gittask::{Comment, Task};
-use crate::github::{get_github_issue, get_runtime, list_github_issues, update_github_issue_status};
+use crate::github::{get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
 use crate::util::{capitalize, colorize_string, format_datetime, parse_date, read_from_pipe};
 
 #[derive(Parser)]
@@ -371,26 +370,20 @@ fn task_pull(ids: Option<Vec<String>>, no_comments: bool) {
 fn get_user_repo() -> Result<(String, String), String> {
     match gittask::list_remotes() {
         Ok(remotes) => {
-            let user_repo = remotes.into_iter().map(|ref remote| {
-                match Regex::new("https://github.com/([a-z0-9-]+)/([a-z0-9-]+)\\.?").unwrap().captures(&remote.to_lowercase()) {
-                    Some(caps) if caps.len() == 3 => {
-                        let user = caps.get(1).unwrap().as_str().to_string();
-                        let repo = caps.get(2).unwrap().as_str().to_string();
-                        Some((user, repo))
-                    },
-                    _ => None,
-                }
-            }).filter(|s| s.is_some()).collect::<Vec<_>>();
+            match list_github_origins(remotes) {
+                Ok(user_repo) => {
+                    if user_repo.is_empty() {
+                        return Err("No GitHub remotes".to_string());
+                    }
 
-            if user_repo.is_empty() {
-                return Err("No GitHub remotes".to_string());
+                    if user_repo.len() > 1 {
+                        return Err("More than one GitHub remote found".to_owned());
+                    }
+
+                    Ok(user_repo.first().unwrap().clone())
+                },
+                Err(e) => Err(e)
             }
-
-            if user_repo.len() > 1 {
-                return Err("More than one GitHub remote found".to_owned());
-            }
-
-            Ok(user_repo.first().unwrap().to_owned().unwrap())
         },
         Err(e) => Err(e)
     }
@@ -621,9 +614,6 @@ fn task_list(status: Option<String>,
                     _ => a.get_id().unwrap().parse::<u64>().unwrap_or(0).cmp(&b.get_id().unwrap().parse::<u64>().unwrap_or(0))
                 }
             });
-            // tasks.sort_by_key(|task| {
-            //     std::cmp::Reverse()
-            // });
 
             let from = parse_date(from);
             let until = parse_date(until);

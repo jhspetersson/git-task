@@ -5,8 +5,10 @@ use futures_util::TryStreamExt;
 use octocrab::models::IssueState::Open;
 use octocrab::{params, Octocrab};
 use octocrab::models::IssueState;
+use regex::Regex;
 use tokio::pin;
 use tokio::runtime::Runtime;
+
 use gittask::{Comment, Task};
 
 pub fn get_runtime() -> Runtime {
@@ -113,4 +115,19 @@ async fn get_octocrab_instance() -> Arc<Octocrab> {
         Ok(token) => Arc::new(Octocrab::builder().personal_token(token).build().unwrap()),
         _ => octocrab::instance()
     }
+}
+
+pub fn list_github_origins(remotes: Vec<String>) -> Result<Vec<(String, String)>, String> {
+    let user_repo = remotes.into_iter().map(|ref remote| {
+        match Regex::new("https://github.com/([a-z0-9-]+)/([a-z0-9-]+)\\.?").unwrap().captures(&remote.to_lowercase()) {
+            Some(caps) if caps.len() == 3 => {
+                let user = caps.get(1).unwrap().as_str().to_string();
+                let repo = caps.get(2).unwrap().as_str().to_string();
+                Some((user, repo))
+            },
+            _ => None,
+        }
+    }).filter_map(|s| s).collect::<Vec<(String, String)>>();
+
+    Ok(user_repo)
 }
