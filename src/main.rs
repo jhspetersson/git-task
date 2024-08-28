@@ -38,6 +38,9 @@ enum Command {
         /// older than date, YYYY-MM-DD, inclusive
         #[arg(short, long)]
         until: Option<String>,
+        /// filter by author
+        #[arg(long)]
+        author: Option<String>,
         /// comma-separated list of columns
         #[arg(short, long, value_delimiter = ',')]
         columns: Option<Vec<String>>,
@@ -185,7 +188,7 @@ fn main() {
     let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
     match args.command {
-        Some(Command::List { status, keyword, from, until, columns, sort, no_color }) => task_list(status, keyword, from, until, columns, sort, no_color),
+        Some(Command::List { status, keyword, from, until, author, columns, sort, no_color }) => task_list(status, keyword, from, until, author, columns, sort, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
         Some(Command::Create { name }) => task_create(name),
         Some(Command::Status { id, status }) => task_status(id, status),
@@ -580,6 +583,7 @@ fn task_list(status: Option<String>,
              keyword: Option<String>,
              from: Option<String>,
              until: Option<String>,
+             author: Option<String>,
              columns: Option<Vec<String>>,
              sort: Option<Vec<String>>,
              no_color: bool) {
@@ -649,6 +653,14 @@ fn task_list(status: Option<String>,
                             if created > until.unwrap().latest().unwrap() {
                                 continue;
                             }
+                        }
+                    }
+                }
+
+                if author.as_ref().is_some() {
+                    if let Some(task_author) = task.get_property("author") {
+                        if author.as_ref().unwrap().to_lowercase() != task_author.to_lowercase() {
+                            continue;
                         }
                     }
                 }

@@ -44,6 +44,10 @@ Filter by date:
     git task list --from 2024-01-01
     git task list --until 2023-12-31
 
+Filter by author:
+
+    git task list --author jhspetersson
+
 Show specific columns:
 
     git task list --columns id,status,name
