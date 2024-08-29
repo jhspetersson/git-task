@@ -47,6 +47,9 @@ enum Command {
         /// soring by one or more task properties, e.g. --sort "author, created desc"
         #[arg(long, value_delimiter = ',')]
         sort: Option<Vec<String>>,
+        /// limit displayed task count
+        #[arg(short, long)]
+        limit: Option<usize>,
         /// disable colors
         #[arg(long)]
         no_color: bool,
@@ -188,7 +191,7 @@ fn main() {
     let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
     match args.command {
-        Some(Command::List { status, keyword, from, until, author, columns, sort, no_color }) => task_list(status, keyword, from, until, author, columns, sort, no_color),
+        Some(Command::List { status, keyword, from, until, author, columns, sort, limit, no_color }) => task_list(status, keyword, from, until, author, columns, sort, limit, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
         Some(Command::Create { name }) => task_create(name),
         Some(Command::Status { id, status }) => task_status(id, status),
@@ -586,6 +589,7 @@ fn task_list(status: Option<String>,
              author: Option<String>,
              columns: Option<Vec<String>>,
              sort: Option<Vec<String>>,
+             limit: Option<usize>,
              no_color: bool) {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
@@ -622,6 +626,7 @@ fn task_list(status: Option<String>,
             let from = parse_date(from);
             let until = parse_date(until);
 
+            let mut count = 0;
             for task in tasks {
                 if status.as_ref().is_some() {
                     let task_status = task.get_property("status").unwrap();
@@ -665,7 +670,15 @@ fn task_list(status: Option<String>,
                     }
                 }
 
+                if let Some(limit) = limit {
+                    if count >= limit {
+                        break;
+                    }
+                }
+
                 print_task_line(task, &columns, no_color);
+
+                count += 1;
             }
         },
         Err(e) => {
