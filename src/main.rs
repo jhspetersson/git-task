@@ -117,6 +117,9 @@ enum Command {
     Push {
         /// space separated task IDs
         ids: Vec<String>,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
         /// disable colors
         #[arg(long)]
         no_color: bool,
@@ -125,6 +128,9 @@ enum Command {
     Pull {
         /// space separated task IDs
         ids: Option<Vec<String>>,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
         /// Don't import task comments
         #[arg(short, long)]
         no_comments: bool,
@@ -200,8 +206,8 @@ fn main() {
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
-        Some(Command::Push { ids, no_color }) => task_push(ids, no_color),
-        Some(Command::Pull { ids, no_comments }) => task_pull(ids, no_comments),
+        Some(Command::Push { ids, remote, no_color }) => task_push(ids, remote, no_color),
+        Some(Command::Pull { ids, remote, no_comments }) => task_pull(ids, remote, no_comments),
         Some(Command::Stats { no_color }) => task_stats(no_color),
         Some(Command::Delete { ids }) => task_delete(ids),
         Some(Command::Clear) => task_clear(),
@@ -336,8 +342,8 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) {
     }
 }
 
-fn task_pull(ids: Option<Vec<String>>, no_comments: bool) {
-    match get_user_repo() {
+fn task_pull(ids: Option<Vec<String>>, remote: Option<String>, no_comments: bool) {
+    match get_user_repo(remote) {
         Ok((user, repo)) => {
             println!("Importing tasks from {user}/{repo}...");
 
@@ -373,8 +379,8 @@ fn task_pull(ids: Option<Vec<String>>, no_comments: bool) {
     }
 }
 
-fn get_user_repo() -> Result<(String, String), String> {
-    match gittask::list_remotes() {
+fn get_user_repo(remote: Option<String>) -> Result<(String, String), String> {
+    match gittask::list_remotes(remote) {
         Ok(remotes) => {
             match list_github_origins(remotes) {
                 Ok(user_repo) => {
@@ -383,7 +389,7 @@ fn get_user_repo() -> Result<(String, String), String> {
                     }
 
                     if user_repo.len() > 1 {
-                        return Err("More than one GitHub remote found".to_owned());
+                        return Err("More than one GitHub remote found. Please specify with --remote option.".to_owned());
                     }
 
                     Ok(user_repo.first().unwrap().clone())
@@ -430,13 +436,13 @@ fn task_export(ids: Option<Vec<String>>, format: Option<String>, pretty: bool) {
     }
 }
 
-fn task_push(ids: Vec<String>, no_color: bool) {
+fn task_push(ids: Vec<String>, remote: Option<String>, no_color: bool) {
     if ids.is_empty() {
         eprintln!("Select one or more task IDs");
         return;
     }
 
-    match get_user_repo() {
+    match get_user_repo(remote) {
         Ok((user, repo)) => {
             let runtime = get_runtime();
             for id in ids {

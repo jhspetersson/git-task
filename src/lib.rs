@@ -342,10 +342,13 @@ fn get_next_id() -> Result<String, String> {
     Ok((result + 1).to_string())
 }
 
-pub fn list_remotes() -> Result<Vec<String>, String> {
+pub fn list_remotes(remote: Option<String>) -> Result<Vec<String>, String> {
     let repo = map_err!(Repository::open("."));
     let remotes = map_err!(repo.remotes());
-    Ok(remotes.iter().map(|s| repo.find_remote(s.unwrap()).unwrap().url().unwrap().to_owned()).collect())
+    Ok(remotes.iter()
+        .filter(|s| remote.is_none() || remote.as_ref().unwrap().as_str() == s.unwrap())
+        .map(|s| repo.find_remote(s.unwrap()).unwrap().url().unwrap().to_owned())
+        .collect())
 }
 
 fn get_current_timestamp() -> u64 {
