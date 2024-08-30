@@ -727,35 +727,46 @@ fn task_stats(no_color: bool) {
         Ok(tasks) => {
             let mut total = 0;
             let mut status_stats = HashMap::<String, i32>::new();
+            let mut author_stats = HashMap::<String, i32>::new();
+
             for task in tasks {
                 total += 1;
-                match task.get_property("status") {
-                    Some(status) => {
-                        let current_value = match status_stats.get(status) {
-                            Some(&value) => value,
-                            _ => 0
-                        };
-                        let key = status.clone();
-                        status_stats.insert(key, current_value + 1);
-                    },
-                    _ => {}
+
+                if let Some(status) = task.get_property("status") {
+                    status_stats.entry(status.to_owned()).and_modify(|count| *count += 1).or_insert(1);
+                }
+
+                if let Some(author) = task.get_property("author") {
+                    author_stats.entry(author.to_owned()).and_modify(|count| *count += 1).or_insert(1);
                 }
             }
 
             println!("Total tasks: {total}");
             println!();
-            match status_stats.get("OPEN") {
-                Some(count) => println!("{}: {}", format_status("OPEN", no_color), count),
-                _ => {}
-            };
-            match status_stats.get("IN_PROGRESS") {
-                Some(count) => println!("{}: {}", format_status("IN_PROGRESS", no_color), count),
-                _ => {}
-            };
-            match status_stats.get("CLOSED") {
-                Some(count) => println!("{}: {}", format_status("CLOSED", no_color), count),
-                _ => {}
-            };
+
+            if let Some(count) = status_stats.get("OPEN") {
+                println!("{}: {}", format_status("OPEN", no_color), count);
+            }
+
+            if let Some(count) = status_stats.get("IN_PROGRESS") {
+                println!("{}: {}", format_status("IN_PROGRESS", no_color), count);
+            }
+
+            if let Some(count) = status_stats.get("CLOSED") {
+                println!("{}: {}", format_status("CLOSED", no_color), count);
+            }
+
+            if !author_stats.is_empty() {
+                println!();
+                println!("Top 10 authors:");
+
+                let mut author_stats = author_stats.iter().collect::<Vec<_>>();
+                author_stats.sort_by(|a, b| b.1.cmp(a.1));
+
+                for author in author_stats.iter().take(10) {
+                    println!("{}: {}", format_author(&author.0, no_color), author.1);
+                }
+            }
         },
         Err(e) => eprintln!("ERROR: {e}")
     }

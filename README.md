@@ -131,7 +131,7 @@ For private repositories you have to set up `GITHUB_TOKEN` environment variable.
 
 ### stats
 
-Show total task count and count by status.
+Show total task count, count by status and top 10 authors.
 
     git task stats
 
