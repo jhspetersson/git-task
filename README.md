@@ -35,6 +35,14 @@ Show only open tasks:
     git task list -s o
     git task list --status o
 
+Show only closed tasks:
+
+    git task list -s c
+
+Show only tasks with a custom status:
+
+    git task list --status DEPLOYED
+
 Filter by keyword:
 
     git task list -k linux
@@ -115,8 +123,8 @@ Export all or selected tasks, only JSON output format is currently supported.
 
 ### push
 
-Push status of the selected tasks to the remote source (e.g., GitHub).
-You have to set up `GITHUB_TOKEN` environment variable.
+Push status of the selected tasks to the remote source.
+For GitHub you have to set up `GITHUB_TOKEN` environment variable.
 
     git task push 2 3 5
 
