@@ -253,17 +253,27 @@ fn task_get(id: String, prop_name: String) {
 }
 
 fn task_set(id: String, prop_name: String, value: String) {
-    match gittask::find_task(&id) {
-        Ok(Some(mut task)) => {
-            task.set_property(prop_name, value);
-
-            match gittask::update_task(task) {
-                Ok(_) => println!("Task ID {id} updated"),
+    match prop_name.as_str() {
+        "id" => {
+            match gittask::update_task_id(&id, &value) {
+                Ok(_) => println!("Task ID {id} -> {value} updated"),
                 Err(e) => eprintln!("ERROR: {e}"),
             }
         },
-        Ok(None) => eprintln!("Task ID {id} not found"),
-        Err(e) => eprintln!("ERROR: {e}"),
+        _ => {
+            match gittask::find_task(&id) {
+                Ok(Some(mut task)) => {
+                    task.set_property(prop_name, value);
+
+                    match gittask::update_task(task) {
+                        Ok(_) => println!("Task ID {id} updated"),
+                        Err(e) => eprintln!("ERROR: {e}"),
+                    }
+                },
+                Ok(None) => eprintln!("Task ID {id} not found"),
+                Err(e) => eprintln!("ERROR: {e}"),
+            }
+        }
     }
 }
 

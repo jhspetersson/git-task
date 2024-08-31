@@ -342,6 +342,15 @@ fn get_next_id() -> Result<String, String> {
     Ok((result + 1).to_string())
 }
 
+pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
+    let mut task = find_task(&id)?.unwrap();
+    task.set_id(new_id.to_string());
+    create_task(task)?;
+    delete_tasks(&[&id])?;
+
+    Ok(())
+}
+
 pub fn list_remotes(remote: Option<String>) -> Result<Vec<String>, String> {
     let repo = map_err!(Repository::open("."));
     let remotes = map_err!(repo.remotes());
