@@ -199,24 +199,17 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
     let repo = map_err!(Repository::open("."));
     let task_ref = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
     let task_tree = map_err!(task_ref.peel_to_tree());
+    let result = match task_tree.get_name(id) {
+        Some(entry) => {
+            let oid = entry.id();
+            let blob = repo.find_blob(oid).unwrap();
+            let content = blob.content();
+            let task = serde_json::from_slice(content).unwrap();
 
-    let mut result = None;
-
-    let _ = map_err!(task_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
-        let entry_name = entry.name().unwrap();
-        if entry_name != id {
-            return TreeWalkResult::Skip
-        }
-
-        let oid = entry.id();
-        let blob = repo.find_blob(oid).unwrap();
-        let content = blob.content();
-
-        let task = serde_json::from_slice(content).unwrap();
-        result = Some(task);
-
-        TreeWalkResult::Abort
-    }));
+            Some(task)
+        },
+        None => None,
+    };
 
     Ok(result)
 }
