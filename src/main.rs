@@ -220,7 +220,7 @@ fn task_create(name: String) {
     let task = Task::new(name, String::from(""), "OPEN".to_owned());
 
     match gittask::create_task(task.unwrap()) {
-        Ok(id) => println!("Task ID {id} created"),
+        Ok(task) => println!("Task ID {} created", task.get_id().unwrap()),
         Err(e) => eprintln!("ERROR: {e}"),
     };
 }
@@ -343,7 +343,7 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) {
             }
 
             match gittask::create_task(task) {
-                Ok(id) => println!("Task ID {id} imported"),
+                Ok(_) => println!("Task ID {id} imported"),
                 Err(e) => eprintln!("ERROR: {e}"),
             }
         }
@@ -363,7 +363,7 @@ fn task_pull(ids: Option<Vec<String>>, remote: Option<String>, no_comments: bool
                     match get_github_issue(&runtime, &user, &repo, id.parse().unwrap(), !no_comments) {
                         Some(task) => {
                             match gittask::create_task(task) {
-                                Ok(id) => println!("Task ID {id} imported"),
+                                Ok(_) => println!("Task ID {id} imported"),
                                 Err(e) => eprintln!("ERROR: {e}"),
                             }
                         },
@@ -378,7 +378,7 @@ fn task_pull(ids: Option<Vec<String>>, remote: Option<String>, no_comments: bool
                 } else {
                     for task in tasks {
                         match gittask::create_task(task) {
-                            Ok(id) => println!("Task ID {id} imported"),
+                            Ok(task) => println!("Task ID {} imported", task.get_id().unwrap()),
                             Err(e) => eprintln!("ERROR: {e}"),
                         }
                     }

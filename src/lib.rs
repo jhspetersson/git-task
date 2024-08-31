@@ -134,7 +134,7 @@ impl Task {
         let index = self.comments.as_ref().unwrap().iter().position(|comment| comment.get_id().unwrap() == id);
 
         if index.is_none() {
-            return Err(format!("Comment ID {} not found", id.clone()));
+            return Err(format!("Comment ID {id} not found"));
         }
 
         self.comments.as_mut().unwrap().remove(index.unwrap());
@@ -260,7 +260,7 @@ pub fn clear_tasks() -> Result<u64, String> {
     Ok(task_count)
 }
 
-pub fn create_task(mut task: Task) -> Result<String, String> {
+pub fn create_task(mut task: Task) -> Result<Task, String> {
     let repo = map_err!(Repository::open("."));
     let task_ref_result = repo.find_reference(&get_ref_path_from_repo(&repo));
     let source_tree = match task_ref_result {
@@ -273,16 +273,15 @@ pub fn create_task(mut task: Task) -> Result<String, String> {
         _ => { None }
     };
 
-    let task_id = if task.get_id().is_some() { task.get_id() } else {
+    if task.get_id().is_none() {
         let id = get_next_id().unwrap_or("1".to_string());
-        task.set_id(id.clone());
-        Some(id)
-    };
+        task.set_id(id);
+    }
     let string_content = serde_json::to_string(&task).unwrap();
     let content = string_content.as_bytes();
     let oid = repo.blob(content).unwrap();
     let mut treebuilder = map_err!(repo.treebuilder(source_tree.as_ref()));
-    map_err!(treebuilder.insert(task_id.clone().unwrap(), oid, FileMode::Blob.into()));
+    map_err!(treebuilder.insert(&task.get_id().unwrap(), oid, FileMode::Blob.into()));
     let tree_oid = map_err!(treebuilder.write());
 
     let me = &repo.signature().unwrap();
@@ -295,7 +294,7 @@ pub fn create_task(mut task: Task) -> Result<String, String> {
     }
     map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "create task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
-    Ok(task_id.unwrap())
+    Ok(task)
 }
 
 pub fn update_task(task: Task) -> Result<String, String> {
@@ -307,15 +306,14 @@ pub fn update_task(task: Task) -> Result<String, String> {
     let content = string_content.as_bytes();
     let oid = repo.blob(content).unwrap();
     let mut treebuilder = map_err!(repo.treebuilder(Some(&source_tree)));
-    let task_id = task.get_id().unwrap();
-    map_err!(treebuilder.insert(task_id.clone(), oid, FileMode::Blob.into()));
+    map_err!(treebuilder.insert(&task.get_id().unwrap(), oid, FileMode::Blob.into()));
     let tree_oid = map_err!(treebuilder.write());
 
     let me = &repo.signature().unwrap();
     let parents = vec![parent_commit];
     map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "update task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
 
-    Ok(task_id)
+    Ok(task.get_id().unwrap())
 }
 
 fn get_next_id() -> Result<String, String> {
