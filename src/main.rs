@@ -26,31 +26,31 @@ struct Args {
 enum Command {
     /// List all tasks
     List {
-        /// filter by status (o - OPEN, i - IN_PROGRESS, c - CLOSED)
+        /// Filter by status (o - OPEN, i - IN_PROGRESS, c - CLOSED)
         #[arg(short, long)]
         status: Option<String>,
-        /// filter by keyword
+        /// Filter by keyword
         #[arg(short, long)]
         keyword: Option<String>,
-        /// newer than date, YYYY-MM-DD, inclusive
+        /// Newer than date, YYYY-MM-DD, inclusive
         #[arg(short, long)]
         from: Option<String>,
-        /// older than date, YYYY-MM-DD, inclusive
+        /// Older than date, YYYY-MM-DD, inclusive
         #[arg(short, long)]
         until: Option<String>,
-        /// filter by author
+        /// Filter by author
         #[arg(long)]
         author: Option<String>,
-        /// comma-separated list of columns
+        /// Comma-separated list of columns
         #[arg(short, long, value_delimiter = ',')]
         columns: Option<Vec<String>>,
-        /// soring by one or more task properties, e.g. --sort "author, created desc"
+        /// Soring by one or more task properties, e.g. --sort "author, created desc"
         #[arg(long, value_delimiter = ',')]
         sort: Option<Vec<String>>,
-        /// limit displayed task count
+        /// Limit displayed task count
         #[arg(short, long)]
         limit: Option<usize>,
-        /// disable colors
+        /// Disable colors
         #[arg(long)]
         no_color: bool,
     },
@@ -58,7 +58,7 @@ enum Command {
     Show {
         /// task ID
         id: String,
-        /// disable colors
+        /// Disable colors
         #[arg(long)]
         no_color: bool,
     },
@@ -120,7 +120,7 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// disable colors
+        /// Disable colors
         #[arg(long)]
         no_color: bool,
     },
@@ -140,7 +140,7 @@ enum Command {
     },
     /// Show total task count and count by status
     Stats {
-        /// disable colors
+        /// Disable colors
         #[arg(long)]
         no_color: bool,
     },
