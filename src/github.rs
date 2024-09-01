@@ -120,8 +120,8 @@ async fn update_issue_status(user: &str, repo: &str, n: u64, state: IssueState) 
 }
 
 pub fn delete_github_issue(user: &String, repo: &String, n: u64) -> Result<(), String> {
-    match std::env::var("GITHUB_TOKEN") {
-        Ok(token) => {
+    match get_token_from_env() {
+        Some(token) => {
             let issue_id = get_runtime().block_on(get_issue_id(user, repo, n));
             if issue_id.is_err() {
                 return Err("Could not match task ID with GitHub internal issue ID.".to_string());
@@ -160,7 +160,7 @@ pub fn delete_github_issue(user: &String, repo: &String, n: u64) -> Result<(), S
                 None => Err("Response data not found".to_string())
             }
         },
-        _ => Err("Could not find GITHUB_TOKEN environment variable.".to_string()),
+        None => Err("Could not find GITHUB_TOKEN environment variable.".to_string()),
     }
 }
 
@@ -174,9 +174,9 @@ async fn get_issue_id(user: &String, repo: &String, n: u64) -> Result<String, St
 }
 
 async fn get_octocrab_instance() -> Arc<Octocrab> {
-    match std::env::var("GITHUB_TOKEN") {
-        Ok(token) => Arc::new(Octocrab::builder().personal_token(token).build().unwrap()),
-        _ => octocrab::instance()
+    match get_token_from_env() {
+        Some(token) => Arc::new(Octocrab::builder().personal_token(token).build().unwrap()),
+        None => octocrab::instance()
     }
 }
 
@@ -193,4 +193,8 @@ pub fn list_github_origins(remotes: Vec<String>) -> Result<Vec<(String, String)>
     }).filter_map(|s| s).collect::<Vec<(String, String)>>();
 
     Ok(user_repo)
+}
+
+fn get_token_from_env() -> Option<String> {
+    std::env::var("GITHUB_TOKEN").or(std::env::var("GITHUB_API_TOKEN")).ok()
 }

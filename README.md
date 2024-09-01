@@ -18,7 +18,7 @@ Now you can switch to some git repo and run it as:
 
     git task create "My first task"
 
-Or import issues from GitHub (`GITHUB_TOKEN` env variable might be needed to be set up if you have a private repository):
+Or import issues from GitHub (`GITHUB_TOKEN` or `GITHUB_API_TOKEN` env variable might be needed to be set up if you have a private repository):
 
     git task pull
 
@@ -124,14 +124,14 @@ Export all or selected tasks, only JSON output format is currently supported.
 ### push
 
 Push status of the selected tasks to the remote source.
-For GitHub you have to set up `GITHUB_TOKEN` environment variable.
+For GitHub you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable.
 
     git task push 2 3 5
 
 ### pull
 
 Grab issues from remote source (currently, only GitHub is supported).
-For private repositories you have to set up `GITHUB_TOKEN` environment variable.
+For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable.
 
     git task pull
     git task pull --no-comments
