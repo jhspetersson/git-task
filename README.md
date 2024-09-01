@@ -150,6 +150,10 @@ Deletes one or more tasks by their IDs.
     git task delete 1
     git task delete 2 3 5
 
+Also delete a corresponding GitHub issue:
+
+    git task delete 120 --push
+
 ### clear
 
 Deletes all tasks.

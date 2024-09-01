@@ -12,7 +12,7 @@ use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::{Open, Closed};
 
 use gittask::{Comment, Task};
-use crate::github::{get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
+use crate::github::{delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
 use crate::util::{capitalize, colorize_string, format_datetime, parse_date, read_from_pipe};
 
 #[derive(Parser)]
@@ -146,6 +146,12 @@ enum Command {
     Delete {
         /// space separated task IDs
         ids: Vec<String>,
+        /// Also delete task from the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
     },
     /// Delete all tasks
     Clear,
@@ -209,7 +215,7 @@ fn main() {
         Some(Command::Push { ids, remote, no_color }) => task_push(ids, remote, no_color),
         Some(Command::Pull { ids, remote, no_comments }) => task_pull(ids, remote, no_comments),
         Some(Command::Stats { no_color }) => task_stats(no_color),
-        Some(Command::Delete { ids }) => task_delete(ids),
+        Some(Command::Delete { ids, push, remote }) => task_delete(ids, push, remote),
         Some(Command::Clear) => task_clear(),
         Some(Command::Config { subcommand }) => task_config(subcommand),
         None => { }
@@ -486,11 +492,25 @@ fn task_push(ids: Vec<String>, remote: Option<String>, no_color: bool) {
     }
 }
 
-fn task_delete(ids: Vec<String>) {
+fn task_delete(ids: Vec<String>, push: bool, remote: Option<String>) {
     let ids = ids.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     match gittask::delete_tasks(&ids) {
         Ok(_) => println!("Task(s) {} deleted", ids.join(", ")),
         Err(e) => eprintln!("ERROR: {e}"),
+    }
+
+    if push {
+        match get_user_repo(remote) {
+            Ok((user, repo)) => {
+                for id in ids {
+                    match delete_github_issue(&user, &repo, id.parse().unwrap()) {
+                        Ok(_) => println!("Sync: REMOTE task ID {id} has been deleted"),
+                        Err(e) => eprintln!("ERROR: {e}")
+                    }
+                }
+            },
+            Err(e) => eprintln!("ERROR: {e}"),
+        }
     }
 }
 

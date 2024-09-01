@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use futures_util::TryStreamExt;
+use graphql_client::{reqwest::post_graphql_blocking as post_graphql, GraphQLQuery};
 use octocrab::models::IssueState::Open;
 use octocrab::{params, Octocrab};
 use octocrab::models::IssueState;
@@ -10,6 +11,14 @@ use tokio::pin;
 use tokio::runtime::Runtime;
 
 use gittask::{Comment, Task};
+
+#[derive(GraphQLQuery)]
+#[graphql(
+    schema_path = "resources/github/schema.graphql",
+    query_path = "resources/github/delete_issue.graphql",
+    response_derives = "Debug"
+)]
+struct DeleteIssue;
 
 pub fn get_runtime() -> Runtime {
     Runtime::new().unwrap()
@@ -108,6 +117,60 @@ pub fn update_github_issue_status(runtime: &Runtime, user: &str, repo: &str, n: 
 async fn update_issue_status(user: &str, repo: &str, n: u64, state: IssueState) -> bool {
     let crab = get_octocrab_instance().await;
     crab.issues(user, repo).update(n).state(state).send().await.is_ok()
+}
+
+pub fn delete_github_issue(user: &String, repo: &String, n: u64) -> Result<(), String> {
+    match std::env::var("GITHUB_TOKEN") {
+        Ok(token) => {
+            let issue_id = get_runtime().block_on(get_issue_id(user, repo, n));
+            if issue_id.is_err() {
+                return Err("Could not match task ID with GitHub internal issue ID.".to_string());
+            }
+            let issue_id = issue_id?;
+            let variables = delete_issue::Variables {
+                issue_id,
+            };
+
+            let client = reqwest::blocking::Client::builder()
+                .user_agent("git-task/".to_owned() + env!("CARGO_PKG_VERSION"))
+                .default_headers(
+                    std::iter::once((
+                        reqwest::header::AUTHORIZATION,
+                        reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+                    )).collect(),
+                )
+                .build().unwrap();
+
+            let response_body = post_graphql::<DeleteIssue, _>(&client, "https://api.github.com/graphql", variables).expect("Failed to make GraphQL request");
+
+            if let Some(errors) = response_body.errors {
+                if !errors.is_empty() {
+                    return Err(errors.first().unwrap().message.clone());
+                }
+            }
+
+            let response_data: Option<delete_issue::ResponseData> = response_body.data;
+
+            if response_data.is_none() {
+                return Err("Missing response data.".to_string());
+            }
+
+            match response_data {
+                Some(_) => Ok(()),
+                None => Err("Response data not found".to_string())
+            }
+        },
+        _ => Err("Could not find GITHUB_TOKEN environment variable.".to_string()),
+    }
+}
+
+async fn get_issue_id(user: &String, repo: &String, n: u64) -> Result<String, String> {
+    let crab = get_octocrab_instance().await;
+    let issue = crab.issues(user, repo).get(n).await;
+    match issue {
+        Ok(issue) => Ok(issue.node_id),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 async fn get_octocrab_instance() -> Arc<Octocrab> {
