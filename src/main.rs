@@ -12,7 +12,7 @@ use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::{Open, Closed};
 
 use gittask::{Comment, Task};
-use crate::github::{delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
+use crate::github::{create_github_issue, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
 use crate::util::{capitalize, colorize_string, format_datetime, parse_date, read_from_pipe};
 
 #[derive(Parser)]
@@ -482,6 +482,18 @@ fn task_push(ids: Vec<String>, remote: Option<String>, no_color: bool) {
                         }
                     } else {
                         eprintln!("Sync: REMOTE task ID {id} NOT found");
+                        match create_github_issue(&runtime, &user, &repo, &local_task) {
+                            Ok(id) => {
+                                println!("Sync: Created REMOTE task ID {id}");
+                                if local_task.get_id().unwrap() != id {
+                                    match gittask::update_task_id(&local_task.get_id().unwrap(), &id) {
+                                        Ok(_) => println!("Task ID {} -> {} updated", local_task.get_id().unwrap(), id),
+                                        Err(e) => eprintln!("ERROR: {e}"),
+                                    }
+                                }
+                            },
+                            Err(e) => eprintln!("ERROR: {e}")
+                        }
                     }
                 } else {
                     eprintln!("Sync: LOCAL task ID {id} NOT found");

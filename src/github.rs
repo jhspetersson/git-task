@@ -110,6 +110,22 @@ async fn get_issue(user: &String, repo: &String, n: u64, with_comments: bool) ->
     }
 }
 
+pub fn create_github_issue(runtime: &Runtime, user: &String, repo: &String, task: &Task) -> Result<String, String> {
+    runtime.block_on(create_issue(user, repo, task))
+}
+
+async fn create_issue(user: &String, repo: &String, task: &Task) -> Result<String, String> {
+    let crab = get_octocrab_instance().await;
+    let crab_issues = crab.issues(user, repo);
+    let mut create_builder = crab_issues.create(task.get_property("name").unwrap());
+    if let Some(description) = task.get_property("description") {
+        create_builder = create_builder.body(description);
+    }
+    let issue = create_builder.send().await.unwrap();
+
+    Ok(issue.number.to_string())
+}
+
 pub fn update_github_issue_status(runtime: &Runtime, user: &str, repo: &str, n: u64, state: IssueState) -> bool {
     runtime.block_on(update_issue_status(user, repo, n, state))
 }
