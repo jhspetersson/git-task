@@ -128,6 +128,9 @@ enum Command {
     Pull {
         /// space separated task IDs
         ids: Option<Vec<String>>,
+        /// Limit the count of imported tasks
+        #[arg(short, long, conflicts_with = "ids")]
+        limit: Option<usize>,
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
@@ -213,7 +216,7 @@ fn main() {
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
         Some(Command::Push { ids, remote, no_color }) => task_push(ids, remote, no_color),
-        Some(Command::Pull { ids, remote, no_comments }) => task_pull(ids, remote, no_comments),
+        Some(Command::Pull { ids, limit, remote, no_comments }) => task_pull(ids, limit, remote, no_comments),
         Some(Command::Stats { no_color }) => task_stats(no_color),
         Some(Command::Delete { ids, push, remote }) => task_delete(ids, push, remote),
         Some(Command::Clear) => task_clear(),
@@ -358,7 +361,7 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) {
     }
 }
 
-fn task_pull(ids: Option<Vec<String>>, remote: Option<String>, no_comments: bool) {
+fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, remote: Option<String>, no_comments: bool) {
     match get_user_repo(remote) {
         Ok((user, repo)) => {
             println!("Importing tasks from {user}/{repo}...");
@@ -377,7 +380,7 @@ fn task_pull(ids: Option<Vec<String>>, remote: Option<String>, no_comments: bool
                     }
                 }
             } else {
-                let tasks = list_github_issues(user.to_string(), repo.to_string(), !no_comments);
+                let tasks = list_github_issues(user.to_string(), repo.to_string(), !no_comments, limit);
 
                 if tasks.is_empty() {
                     println!("No tasks found");

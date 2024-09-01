@@ -24,11 +24,11 @@ pub fn get_runtime() -> Runtime {
     Runtime::new().unwrap()
 }
 
-pub fn list_github_issues(user: String, repo: String, with_comments: bool) -> Vec<Task> {
-    Runtime::new().unwrap().block_on(list_github_issues_async(user, repo, with_comments))
+pub fn list_github_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>) -> Vec<Task> {
+    Runtime::new().unwrap().block_on(list_github_issues_async(user, repo, with_comments, limit))
 }
 
-async fn list_github_issues_async(user: String, repo: String, with_comments: bool) -> Vec<Task> {
+async fn list_github_issues_async(user: String, repo: String, with_comments: bool, limit: Option<usize>) -> Vec<Task> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
     let stream = crab.issues(&user, &repo)
@@ -39,7 +39,12 @@ async fn list_github_issues_async(user: String, repo: String, with_comments: boo
         .await.unwrap()
         .into_stream(&crab);
     pin!(stream);
+    let mut count = 0;
     while let Some(issue) = stream.try_next().await.unwrap() {
+        if limit.is_some() && count >= limit.unwrap() {
+            break;
+        }
+        count += 1;
         let mut props = HashMap::new();
         props.insert(String::from("name"), issue.title);
         props.insert(String::from("status"), if issue.state == Open { String::from("OPEN") } else { String::from("CLOSED") } );

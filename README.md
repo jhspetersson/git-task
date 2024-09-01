@@ -136,6 +136,7 @@ For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN`
     git task pull
     git task pull --no-comments
     git task pull 2 3 5
+    git task pull --limit 50
 
 ### stats
 
