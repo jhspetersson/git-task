@@ -12,7 +12,7 @@ use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::{Open, Closed};
 
 use gittask::{Comment, Task};
-use crate::github::{create_github_issue, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
+use crate::github::{create_github_comment, create_github_issue, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
 use crate::util::{capitalize, colorize_string, format_datetime, parse_date, read_from_pipe};
 
 #[derive(Parser)]
@@ -494,6 +494,25 @@ fn task_push(ids: Vec<String>, remote: Option<String>, no_color: bool) {
                                         Err(e) => eprintln!("ERROR: {e}"),
                                     }
                                 }
+
+                                if let Some(comments) = local_task.get_comments() {
+                                    if !comments.is_empty() {
+                                        for comment in comments {
+                                            let local_comment_id = comment.get_id().unwrap();
+                                            match create_github_comment(&runtime, &user, &repo, &id, &comment) {
+                                                Ok(remote_comment_id) => {
+                                                    println!("Created REMOTE comment ID {}", remote_comment_id);
+                                                    match gittask::update_comment_id(&id, &local_comment_id, &remote_comment_id) {
+                                                        Ok(_) => println!("Comment ID {} -> {} updated", local_comment_id, remote_comment_id),
+                                                        Err(e) => eprintln!("ERROR: {e}"),
+                                                    }
+                                                },
+                                                Err(e) => eprintln!("ERROR creating REMOTE comment: {}", e)
+                                            }
+                                        }
+                                    }
+                                }
+
                             },
                             Err(e) => eprintln!("ERROR: {e}")
                         }

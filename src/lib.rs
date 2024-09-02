@@ -10,14 +10,14 @@ const DESCRIPTION: &'static str = "description";
 const STATUS: &'static str = "status";
 const CREATED: &'static str = "created";
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Task {
     id: Option<String>,
     props: HashMap<String, String>,
     comments: Option<Vec<Comment>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Comment {
     id: Option<String>,
     props: HashMap<String, String>,
@@ -157,6 +157,10 @@ impl Comment {
             Some(id) => Some(id.clone()),
             _ => None
         }
+    }
+
+    pub fn set_id(&mut self, id: String) {
+        self.id = Some(id);
     }
 
     pub fn get_all_properties(&self) -> &HashMap<String, String> {
@@ -338,6 +342,29 @@ pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
     task.set_id(new_id.to_string());
     create_task(task)?;
     delete_tasks(&[&id])?;
+
+    Ok(())
+}
+
+pub fn update_comment_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
+    let mut task = find_task(&task_id)?.unwrap().clone();
+    let comments = task.get_comments();
+    match comments {
+        Some(comments) => {
+            let updated_comments = comments.iter().map(|c| {
+                if c.get_id().unwrap() == id {
+                    let mut c = c.clone();
+                    c.set_id(new_id.to_string());
+                    c
+                } else {
+                    c.clone()
+                }
+            }).collect::<Vec<_>>();
+            task.set_comments(updated_comments);
+            create_task(task)?;
+        },
+        None => {}
+    }
 
     Ok(())
 }
