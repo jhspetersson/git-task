@@ -176,6 +176,12 @@ enum CommentCommand {
         task_id: String,
         /// comment text
         text: String,
+        /// Also push comment to the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
     },
     /// Delete a comment
     #[clap(visible_aliases(["del", "remove", "rem"]))]
@@ -297,17 +303,38 @@ fn task_set(id: String, prop_name: String, value: String) {
 
 fn task_comment(subcommand: CommentCommand) {
     match subcommand {
-        CommentCommand::Add { task_id, text } => task_comment_add(task_id, text),
+        CommentCommand::Add { task_id, text, push, remote } => task_comment_add(task_id, text, push, remote),
         CommentCommand::Delete { task_id, comment_id, push, remote } => task_comment_delete(task_id, comment_id, push, remote),
     }
 }
 
-fn task_comment_add(task_id: String, text: String) {
+fn task_comment_add(task_id: String, text: String, push: bool, remote: Option<String>) {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
-            task.add_comment(None, HashMap::new(), text);
+            let comment = task.add_comment(None, HashMap::new(), text);
             match gittask::update_task(task) {
-                Ok(_) => println!("Task ID {task_id} updated"),
+                Ok(_) => {
+                    println!("Task ID {task_id} updated");
+
+                    if push {
+                        match get_user_repo(remote) {
+                            Ok((user, repo)) => {
+                                let runtime = get_runtime();
+                                match create_github_comment(&runtime, &user, &repo, &task_id, &comment) {
+                                    Ok(remote_comment_id) => {
+                                        println!("Created REMOTE comment ID {}", remote_comment_id);
+                                        match gittask::update_comment_id(&task_id, &comment.get_id().unwrap(), &remote_comment_id) {
+                                            Ok(_) => println!("Comment ID {} -> {} updated", &comment.get_id().unwrap(), remote_comment_id),
+                                            Err(e) => eprintln!("ERROR: {e}"),
+                                        }
+                                    },
+                                    Err(e) => eprintln!("ERROR creating REMOTE comment: {}", e)
+                                }
+                            },
+                            Err(e) => eprintln!("ERROR: {e}"),
+                        }
+                    }
+                },
                 Err(e) => eprintln!("ERROR: {e}"),
             }
         },

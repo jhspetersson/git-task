@@ -99,7 +99,7 @@ impl Task {
         &self.comments
     }
 
-    pub fn add_comment(&mut self, id: Option<String>, mut props: HashMap<String, String>, text: String) {
+    pub fn add_comment(&mut self, id: Option<String>, mut props: HashMap<String, String>, text: String) -> Comment {
         if self.comments.is_none() {
             self.comments = Some(vec![]);
         }
@@ -116,11 +116,15 @@ impl Task {
             }
         }
 
-        self.comments.as_mut().unwrap().push(Comment {
+        let comment = Comment {
             id,
             props,
             text,
-        });
+        };
+
+        self.comments.as_mut().unwrap().push(comment.clone());
+
+        comment
     }
 
     pub fn set_comments(&mut self, comments: Vec<Comment>) {
