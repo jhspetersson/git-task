@@ -1,5 +1,6 @@
 use std::borrow::ToOwned;
 use std::collections::HashMap;
+use std::ops::Deref;
 use std::time::{SystemTime, UNIX_EPOCH};
 use git2::*;
 use serde_json;
@@ -126,12 +127,12 @@ impl Task {
         self.comments = Some(comments);
     }
 
-    pub fn delete_comment(&mut self, id: String) -> Result<(), String> {
+    pub fn delete_comment(&mut self, id: &String) -> Result<(), String> {
         if self.comments.is_none() {
             return Err("Task has no comments".to_string());
         }
 
-        let index = self.comments.as_ref().unwrap().iter().position(|comment| comment.get_id().unwrap() == id);
+        let index = self.comments.as_ref().unwrap().iter().position(|comment| comment.get_id().unwrap() == id.deref());
 
         if index.is_none() {
             return Err(format!("Comment ID {id} not found"));

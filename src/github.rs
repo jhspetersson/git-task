@@ -5,7 +5,7 @@ use futures_util::TryStreamExt;
 use graphql_client::{reqwest::post_graphql_blocking as post_graphql, GraphQLQuery};
 use octocrab::models::IssueState::Open;
 use octocrab::{params, Octocrab};
-use octocrab::models::IssueState;
+use octocrab::models::{CommentId, IssueState};
 use regex::Regex;
 use tokio::pin;
 use tokio::runtime::Runtime;
@@ -195,6 +195,21 @@ pub fn delete_github_issue(user: &String, repo: &String, n: u64) -> Result<(), S
             }
         },
         None => Err("Could not find GITHUB_TOKEN environment variable.".to_string()),
+    }
+}
+
+pub fn delete_github_comment(user: &String, repo: &String, n: u64) -> Result<(), String> {
+    match get_token_from_env() {
+        Some(_) => get_runtime().block_on(delete_comment(user, repo, n)),
+        None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
+    }
+}
+
+async fn delete_comment(user: &String, repo: &String, n: u64) -> Result<(), String> {
+    let crab = get_octocrab_instance().await;
+    match crab.issues(user, repo).delete_comment(CommentId(n)).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string())
     }
 }
 

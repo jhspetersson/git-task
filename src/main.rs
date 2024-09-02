@@ -12,7 +12,7 @@ use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::{Open, Closed};
 
 use gittask::{Comment, Task};
-use crate::github::{create_github_comment, create_github_issue, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
+use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
 use crate::util::{capitalize, colorize_string, format_datetime, parse_date, read_from_pipe};
 
 #[derive(Parser)]
@@ -184,6 +184,12 @@ enum CommentCommand {
         task_id: String,
         /// comment ID
         comment_id: String,
+        /// Also delete comment from the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
     },
 }
 
@@ -292,7 +298,7 @@ fn task_set(id: String, prop_name: String, value: String) {
 fn task_comment(subcommand: CommentCommand) {
     match subcommand {
         CommentCommand::Add { task_id, text } => task_comment_add(task_id, text),
-        CommentCommand::Delete { task_id, comment_id } => task_comment_delete(task_id, comment_id),
+        CommentCommand::Delete { task_id, comment_id, push, remote } => task_comment_delete(task_id, comment_id, push, remote),
     }
 }
 
@@ -310,13 +316,28 @@ fn task_comment_add(task_id: String, text: String) {
     }
 }
 
-fn task_comment_delete(task_id: String, comment_id: String) {
+fn task_comment_delete(task_id: String, comment_id: String, push: bool, remote: Option<String>) {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
-            match task.delete_comment(comment_id) {
+            match task.delete_comment(&comment_id) {
                 Ok(_) => {
                     match gittask::update_task(task) {
-                        Ok(_) => println!("Task ID {task_id} updated"),
+                        Ok(_) => {
+                            println!("Task ID {task_id} updated");
+
+                            if push {
+                                match get_user_repo(remote) {
+                                    Ok((user, repo)) => {
+                                        let comment_id = comment_id.clone().parse().unwrap();
+                                        match delete_github_comment(&user, &repo, comment_id) {
+                                            Ok(_) => println!("Sync: REMOTE comment ID {comment_id} has been deleted"),
+                                            Err(e) => eprintln!("ERROR: {e}")
+                                        }
+                                    },
+                                    Err(e) => eprintln!("ERROR: {e}"),
+                                }
+                            }
+                        },
                         Err(e) => eprintln!("ERROR: {e}"),
                     }
                 },
