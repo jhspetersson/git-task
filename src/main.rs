@@ -120,6 +120,9 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Don't create task comments
+        #[arg(short, long)]
+        no_comments: bool,
         /// Disable colors
         #[arg(long)]
         no_color: bool,
@@ -215,7 +218,7 @@ fn main() {
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
-        Some(Command::Push { ids, remote, no_color }) => task_push(ids, remote, no_color),
+        Some(Command::Push { ids, remote, no_comments, no_color }) => task_push(ids, remote, no_comments, no_color),
         Some(Command::Pull { ids, limit, remote, no_comments }) => task_pull(ids, limit, remote, no_comments),
         Some(Command::Stats { no_color }) => task_stats(no_color),
         Some(Command::Delete { ids, push, remote }) => task_delete(ids, push, remote),
@@ -455,7 +458,7 @@ fn task_export(ids: Option<Vec<String>>, format: Option<String>, pretty: bool) {
     }
 }
 
-fn task_push(ids: Vec<String>, remote: Option<String>, no_color: bool) {
+fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: bool, no_color: bool) {
     if ids.is_empty() {
         eprintln!("Select one or more task IDs");
         return;
@@ -495,24 +498,25 @@ fn task_push(ids: Vec<String>, remote: Option<String>, no_color: bool) {
                                     }
                                 }
 
-                                if let Some(comments) = local_task.get_comments() {
-                                    if !comments.is_empty() {
-                                        for comment in comments {
-                                            let local_comment_id = comment.get_id().unwrap();
-                                            match create_github_comment(&runtime, &user, &repo, &id, &comment) {
-                                                Ok(remote_comment_id) => {
-                                                    println!("Created REMOTE comment ID {}", remote_comment_id);
-                                                    match gittask::update_comment_id(&id, &local_comment_id, &remote_comment_id) {
-                                                        Ok(_) => println!("Comment ID {} -> {} updated", local_comment_id, remote_comment_id),
-                                                        Err(e) => eprintln!("ERROR: {e}"),
-                                                    }
-                                                },
-                                                Err(e) => eprintln!("ERROR creating REMOTE comment: {}", e)
+                                if !no_comments {
+                                    if let Some(comments) = local_task.get_comments() {
+                                        if !comments.is_empty() {
+                                            for comment in comments {
+                                                let local_comment_id = comment.get_id().unwrap();
+                                                match create_github_comment(&runtime, &user, &repo, &id, &comment) {
+                                                    Ok(remote_comment_id) => {
+                                                        println!("Created REMOTE comment ID {}", remote_comment_id);
+                                                        match gittask::update_comment_id(&id, &local_comment_id, &remote_comment_id) {
+                                                            Ok(_) => println!("Comment ID {} -> {} updated", local_comment_id, remote_comment_id),
+                                                            Err(e) => eprintln!("ERROR: {e}"),
+                                                        }
+                                                    },
+                                                    Err(e) => eprintln!("ERROR creating REMOTE comment: {}", e)
+                                                }
                                             }
                                         }
                                     }
                                 }
-
                             },
                             Err(e) => eprintln!("ERROR: {e}")
                         }
