@@ -281,7 +281,7 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
                     println!("Sync: LOCAL task ID {id} found");
-                    let remote_task = get_github_issue(&runtime, &user, &repo, id.parse().unwrap(), false);
+                    let remote_task = get_github_issue(&runtime, &user, &repo, id.parse().unwrap(), !no_comments);
                     if let Some(remote_task) = remote_task {
                         println!("Sync: REMOTE task ID {id} found");
                         let local_status = local_task.get_property("status").unwrap();
@@ -292,6 +292,16 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
                             let result = update_github_issue_status(&runtime, &user, &repo, id.parse().unwrap(), state);
                             if result {
                                 println!("Sync: REMOTE task ID {id} has been updated");
+
+                                if !no_comments {
+                                    let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().map(|comment| comment.get_id().unwrap()).collect();
+                                    for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
+                                        let local_comment_id = comment.get_id().unwrap();
+                                        if !remote_comment_ids.contains(&local_comment_id) {
+                                            create_remote_comment(&runtime, &user, &repo, &id, &comment);
+                                        }
+                                    }
+                                }
                             }
                         } else {
                             eprintln!("Nothing to sync");
@@ -312,17 +322,7 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
                                     if let Some(comments) = local_task.get_comments() {
                                         if !comments.is_empty() {
                                             for comment in comments {
-                                                let local_comment_id = comment.get_id().unwrap();
-                                                match create_github_comment(&runtime, &user, &repo, &id, &comment) {
-                                                    Ok(remote_comment_id) => {
-                                                        println!("Created REMOTE comment ID {}", remote_comment_id);
-                                                        match gittask::update_comment_id(&id, &local_comment_id, &remote_comment_id) {
-                                                            Ok(_) => println!("Comment ID {} -> {} updated", local_comment_id, remote_comment_id),
-                                                            Err(e) => eprintln!("ERROR: {e}"),
-                                                        }
-                                                    },
-                                                    Err(e) => eprintln!("ERROR creating REMOTE comment: {}", e)
-                                                }
+                                                create_remote_comment(&runtime, &user, &repo, &id, &comment);
                                             }
                                         }
                                     }
@@ -337,6 +337,20 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
             }
         },
         Err(e) => eprintln!("ERROR: {e}")
+    }
+}
+
+fn create_remote_comment(runtime: &tokio::runtime::Runtime, user: &String, repo: &String, id: &String, comment: &Comment) {
+    let local_comment_id = comment.get_id().unwrap();
+    match create_github_comment(&runtime, user, repo, id, comment) {
+        Ok(remote_comment_id) => {
+            println!("Created REMOTE comment ID {}", remote_comment_id);
+            match gittask::update_comment_id(&id, &local_comment_id, &remote_comment_id) {
+                Ok(_) => println!("Comment ID {} -> {} updated", local_comment_id, remote_comment_id),
+                Err(e) => eprintln!("ERROR: {e}"),
+            }
+        },
+        Err(e) => eprintln!("ERROR creating REMOTE comment: {}", e)
     }
 }
 

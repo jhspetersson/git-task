@@ -25,10 +25,10 @@ pub fn get_runtime() -> Runtime {
 }
 
 pub fn list_github_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>) -> Vec<Task> {
-    Runtime::new().unwrap().block_on(list_github_issues_async(user, repo, with_comments, limit))
+    Runtime::new().unwrap().block_on(list_issues(user, repo, with_comments, limit))
 }
 
-async fn list_github_issues_async(user: String, repo: String, with_comments: bool, limit: Option<usize>) -> Vec<Task> {
+async fn list_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>) -> Vec<Task> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
     let stream = crab.issues(&user, &repo)
@@ -55,7 +55,7 @@ async fn list_github_issues_async(user: String, repo: String, with_comments: boo
         let mut task = Task::from_properties(issue.number.to_string(), props).unwrap();
 
         if with_comments {
-            let task_comments = list_github_issue_comments(&user, &repo, issue.number).await;
+            let task_comments = list_issue_comments(&user, &repo, issue.number).await;
             task.set_comments(task_comments);
         }
 
@@ -65,7 +65,7 @@ async fn list_github_issues_async(user: String, repo: String, with_comments: boo
     result
 }
 
-async fn list_github_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Comment> {
+async fn list_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Comment> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
     let stream = crab.issues(user, repo)
@@ -105,7 +105,7 @@ async fn get_issue(user: &String, repo: &String, n: u64, with_comments: bool) ->
             let mut task = Task::from_properties(n.to_string(), props).unwrap();
 
             if with_comments {
-                let task_comments = list_github_issue_comments(user, repo, issue.number).await;
+                let task_comments = list_issue_comments(user, repo, issue.number).await;
                 task.set_comments(task_comments);
             }
 
