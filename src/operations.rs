@@ -7,10 +7,18 @@ use octocrab::models::IssueState::{Closed, Open};
 use octocrab::params::State;
 use gittask::{Comment, Task};
 use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
-use crate::util::{capitalize, colorize_string, format_datetime, parse_date, read_from_pipe};
+use crate::util::{capitalize, colorize_string, format_datetime, get_text_from_editor, parse_date, read_from_pipe};
 
-pub(crate) fn task_create(name: String) {
-    let task = Task::new(name, String::from(""), "OPEN".to_owned());
+pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool) {
+    let description = match description {
+        Some(description) => description,
+        None => match no_desc {
+            true => String::from(""),
+            false => get_text_from_editor().unwrap_or_else(|| String::from(""))
+        }
+    };
+
+    let task = Task::new(name, description, "OPEN".to_owned());
 
     match gittask::create_task(task.unwrap()) {
         Ok(task) => println!("Task ID {} created", task.get_id().unwrap()),
@@ -685,12 +693,7 @@ pub(crate) fn task_stats(no_color: bool) {
 
 pub(crate) fn task_config_get(param: String) {
     match param.as_str() {
-        "task.ref" => {
-            match gittask::get_ref_path() {
-                Ok(ref_path) => println!("{ref_path}"),
-                Err(e) => eprintln!("ERROR: {e}")
-            }
-        },
+        "task.ref" => println!("{}", gittask::get_ref_path()),
         _ => eprintln!("Unknown parameter: {}", param)
     }
 }

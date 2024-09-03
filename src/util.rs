@@ -1,4 +1,6 @@
+use std::fs::File;
 use std::io::{IsTerminal, Read};
+use std::process::Command;
 use std::time::{Duration, UNIX_EPOCH};
 use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
 use nu_ansi_term::Color;
@@ -44,4 +46,41 @@ pub fn read_from_pipe() -> Option<String> {
         },
         true => None
     }
+}
+
+pub fn get_text_from_editor() -> Option<String> {
+    let tmp_file = tempfile::Builder::new().prefix("git-task").suffix(".txt").keep(true).tempfile().ok()?;
+    let _ = File::create(tmp_file.path()).unwrap();
+
+    let editor = match gittask::get_config_value("core.editor") {
+        Ok(s) => s,
+        _ => std::env::var("VISUAL")
+            .or(std::env::var("EDITOR"))
+            .or::<Result<String, std::env::VarError>>(Ok("vi".to_string()))
+            .unwrap()
+    };
+
+    let mut status = Command::new(editor)
+        .arg(tmp_file.path().to_str()?)
+        .status();
+
+    if status.is_err() {
+        status = Command::new("notepad")
+            .arg(tmp_file.path().to_str()?)
+            .status();
+    }
+
+    if !status.unwrap().success() {
+        let _ = tmp_file.close();
+        eprintln!("Editor exited with a non-zero status. Changes might not be saved.");
+        return None;
+    }
+
+    let mut file = File::open(tmp_file.path()).unwrap();
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).ok()?;
+
+    let _ = tmp_file.close();
+
+    Some(contents)
 }

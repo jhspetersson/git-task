@@ -81,6 +81,8 @@ Shows one task with all the properties (like id, name, status, description and a
 Creates a new task.
 
     git task create "Fix my Fizz Buzz implementation"
+    git task create "Task title" "Task description"
+    git task create "This task goes without description" --no-desc
 
 ### status
 

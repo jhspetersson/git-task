@@ -57,7 +57,13 @@ enum Command {
     },
     /// Create a new task
     Create {
+        /// task name
         name: String,
+        /// task description
+        description: Option<String>,
+        /// skip editing description in the editor
+        #[arg(short, long, conflicts_with = "description")]
+        no_desc: bool,
     },
     /// Update task status
     Status {
@@ -222,7 +228,7 @@ fn main() {
     match args.command {
         Some(Command::List { status, keyword, from, until, author, columns, sort, limit, no_color }) => task_list(status, keyword, from, until, author, columns, sort, limit, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
-        Some(Command::Create { name }) => task_create(name),
+        Some(Command::Create { name, description, no_desc }) => task_create(name, description, no_desc),
         Some(Command::Status { id, status }) => task_status(id, status),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
         Some(Command::Set { id, prop_name, value }) => task_set(id, prop_name, value),
