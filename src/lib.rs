@@ -211,7 +211,7 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
     let result = match task_tree.get_name(id) {
         Some(entry) => {
             let oid = entry.id();
-            let blob = repo.find_blob(oid).unwrap();
+            let blob = map_err!(repo.find_blob(oid));
             let content = blob.content();
             let task = serde_json::from_slice(content).unwrap();
 
@@ -236,9 +236,9 @@ pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
 
     let parent_commit = map_err!(task_ref.peel_to_commit());
     let parents = vec![parent_commit];
-    let me = &repo.signature().unwrap();
+    let me = &map_err!(repo.signature());
 
-    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "delete task", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(())
 }
@@ -255,9 +255,9 @@ pub fn clear_tasks() -> Result<u64, String> {
 
     let parent_commit = map_err!(task_ref.peel_to_commit());
     let parents = vec![parent_commit];
-    let me = &repo.signature().unwrap();
+    let me = &map_err!(repo.signature());
 
-    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "delete task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "delete task", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task_count)
 }
@@ -281,39 +281,39 @@ pub fn create_task(mut task: Task) -> Result<Task, String> {
     }
     let string_content = serde_json::to_string(&task).unwrap();
     let content = string_content.as_bytes();
-    let oid = repo.blob(content).unwrap();
+    let oid = map_err!(repo.blob(content));
     let mut treebuilder = map_err!(repo.treebuilder(source_tree.as_ref()));
     map_err!(treebuilder.insert(&task.get_id().unwrap(), oid, FileMode::Blob.into()));
     let tree_oid = map_err!(treebuilder.write());
 
-    let me = &repo.signature().unwrap();
+    let me = &map_err!(repo.signature());
     let mut parents = vec![];
     if task_ref_result.is_ok() {
-        let parent_commit = task_ref_result.unwrap().peel_to_commit();
+        let parent_commit = map_err!(task_ref_result).peel_to_commit();
         if parent_commit.is_ok() {
-            parents.push(parent_commit.unwrap());
+            parents.push(map_err!(parent_commit));
         }
     }
-    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "create task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "create task", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task)
 }
 
 pub fn update_task(task: Task) -> Result<String, String> {
     let repo = map_err!(Repository::open("."));
-    let task_ref_result = repo.find_reference(&get_ref_path_from_repo(&repo)).unwrap();
-    let parent_commit = task_ref_result.peel_to_commit().unwrap();
-    let source_tree = task_ref_result.peel_to_tree().unwrap();
+    let task_ref_result = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
+    let parent_commit = map_err!(task_ref_result.peel_to_commit());
+    let source_tree = map_err!(task_ref_result.peel_to_tree());
     let string_content = serde_json::to_string(&task).unwrap();
     let content = string_content.as_bytes();
-    let oid = repo.blob(content).unwrap();
+    let oid = map_err!(repo.blob(content));
     let mut treebuilder = map_err!(repo.treebuilder(Some(&source_tree)));
     map_err!(treebuilder.insert(&task.get_id().unwrap(), oid, FileMode::Blob.into()));
     let tree_oid = map_err!(treebuilder.write());
 
-    let me = &repo.signature().unwrap();
+    let me = &map_err!(repo.signature());
     let parents = vec![parent_commit];
-    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "update task", &repo.find_tree(tree_oid).unwrap(), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path_from_repo(&repo)), me, me, "update task", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task.get_id().unwrap())
 }
@@ -389,7 +389,7 @@ fn get_current_timestamp() -> u64 {
 
 fn get_current_user() -> Result<Option<String>, String> {
     let repo = map_err!(Repository::open("."));
-    let me = &repo.signature().unwrap();
+    let me = &map_err!(repo.signature());
     match me.name() {
         Some(name) => Ok(Some(String::from(name))),
         _ => match me.email() {
@@ -418,7 +418,7 @@ pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
     let repo = map_err!(Repository::open("."));
 
     let mut current_reference = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
-    let commit = current_reference.peel_to_commit().unwrap();
+    let commit = map_err!(current_reference.peel_to_commit());
     map_err!(repo.reference(ref_path, commit.id(), true, "task.ref migrated"));
 
     let mut config = map_err!(repo.config());
