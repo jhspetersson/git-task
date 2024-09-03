@@ -4,7 +4,7 @@ use chrono::{Local, TimeZone};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
 use octocrab::models::IssueState::{Closed, Open};
-
+use octocrab::params::State;
 use gittask::{Comment, Task};
 use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
 use crate::util::{capitalize, colorize_string, format_datetime, parse_date, read_from_pipe};
@@ -174,7 +174,7 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) {
     }
 }
 
-pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, remote: Option<String>, no_comments: bool) {
+pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: Option<String>, remote: Option<String>, no_comments: bool) {
     match get_user_repo(remote) {
         Ok((user, repo)) => {
             println!("Importing tasks from {user}/{repo}...");
@@ -193,17 +193,30 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, remote: 
                     }
                 }
             } else {
-                let tasks = list_github_issues(user.to_string(), repo.to_string(), !no_comments, limit);
+                let state = match status {
+                    Some(s) => match get_full_status(&s).as_ref() {
+                        "OPEN" => Some(State::Open),
+                        "CLOSED" => Some(State::Closed),
+                        _ => None
+                    },
+                    None => Some(State::All)
+                };
+                match state {
+                    Some(state) => {
+                        let tasks = list_github_issues(user.to_string(), repo.to_string(), !no_comments, limit, state);
 
-                if tasks.is_empty() {
-                    println!("No tasks found");
-                } else {
-                    for task in tasks {
-                        match gittask::create_task(task) {
-                            Ok(task) => println!("Task ID {} imported", task.get_id().unwrap()),
-                            Err(e) => eprintln!("ERROR: {e}"),
+                        if tasks.is_empty() {
+                            println!("No tasks found");
+                        } else {
+                            for task in tasks {
+                                match gittask::create_task(task) {
+                                    Ok(task) => println!("Task ID {} imported", task.get_id().unwrap()),
+                                    Err(e) => eprintln!("ERROR: {e}"),
+                                }
+                            }
                         }
-                    }
+                    },
+                    None => eprintln!("ERROR: Can't pull tasks with this status, only OPEN and CLOSED are supported"),
                 }
             }
         },

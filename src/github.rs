@@ -4,8 +4,9 @@ use std::sync::Arc;
 use futures_util::TryStreamExt;
 use graphql_client::{reqwest::post_graphql_blocking as post_graphql, GraphQLQuery};
 use octocrab::models::IssueState::Open;
-use octocrab::{params, Octocrab};
+use octocrab::Octocrab;
 use octocrab::models::{CommentId, IssueState};
+use octocrab::params::State;
 use regex::Regex;
 use tokio::pin;
 use tokio::runtime::Runtime;
@@ -24,16 +25,16 @@ pub fn get_runtime() -> Runtime {
     Runtime::new().unwrap()
 }
 
-pub fn list_github_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>) -> Vec<Task> {
-    Runtime::new().unwrap().block_on(list_issues(user, repo, with_comments, limit))
+pub fn list_github_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>, state: State) -> Vec<Task> {
+    Runtime::new().unwrap().block_on(list_issues(user, repo, with_comments, limit, state))
 }
 
-async fn list_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>) -> Vec<Task> {
+async fn list_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>, state: State) -> Vec<Task> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
     let stream = crab.issues(&user, &repo)
         .list()
-        .state(params::State::All)
+        .state(state)
         .per_page(100)
         .send()
         .await.unwrap()

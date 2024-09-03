@@ -121,13 +121,6 @@ Export all or selected tasks, only JSON output format is currently supported.
     git task export
     git task export --pretty 2 3 5 >my_tasks.json
 
-### push
-
-Push status of the selected tasks to the remote source.
-For GitHub you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable.
-
-    git task push 2 3 5
-
 ### pull
 
 Grab issues from remote source (currently, only GitHub is supported).
@@ -137,6 +130,18 @@ For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN`
     git task pull --no-comments
     git task pull 2 3 5
     git task pull --limit 50
+
+Pull only open issues:
+
+    git task pull -s o
+    git task pull --status OPEN
+
+### push
+
+Push status of the selected tasks to the remote source.
+For GitHub you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable.
+
+    git task push 2 3 5
 
 ### stats
 

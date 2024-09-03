@@ -106,6 +106,23 @@ enum Command {
         #[arg(short, long)]
         pretty: bool,
     },
+    /// Import tasks from a remote source (e.g., GitHub)
+    Pull {
+        /// space separated task IDs
+        ids: Option<Vec<String>>,
+        /// Limit the count of imported tasks
+        #[arg(short, long, conflicts_with = "ids")]
+        limit: Option<usize>,
+        /// Import only issues with this status
+        #[arg(short, long, conflicts_with = "ids")]
+        status: Option<String>,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Don't import task comments
+        #[arg(short, long)]
+        no_comments: bool,
+    },
     /// Push task status to the remote source (e.g., GitHub)
     Push {
         /// space separated task IDs
@@ -119,20 +136,6 @@ enum Command {
         /// Disable colors
         #[arg(long)]
         no_color: bool,
-    },
-    /// Import tasks from a remote source (e.g., GitHub)
-    Pull {
-        /// space separated task IDs
-        ids: Option<Vec<String>>,
-        /// Limit the count of imported tasks
-        #[arg(short, long, conflicts_with = "ids")]
-        limit: Option<usize>,
-        /// Use this remote if there are several of them
-        #[arg(short, long)]
-        remote: Option<String>,
-        /// Don't import task comments
-        #[arg(short, long)]
-        no_comments: bool,
     },
     /// Show total task count and count by status
     Stats {
@@ -223,8 +226,8 @@ fn main() {
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
+        Some(Command::Pull { ids, limit, status, remote, no_comments }) => task_pull(ids, limit, status, remote, no_comments),
         Some(Command::Push { ids, remote, no_comments, no_color }) => task_push(ids, remote, no_comments, no_color),
-        Some(Command::Pull { ids, limit, remote, no_comments }) => task_pull(ids, limit, remote, no_comments),
         Some(Command::Stats { no_color }) => task_stats(no_color),
         Some(Command::Delete { ids, push, remote }) => task_delete(ids, push, remote),
         Some(Command::Clear) => task_clear(),
