@@ -177,6 +177,10 @@ By default `git-task` saves everything under a custom ref. You can change that t
 
     git task config set task.ref refs/heads/tasks
 
+Remove old ref after setting a new one:
+
+    git task config set task.ref refs/heads/tasks --move
+
 ### help
 
 Show available commands or their arguments.
