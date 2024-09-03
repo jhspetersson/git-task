@@ -414,15 +414,19 @@ fn get_ref_path_from_repo(repo: &Repository) -> String {
     "refs/tasks/tasks".to_string()
 }
 
-pub fn set_ref_path(ref_path: &str) -> Result<(), String> {
+pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
     let repo = map_err!(Repository::open("."));
 
-    let current_reference = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
+    let mut current_reference = map_err!(repo.find_reference(&get_ref_path_from_repo(&repo)));
     let commit = current_reference.peel_to_commit().unwrap();
     map_err!(repo.reference(ref_path, commit.id(), true, "task.ref migrated"));
 
     let mut config = map_err!(repo.config());
     map_err!(config.set_str("task.ref", ref_path));
+
+    if move_ref {
+        map_err!(current_reference.delete());
+    }
 
     Ok(())
 }

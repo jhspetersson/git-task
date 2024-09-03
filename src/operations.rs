@@ -695,10 +695,10 @@ pub(crate) fn task_config_get(param: String) {
     }
 }
 
-pub(crate) fn task_config_set(param: String, value: String) {
+pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) {
     match param.as_str() {
         "task.ref" => {
-            match gittask::set_ref_path(&value) {
+            match gittask::set_ref_path(&value, move_ref) {
                 Ok(_) => println!("{param} has been updated"),
                 Err(e) => eprintln!("ERROR: {e}")
             }

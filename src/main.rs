@@ -208,6 +208,9 @@ enum ConfigCommand {
         param: String,
         /// parameter value
         value: String,
+        /// Remove old tasks ref after update
+        #[arg(long = "move")]
+        move_ref: bool,
     },
     /// List configuration parameters
     List,
@@ -246,7 +249,7 @@ fn task_comment(subcommand: CommentCommand) {
 fn task_config(subcommand: ConfigCommand) {
     match subcommand {
         ConfigCommand::Get { param } => task_config_get(param),
-        ConfigCommand::Set { param, value } => task_config_set(param, value),
+        ConfigCommand::Set { param, value, move_ref } => task_config_set(param, value, move_ref),
         ConfigCommand::List => task_config_list(),
     }
 }
