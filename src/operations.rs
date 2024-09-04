@@ -7,7 +7,7 @@ use octocrab::models::IssueState::{Closed, Open};
 use octocrab::params::State;
 use gittask::{Comment, Task};
 use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
-use crate::status::{format_status, get_full_status_name, get_starting_status, get_statuses};
+use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, format_datetime, get_text_from_editor, parse_date, read_from_pipe};
 
 pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: Option<String>) {
@@ -19,7 +19,8 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
         }
     };
 
-    let task = Task::new(name, description, get_starting_status());
+    let status_manager = StatusManager::new();
+    let task = Task::new(name, description, status_manager.get_starting_status());
 
     match gittask::create_task(task.unwrap()) {
         Ok(task) => {
@@ -49,7 +50,8 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
 }
 
 pub(crate) fn task_status(id: String, status: String) {
-    let status = get_full_status_name(&status);
+    let status_manager = StatusManager::new();
+    let status = status_manager.get_full_status_name(&status);
     task_set(id, "status".to_string(), status);
 }
 
@@ -214,8 +216,9 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                     }
                 }
             } else {
+                let status_manager = StatusManager::new();
                 let state = match status {
-                    Some(s) => match get_full_status_name(&s).as_ref() {
+                    Some(s) => match status_manager.get_full_status_name(&s).as_ref() {
                         "OPEN" => Some(State::Open),
                         "CLOSED" => Some(State::Closed),
                         _ => None
@@ -311,6 +314,7 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
     match get_user_repo(remote) {
         Ok((user, repo)) => {
             let runtime = get_runtime();
+            let status_manager = StatusManager::new();
             for id in ids {
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
@@ -321,7 +325,7 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
                         let local_status = local_task.get_property("status").unwrap();
                         let remote_status = remote_task.get_property("status").unwrap();
                         if local_status != remote_status {
-                            println!("{}: {} -> {}", id, format_status(remote_status, no_color), format_status(local_status, no_color));
+                            println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
                             let state = if local_status == "CLOSED" { Closed } else { Open };
                             let result = update_github_issue_status(&runtime, &user, &repo, id.parse().unwrap(), state);
                             if result {
@@ -446,8 +450,9 @@ fn print_task(task: Task, no_color: bool) {
     let name_title = colorize_string("Name", DarkGray, no_color);
     println!("{}: {}", name_title, task.get_property("name").unwrap());
 
+    let status_manager = StatusManager::new();
     let status_title = colorize_string("Status", DarkGray, no_color);
-    println!("{}: {}", status_title, format_status(task.get_property("status").unwrap(), no_color));
+    println!("{}: {}", status_title, status_manager.format_status(task.get_property("status").unwrap(), no_color));
 
     task.get_all_properties().iter().filter(|entry| {
         entry.0 != "name" && entry.0 != "status" && entry.0 != "description" && entry.0 != "created" && entry.0 != "author"
@@ -544,11 +549,13 @@ pub(crate) fn task_list(status: Option<String>,
             let from = parse_date(from);
             let until = parse_date(until);
 
+            let status_manager = StatusManager::new();
+
             let mut count = 0;
             for task in tasks {
                 if status.as_ref().is_some() {
                     let task_status = task.get_property("status").unwrap();
-                    if get_full_status_name(status.as_ref().unwrap()).as_str() != task_status {
+                    if status_manager.get_full_status_name(status.as_ref().unwrap()).as_str() != task_status {
                         continue;
                     }
                 }
@@ -594,7 +601,7 @@ pub(crate) fn task_list(status: Option<String>,
                     }
                 }
 
-                print_task_line(task, &columns, no_color);
+                print_task_line(task, &columns, no_color, &status_manager);
 
                 count += 1;
             }
@@ -605,7 +612,7 @@ pub(crate) fn task_list(status: Option<String>,
     }
 }
 
-fn print_task_line(task: Task, columns: &Option<Vec<String>>, no_color: bool) {
+fn print_task_line(task: Task, columns: &Option<Vec<String>>, no_color: bool, status_manager: &StatusManager) {
     let columns = match columns {
         Some(columns) => columns,
         _ => &vec![String::from("id"), String::from("created"), String::from("status"), String::from("name")]
@@ -615,18 +622,18 @@ fn print_task_line(task: Task, columns: &Option<Vec<String>>, no_color: bool) {
 
     columns.iter().for_each(|column| {
         let value = if column == "id" { &task.get_id().unwrap() } else { task.get_property(column).unwrap_or(&empty_string) };
-        print_column(column, &value, no_color);
+        print_column(column, &value, no_color, status_manager);
     });
     println!();
 }
 
-fn print_column(column: &String, value: &String, no_color: bool) {
+fn print_column(column: &String, value: &String, no_color: bool, status_manager: &StatusManager) {
     match no_color {
         false => {
             match column.as_str() {
                 "id" => print!("{} ", DarkGray.paint(value)),
                 "created" => print!("{} ", Fixed(239).paint(format_datetime(value.parse().unwrap_or(0)))),
-                "status" => print!("{} ", format_status(value, no_color)),
+                "status" => print!("{} ", status_manager.format_status(value, no_color)),
                 "author" => print!("{} ", format_author(value, no_color)),
                 _ => print!("{} ", value),
             }
@@ -662,9 +669,10 @@ pub(crate) fn task_stats(no_color: bool) {
             println!("Total tasks: {total}");
             println!();
 
-            for status in get_statuses() {
+            let status_manager = StatusManager::new();
+            for status in status_manager.get_statuses() {
                 if let Some(count) = status_stats.get(status.get_name()) {
-                    println!("{}: {}", format_status(status.get_name(), no_color), count);
+                    println!("{}: {}", status_manager.format_status(status.get_name(), no_color), count);
                 }
             }
 
