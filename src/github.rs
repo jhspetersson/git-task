@@ -246,5 +246,5 @@ pub fn list_github_origins(remotes: Vec<String>) -> Result<Vec<(String, String)>
 }
 
 fn get_token_from_env() -> Option<String> {
-    std::env::var("GITHUB_TOKEN").or(std::env::var("GITHUB_API_TOKEN")).ok()
+    std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GITHUB_API_TOKEN")).ok()
 }

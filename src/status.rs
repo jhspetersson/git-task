@@ -49,7 +49,7 @@ impl StatusManager {
             false => {
                 let status_color = self.statuses.iter().find_map(|saved_status| {
                     if status == saved_status.name { Some(saved_status.color.clone()) } else { None }
-                }).or(Some("Default".to_string())).unwrap();
+                }).or_else(|| Some("Default".to_string())).unwrap();
 
                 let status_color = match status_color.as_str() {
                     "Red" => Red,

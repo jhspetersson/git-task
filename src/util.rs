@@ -55,8 +55,8 @@ pub fn get_text_from_editor() -> Option<String> {
     let editor = match gittask::get_config_value("core.editor") {
         Ok(s) => s,
         _ => std::env::var("VISUAL")
-            .or(std::env::var("EDITOR"))
-            .or::<Result<String, std::env::VarError>>(Ok("vi".to_string()))
+            .or_else(|_| std::env::var("EDITOR"))
+            .or_else(|_| Ok::<String, std::env::VarError>("vi".to_string()))
             .unwrap()
     };
 
