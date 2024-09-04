@@ -1,5 +1,5 @@
 use nu_ansi_term::AnsiString;
-use nu_ansi_term::Color::{Default, Green, Red, Yellow};
+use nu_ansi_term::Color::{Black, Blue, Cyan, DarkGray, Default, Green, LightBlue, LightCyan, LightGray, LightGreen, LightMagenta, LightPurple, LightRed, LightYellow, Magenta, Purple, Red, White, Yellow};
 
 pub struct Status {
     name: String,
@@ -52,9 +52,24 @@ impl StatusManager {
                 }).or_else(|| Some("Default".to_string())).unwrap();
 
                 let status_color = match status_color.as_str() {
+                    "Black" => Black,
+                    "DarkGray" => DarkGray,
                     "Red" => Red,
-                    "Yellow" => Yellow,
+                    "LightRed" => LightRed,
                     "Green" => Green,
+                    "LightGreen" => LightGreen,
+                    "Yellow" => Yellow,
+                    "LightYellow" => LightYellow,
+                    "Blue" => Blue,
+                    "LightBlue" => LightBlue,
+                    "Purple" => Purple,
+                    "LightPurple" => LightPurple,
+                    "Magenta" => Magenta,
+                    "LightMagenta" => LightMagenta,
+                    "Cyan" => Cyan,
+                    "LightCyan" => LightCyan,
+                    "White" => White,
+                    "LightGray" => LightGray,
                     _ => Default
                 };
 
