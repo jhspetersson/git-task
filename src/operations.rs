@@ -7,7 +7,7 @@ use octocrab::models::IssueState::{Closed, Open};
 use octocrab::params::State;
 use gittask::{Comment, Task};
 use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
-use crate::status::{format_status, get_full_status_name, get_statuses};
+use crate::status::{format_status, get_full_status_name, get_starting_status, get_statuses};
 use crate::util::{capitalize, colorize_string, format_datetime, get_text_from_editor, parse_date, read_from_pipe};
 
 pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: Option<String>) {
@@ -19,7 +19,7 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
         }
     };
 
-    let task = Task::new(name, description, "OPEN".to_owned());
+    let task = Task::new(name, description, get_starting_status());
 
     match gittask::create_task(task.unwrap()) {
         Ok(task) => {

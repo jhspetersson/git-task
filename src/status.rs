@@ -58,3 +58,7 @@ pub(crate) fn get_full_status_name(status: &String) -> String {
         if status == saved_status.shortcut.as_str() { Some(saved_status.name.clone()) } else { None }
     }).unwrap_or(status.clone())
 }
+
+pub(crate) fn get_starting_status() -> String {
+    get_statuses().first().unwrap().name.clone()
+}
