@@ -2,11 +2,12 @@ use std::collections::HashMap;
 
 use chrono::{Local, TimeZone};
 use nu_ansi_term::AnsiString;
-use nu_ansi_term::Color::{Cyan, DarkGray, Fixed, Green, Red, Yellow};
+use nu_ansi_term::Color::{Cyan, DarkGray, Fixed};
 use octocrab::models::IssueState::{Closed, Open};
 use octocrab::params::State;
 use gittask::{Comment, Task};
 use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
+use crate::status::{format_status, get_full_status_name};
 use crate::util::{capitalize, colorize_string, format_datetime, get_text_from_editor, parse_date, read_from_pipe};
 
 pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: Option<String>) {
@@ -48,17 +49,8 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
 }
 
 pub(crate) fn task_status(id: String, status: String) {
-    let status = get_full_status(&status);
+    let status = get_full_status_name(&status);
     task_set(id, "status".to_string(), status);
-}
-
-fn get_full_status(status: &String) -> String {
-    match status.as_str() {
-        "o" => String::from("OPEN"),
-        "i" => String::from("IN_PROGRESS"),
-        "c" => String::from("CLOSED"),
-        status => String::from(status)
-    }
 }
 
 pub(crate) fn task_get(id: String, prop_name: String) {
@@ -223,7 +215,7 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                 }
             } else {
                 let state = match status {
-                    Some(s) => match get_full_status(&s).as_ref() {
+                    Some(s) => match get_full_status_name(&s).as_ref() {
                         "OPEN" => Some(State::Open),
                         "CLOSED" => Some(State::Closed),
                         _ => None
@@ -504,20 +496,6 @@ fn print_comment(comment: &Comment, no_color: bool) {
     println!("{}", comment.get_text());
 }
 
-fn format_status(status: &str, no_color: bool) -> AnsiString {
-    match no_color {
-        false => {
-            match status {
-                "OPEN" => Red.paint("OPEN"),
-                "IN_PROGRESS" => Yellow.paint("IN_PROGRESS"),
-                "CLOSED" => Green.paint("CLOSED"),
-                s => s.into()
-            }
-        },
-        true => status.into()
-    }
-}
-
 fn format_author(author: &str, no_color: bool) -> AnsiString {
     if no_color { author.into() } else { Cyan.paint(author) }
 }
@@ -570,7 +548,7 @@ pub(crate) fn task_list(status: Option<String>,
             for task in tasks {
                 if status.as_ref().is_some() {
                     let task_status = task.get_property("status").unwrap();
-                    if get_full_status(status.as_ref().unwrap()).as_str() != task_status {
+                    if get_full_status_name(status.as_ref().unwrap()).as_str() != task_status {
                         continue;
                     }
                 }

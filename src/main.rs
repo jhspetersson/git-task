@@ -1,5 +1,6 @@
 mod github;
 mod operations;
+mod status;
 mod util;
 
 extern crate gittask;
