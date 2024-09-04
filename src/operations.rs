@@ -7,7 +7,7 @@ use octocrab::models::IssueState::{Closed, Open};
 use octocrab::params::State;
 use gittask::{Comment, Task};
 use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
-use crate::status::{format_status, get_full_status_name};
+use crate::status::{format_status, get_full_status_name, get_statuses};
 use crate::util::{capitalize, colorize_string, format_datetime, get_text_from_editor, parse_date, read_from_pipe};
 
 pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: Option<String>) {
@@ -662,16 +662,10 @@ pub(crate) fn task_stats(no_color: bool) {
             println!("Total tasks: {total}");
             println!();
 
-            if let Some(count) = status_stats.get("OPEN") {
-                println!("{}: {}", format_status("OPEN", no_color), count);
-            }
-
-            if let Some(count) = status_stats.get("IN_PROGRESS") {
-                println!("{}: {}", format_status("IN_PROGRESS", no_color), count);
-            }
-
-            if let Some(count) = status_stats.get("CLOSED") {
-                println!("{}: {}", format_status("CLOSED", no_color), count);
+            for status in get_statuses() {
+                if let Some(count) = status_stats.get(status.get_name()) {
+                    println!("{}: {}", format_status(status.get_name(), no_color), count);
+                }
             }
 
             if !author_stats.is_empty() {

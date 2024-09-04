@@ -7,7 +7,13 @@ pub struct Status {
     color: String,
 }
 
-fn get_statuses() -> Vec<Status> {
+impl Status {
+    pub(crate) fn get_name(&self) -> &str {
+        &self.name
+    }
+}
+
+pub(crate) fn get_statuses() -> Vec<Status> {
     vec![
         Status {
             name: String::from("OPEN"),
