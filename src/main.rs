@@ -61,9 +61,15 @@ enum Command {
         name: String,
         /// task description
         description: Option<String>,
-        /// skip editing description in the editor
+        /// Skip editing description in the editor
         #[arg(short, long, conflicts_with = "description")]
         no_desc: bool,
+        /// Also push task to the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
     },
     /// Update task status
     Status {
@@ -228,7 +234,7 @@ fn main() {
     match args.command {
         Some(Command::List { status, keyword, from, until, author, columns, sort, limit, no_color }) => task_list(status, keyword, from, until, author, columns, sort, limit, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
-        Some(Command::Create { name, description, no_desc }) => task_create(name, description, no_desc),
+        Some(Command::Create { name, description, no_desc, push, remote }) => task_create(name, description, no_desc, push, remote),
         Some(Command::Status { id, status }) => task_status(id, status),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
         Some(Command::Set { id, prop_name, value }) => task_set(id, prop_name, value),

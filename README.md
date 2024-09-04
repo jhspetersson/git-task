@@ -83,6 +83,7 @@ Creates a new task.
     git task create "Fix my Fizz Buzz implementation"
     git task create "Task title" "Task description"
     git task create "This task goes without description" --no-desc
+    git task create "Create a task and push it to GitHub" --push
 
 ### status
 

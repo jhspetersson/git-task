@@ -9,7 +9,7 @@ use gittask::{Comment, Task};
 use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
 use crate::util::{capitalize, colorize_string, format_datetime, get_text_from_editor, parse_date, read_from_pipe};
 
-pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool) {
+pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: Option<String>) {
     let description = match description {
         Some(description) => description,
         None => match no_desc {
@@ -21,8 +21,29 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
     let task = Task::new(name, description, "OPEN".to_owned());
 
     match gittask::create_task(task.unwrap()) {
-        Ok(task) => println!("Task ID {} created", task.get_id().unwrap()),
-        Err(e) => eprintln!("ERROR: {e}"),
+        Ok(task) => {
+            println!("Task ID {} created", task.get_id().unwrap());
+
+            if push {
+                match get_user_repo(remote) {
+                    Ok((user, repo)) => {
+                        let runtime = get_runtime();
+                        match create_github_issue(&runtime, &user, &repo, &task) {
+                            Ok(id) => {
+                                println!("Sync: Created REMOTE task ID {id}");
+                                match gittask::update_task_id(&task.get_id().unwrap(), &id) {
+                                    Ok(_) => println!("Task ID {} -> {} updated", task.get_id().unwrap(), id),
+                                    Err(e) => eprintln!("ERROR: {e}")
+                                }
+                            },
+                            Err(e) => eprintln!("ERROR: {e}")
+                        }
+                    },
+                    Err(e) => eprintln!("ERROR: {e}")
+                }
+            }
+        },
+        Err(e) => eprintln!("ERROR: {e}")
     };
 }
 
