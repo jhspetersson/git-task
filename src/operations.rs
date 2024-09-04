@@ -559,7 +559,7 @@ pub(crate) fn task_list(status: Option<String>,
 
                         ordering.unwrap()
                     },
-                    _ => a.get_id().unwrap().parse::<u64>().unwrap_or(0).cmp(&b.get_id().unwrap().parse::<u64>().unwrap_or(0))
+                    _ => b.get_id().unwrap().parse::<u64>().unwrap_or(0).cmp(&a.get_id().unwrap().parse::<u64>().unwrap_or(0))
                 }
             });
 
