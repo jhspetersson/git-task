@@ -34,7 +34,15 @@ pub struct StatusManager {
 
 impl StatusManager {
     pub fn new() -> StatusManager {
-        let statuses = read_config().unwrap_or_else(|_| vec![
+        let statuses = read_config().unwrap_or_else(|_| Self::get_defaults());
+
+        StatusManager {
+            statuses
+        }
+    }
+
+    fn get_defaults() -> Vec<Status> {
+        vec![
             Status {
                 name: String::from("OPEN"),
                 shortcut: String::from("o"),
@@ -53,11 +61,7 @@ impl StatusManager {
                 color: String::from("Green"),
                 is_done: true,
             }
-        ]);
-
-        StatusManager {
-            statuses
-        }
+        ]
     }
 
     pub fn get_statuses(&self) -> &Vec<Status> {
@@ -67,6 +71,10 @@ impl StatusManager {
     pub fn set_statuses(&mut self, statuses: Vec<Status>) -> Result<(), String> {
         self.statuses = statuses;
         save_config(&self.statuses)
+    }
+
+    pub fn set_defaults(&mut self) -> Result<(), String> {
+        self.set_statuses(Self::get_defaults())
     }
 
     pub fn format_status<'a>(&self, status: &'a str, no_color: bool) -> AnsiString<'a> {

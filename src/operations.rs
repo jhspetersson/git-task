@@ -806,3 +806,11 @@ pub(crate) fn task_config_status_export(pretty: bool) {
         eprintln!("ERROR serializing status list");
     }
 }
+
+pub(crate) fn task_config_status_reset() {
+    let mut status_manager = StatusManager::new();
+    match status_manager.set_defaults() {
+        Ok(_) => println!("Statuses have been reset"),
+        Err(e) => eprintln!("ERROR: {e}")
+    }
+}
