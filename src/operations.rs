@@ -15,7 +15,7 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
         Some(description) => description,
         None => match no_desc {
             true => String::from(""),
-            false => get_text_from_editor().unwrap_or_else(|| String::from(""))
+            false => get_text_from_editor(None).unwrap_or_else(|| String::from(""))
         }
     };
 
@@ -90,6 +90,30 @@ pub(crate) fn task_set(id: String, prop_name: String, value: String) {
                 Err(e) => eprintln!("ERROR: {e}"),
             }
         }
+    }
+}
+
+pub(crate) fn task_edit(id: String, prop_name: String) {
+    match gittask::find_task(&id) {
+        Ok(Some(mut task)) => {
+            match task.get_property(&prop_name) {
+                Some(value) => {
+                    match get_text_from_editor(Some(value)) {
+                        Some(text) => {
+                            task.set_property(prop_name, text);
+                            match gittask::update_task(task) {
+                                Ok(_) => println!("Task ID {id} updated"),
+                                Err(e) => eprintln!("ERROR: {e}"),
+                            }
+                        },
+                        None => eprintln!("Editing failed"),
+                    }
+                },
+                None => eprintln!("Task property {prop_name} not found")
+            }
+        },
+        Ok(None) => eprintln!("Task ID {id} not found"),
+        Err(e) => eprintln!("ERROR: {e}"),
     }
 }
 

@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{IsTerminal, Read};
+use std::io::{IsTerminal, Read, Write};
 use std::process::Command;
 use std::time::{Duration, UNIX_EPOCH};
 use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
@@ -48,9 +48,13 @@ pub fn read_from_pipe() -> Option<String> {
     }
 }
 
-pub fn get_text_from_editor() -> Option<String> {
+pub fn get_text_from_editor(text: Option<&String>) -> Option<String> {
     let tmp_file = tempfile::Builder::new().prefix("git-task").suffix(".txt").keep(true).tempfile().ok()?;
-    let _ = File::create(tmp_file.path()).unwrap();
+    let mut file = File::create(tmp_file.path()).unwrap();
+
+    if let Some(text) = text {
+        write!(file, "{}", text).ok()?;
+    }
 
     let editor = match gittask::get_config_value("core.editor") {
         Ok(s) => s,

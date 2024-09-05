@@ -103,6 +103,12 @@ Sets task property.
 
     git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!"
 
+### edit
+
+Edit task property in the default git editor.
+
+    git task edit 1 description
+
 ### comment
 
 Add or remove comments:
