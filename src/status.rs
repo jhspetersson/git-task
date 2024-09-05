@@ -7,6 +7,7 @@ pub struct Status {
     name: String,
     shortcut: String,
     color: String,
+    is_done: bool,
 }
 
 impl Status {
@@ -21,6 +22,10 @@ impl Status {
     pub(crate) fn get_color(&self) -> &str {
         &self.color
     }
+
+    pub(crate) fn is_done(&self) -> &bool {
+        &self.is_done
+    }
 }
 
 pub struct StatusManager {
@@ -34,16 +39,19 @@ impl StatusManager {
                 name: String::from("OPEN"),
                 shortcut: String::from("o"),
                 color: String::from("Red"),
+                is_done: false,
             },
             Status {
                 name: String::from("IN_PROGRESS"),
                 shortcut: String::from("i"),
                 color: String::from("Yellow"),
+                is_done: false,
             },
             Status {
                 name: String::from("CLOSED"),
                 shortcut: String::from("c"),
                 color: String::from("Green"),
+                is_done: true,
             }
         ]);
 
@@ -106,13 +114,14 @@ impl StatusManager {
         self.statuses.first().unwrap().name.clone()
     }
 
-    pub fn get_property(&self, status: &String, property: &String) -> Option<String> {
+    pub fn get_property(&self, status: &str, property: &str) -> Option<String> {
         self.statuses.iter().find_map(|saved_status| {
             if status == saved_status.name.as_str() {
-                match property.as_str() {
+                match property {
                     "name" => return Some(saved_status.name.clone()),
                     "shortcut" => return Some(saved_status.shortcut.clone()),
                     "color" => return Some(saved_status.color.clone()),
+                    "is_done" => return Some(saved_status.is_done.to_string()),
                     _ => None
                 }
             } else { None }
@@ -134,6 +143,9 @@ impl StatusManager {
                     },
                     "color" => {
                         saved_status.color = value.clone(); Ok(())
+                    },
+                    "is_done" => {
+                        saved_status.is_done = value.parse::<bool>().unwrap(); Ok(())
                     },
                     _ => Err("Unknown property".to_string())
                 };

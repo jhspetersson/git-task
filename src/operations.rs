@@ -243,29 +243,25 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
             } else {
                 let status_manager = StatusManager::new();
                 let state = match status {
-                    Some(s) => match status_manager.get_full_status_name(&s).as_ref() {
-                        "OPEN" => Some(State::Open),
-                        "CLOSED" => Some(State::Closed),
-                        _ => None
+                    Some(s) => {
+                        let status = status_manager.get_full_status_name(&s);
+                        let is_done = status_manager.get_property(&status, "is_done").unwrap().parse::<bool>().unwrap();
+                        if is_done { State::Closed } else { State::Open }
                     },
-                    None => Some(State::All)
+                    None => State::All
                 };
-                match state {
-                    Some(state) => {
-                        let tasks = list_github_issues(user.to_string(), repo.to_string(), !no_comments, limit, state);
 
-                        if tasks.is_empty() {
-                            println!("No tasks found");
-                        } else {
-                            for task in tasks {
-                                match gittask::create_task(task) {
-                                    Ok(task) => println!("Task ID {} imported", task.get_id().unwrap()),
-                                    Err(e) => eprintln!("ERROR: {e}"),
-                                }
-                            }
+                let tasks = list_github_issues(user.to_string(), repo.to_string(), !no_comments, limit, state);
+
+                if tasks.is_empty() {
+                    println!("No tasks found");
+                } else {
+                    for task in tasks {
+                        match gittask::create_task(task) {
+                            Ok(task) => println!("Task ID {} imported", task.get_id().unwrap()),
+                            Err(e) => eprintln!("ERROR: {e}"),
                         }
-                    },
-                    None => eprintln!("ERROR: Can't pull tasks with this status, only OPEN and CLOSED are supported"),
+                    }
                 }
             }
         },
@@ -758,8 +754,9 @@ pub(crate) fn task_config_status_set(name: String, param: String, value: String)
 
 pub(crate) fn task_config_status_list() {
     let status_manager = StatusManager::new();
+    println!("Name\tShortcut\tColor\tIs DONE");
     status_manager.get_statuses().iter().for_each(|status| {
-        println!("{} {} {}", status.get_name(), status.get_shortcut(), status.get_color());
+        println!("{}\t{}\t{}\t{}", status.get_name(), status.get_shortcut(), status.get_color(), status.is_done());
     })
 }
 
