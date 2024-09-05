@@ -7,7 +7,7 @@ extern crate gittask;
 
 use clap::{Parser, Subcommand};
 
-use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_config_get, task_config_list, task_config_set, task_config_status_get, task_config_status_list, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
+use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_config_get, task_config_list, task_config_set, task_config_status_export, task_config_status_get, task_config_status_import, task_config_status_list, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -261,6 +261,14 @@ enum StatusCommand {
     },
     /// List task statuses
     List,
+    /// Import task statuses from JSON
+    Import,
+    /// Export task statuses
+    Export {
+        /// Prettify output
+        #[arg(short, long)]
+        pretty: bool,
+    },
 }
 
 fn main() {
@@ -308,5 +316,7 @@ fn task_config_status(subcommand: StatusCommand) {
         StatusCommand::Get { name, param } => task_config_status_get(name, param),
         StatusCommand::Set { name, param, value } => task_config_status_set(name, param, value),
         StatusCommand::List => task_config_status_list(),
+        StatusCommand::Import => task_config_status_import(),
+        StatusCommand::Export { pretty } => task_config_status_export(pretty),
     }
 }

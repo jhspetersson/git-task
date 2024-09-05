@@ -7,6 +7,7 @@ use octocrab::models::IssueState::{Closed, Open};
 use octocrab::params::State;
 use gittask::{Comment, Task};
 use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
+use crate::status;
 use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, format_datetime, get_text_from_editor, parse_date, read_from_pipe};
 
@@ -760,4 +761,32 @@ pub(crate) fn task_config_status_list() {
     status_manager.get_statuses().iter().for_each(|status| {
         println!("{} {} {}", status.get_name(), status.get_shortcut(), status.get_color());
     })
+}
+
+pub(crate) fn task_config_status_import() {
+    if let Some(input) = read_from_pipe() {
+        match status::parse_statuses(input) {
+            Ok(statuses) => {
+                let mut status_manager = StatusManager::new();
+                match status_manager.set_statuses(statuses) {
+                    Ok(_) => println!("Import successful"),
+                    Err(e) => eprintln!("ERROR: {e}")
+                }
+            },
+            Err(e) => eprintln!("{e}")
+        }
+    } else {
+        eprintln!("Can't read from pipe");
+    }
+}
+
+pub(crate) fn task_config_status_export(pretty: bool) {
+    let status_manager = StatusManager::new();
+    let func = if pretty { serde_json::to_string_pretty } else { serde_json::to_string };
+
+    if let Ok(result) = func(&status_manager.get_statuses()) {
+        println!("{}", result);
+    } else {
+        eprintln!("ERROR serializing status list");
+    }
 }

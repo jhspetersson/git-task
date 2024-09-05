@@ -56,6 +56,11 @@ impl StatusManager {
         &self.statuses
     }
 
+    pub fn set_statuses(&mut self, statuses: Vec<Status>) -> Result<(), String> {
+        self.statuses = statuses;
+        save_config(&self.statuses)
+    }
+
     pub fn format_status<'a>(&self, status: &'a str, no_color: bool) -> AnsiString<'a> {
         match no_color {
             false => {
@@ -145,14 +150,12 @@ impl StatusManager {
             None => Err("No such status".into())
         }
     }
+
 }
 
 fn read_config() -> Result<Vec<Status>, String> {
     match gittask::get_config_value("task.statuses") {
-        Ok(s) => {
-            let result: Vec<Status> = serde_json::from_str(&s).map_err(|e| e.to_string())?;
-            Ok(result)
-        },
+        Ok(s) => parse_statuses(s),
         Err(e) => Err(e)
     }
 }
@@ -163,4 +166,9 @@ fn save_config(statuses: &Vec<Status>) -> Result<(), String> {
         Ok(_) => Ok(()),
         Err(e) => Err(e)
     }
+}
+
+pub fn parse_statuses(input: String) -> Result<Vec<Status>, String> {
+    let result: Vec<Status> = serde_json::from_str(&input).map_err(|e| e.to_string())?;
+    Ok(result)
 }

@@ -197,6 +197,11 @@ Configure task statuses:
     git task config status set CLOSED name FINISHED
     git task config status set FINISHED shortcut f
 
+You can export status config, edit it manually and import it back:
+
+    git task config status export --pretty >statuses.json
+    git task config status import <statuses.json
+
 ### help
 
 Show available commands or their arguments.
