@@ -2,7 +2,7 @@ use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{Black, Blue, Cyan, DarkGray, Default, Green, LightBlue, LightCyan, LightGray, LightGreen, LightMagenta, LightPurple, LightRed, LightYellow, Magenta, Purple, Red, White, Yellow};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Status {
     name: String,
     shortcut: String,
@@ -128,7 +128,8 @@ impl StatusManager {
         })
     }
 
-    pub fn set_property(&mut self, status: &String, property: &String, value: &String) -> Result<(), String> {
+    pub fn set_property(&mut self, status: &String, property: &String, value: &String) -> Result<Option<String>, String> {
+        let statuses = self.statuses.clone();
         let status = self.statuses.iter_mut().find(|saved_status| {
             status == saved_status.name.as_str()
         });
@@ -136,23 +137,33 @@ impl StatusManager {
             Some(saved_status) => {
                 let set_result = match property.as_str() {
                     "name" => {
-                        saved_status.name = value.clone(); Ok(())
+                        let prev_value = saved_status.name.clone();
+                        if statuses.iter().find(|status| status.name == value.to_string()).is_some() {
+                            Err("Name already exists for another status".to_string())
+                        } else {
+                            saved_status.name = value.clone();
+                            Ok(Some(prev_value))
+                        }
                     },
                     "shortcut" => {
-                        saved_status.shortcut = value.clone(); Ok(())
+                        if statuses.iter().find(|status| status.shortcut == value.to_string()).is_some() {
+                            Err("Shortcut already exists for another status".to_string())
+                        } else {
+                            saved_status.shortcut = value.clone(); Ok(None)
+                        }
                     },
                     "color" => {
-                        saved_status.color = value.clone(); Ok(())
+                        saved_status.color = value.clone(); Ok(None)
                     },
                     "is_done" => {
-                        saved_status.is_done = value.parse::<bool>().unwrap(); Ok(())
+                        saved_status.is_done = value.parse::<bool>().unwrap(); Ok(None)
                     },
                     _ => Err("Unknown property".to_string())
                 };
                 match set_result {
-                    Ok(_) => {
+                    Ok(prev_value) => {
                         match save_config(&self.statuses) {
-                            Ok(_) => Ok(()),
+                            Ok(_) => Ok(prev_value),
                             Err(e) => Err(e)
                         }
                     },

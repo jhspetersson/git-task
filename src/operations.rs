@@ -747,7 +747,26 @@ pub(crate) fn task_config_status_get(name: String, param: String) {
 pub(crate) fn task_config_status_set(name: String, param: String, value: String) {
     let mut status_manager = StatusManager::new();
     match status_manager.set_property(&name, &param, &value) {
-        Ok(_) => println!("{name} {param} has been updated"),
+        Ok(prev_value) => {
+            println!("{name} {param} has been updated");
+
+            if param.as_str() == "name" && prev_value.is_some() {
+                let prev_status = prev_value.unwrap();
+                match gittask::list_tasks() {
+                    Ok(tasks) => {
+                        for mut task in tasks {
+                            if task.get_property("status").unwrap() == prev_status.as_str() {
+                                task.set_property("status".to_string(), value.clone());
+                                if let Err(e) = gittask::update_task(task) {
+                                    eprintln!("ERROR: {e}");
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => eprintln!("ERROR: {e}")
+                }
+            }
+        },
         Err(e) => eprintln!("ERROR: {e}")
     }
 }
