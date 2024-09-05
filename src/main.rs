@@ -7,7 +7,7 @@ extern crate gittask;
 
 use clap::{Parser, Subcommand};
 
-use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_config_get, task_config_list, task_config_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
+use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_config_get, task_config_list, task_config_set, task_config_status_get, task_config_status_list, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -234,6 +234,33 @@ enum ConfigCommand {
     },
     /// List configuration parameters
     List,
+    /// Configure task statuses
+    Status {
+        #[command(subcommand)]
+        subcommand: StatusCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum StatusCommand {
+    /// Get task status
+    Get {
+        /// status name
+        name: String,
+        /// status parameter
+        param: String,
+    },
+    /// Set task status configuration
+    Set {
+        /// status name
+        name: String,
+        /// status parameter
+        param: String,
+        /// parameter value
+        value: String,
+    },
+    /// List task statuses
+    List,
 }
 
 fn main() {
@@ -272,5 +299,14 @@ fn task_config(subcommand: ConfigCommand) {
         ConfigCommand::Get { param } => task_config_get(param),
         ConfigCommand::Set { param, value, move_ref } => task_config_set(param, value, move_ref),
         ConfigCommand::List => task_config_list(),
+        ConfigCommand::Status { subcommand } => task_config_status(subcommand),
+    }
+}
+
+fn task_config_status(subcommand: StatusCommand) {
+    match subcommand {
+        StatusCommand::Get { name, param } => task_config_status_get(name, param),
+        StatusCommand::Set { name, param, value } => task_config_status_set(name, param, value),
+        StatusCommand::List => task_config_status_list(),
     }
 }

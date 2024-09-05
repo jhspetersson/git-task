@@ -190,6 +190,13 @@ Remove old ref after setting a new one:
 
     git task config set task.ref refs/heads/tasks --move
 
+Configure task statuses:
+
+    git task config status list
+    git task config status set CLOSED color Magenta
+    git task config status set CLOSED name FINISHED
+    git task config status set FINISHED shortcut f
+
 ### help
 
 Show available commands or their arguments.

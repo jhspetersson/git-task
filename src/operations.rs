@@ -738,3 +738,26 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) {
 pub(crate) fn task_config_list() {
     println!("task.ref");
 }
+
+pub(crate) fn task_config_status_get(name: String, param: String) {
+    let status_manager = StatusManager::new();
+    match status_manager.get_property(&name, &param) {
+        Some(value) => println!("{}", value),
+        None => eprintln!("Unknown status {} or property: {}", name, param)
+    }
+}
+
+pub(crate) fn task_config_status_set(name: String, param: String, value: String) {
+    let mut status_manager = StatusManager::new();
+    match status_manager.set_property(&name, &param, &value) {
+        Ok(_) => println!("{name} {param} has been updated"),
+        Err(e) => eprintln!("ERROR: {e}")
+    }
+}
+
+pub(crate) fn task_config_status_list() {
+    let status_manager = StatusManager::new();
+    status_manager.get_statuses().iter().for_each(|status| {
+        println!("{} {} {}", status.get_name(), status.get_shortcut(), status.get_color());
+    })
+}

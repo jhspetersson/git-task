@@ -409,6 +409,13 @@ pub fn get_config_value(key: &str) -> Result<String, String> {
     Ok(map_err!(config.get_string(key)))
 }
 
+pub fn set_config_value(key: &str, value: &str) -> Result<(), String> {
+    let repo = map_err!(Repository::open("."));
+    let mut config = map_err!(repo.config());
+    map_err!(config.set_str(key, value));
+    Ok(())
+}
+
 pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
     let repo = map_err!(Repository::open("."));
 
