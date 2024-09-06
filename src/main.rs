@@ -20,7 +20,7 @@ struct Args {
 enum Command {
     /// List all tasks
     List {
-        /// Filter by status (o - OPEN, i - IN_PROGRESS, c - CLOSED)
+        /// Filter by status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
         #[arg(short, long)]
         status: Option<String>,
         /// Filter by keyword
@@ -57,6 +57,7 @@ enum Command {
         no_color: bool,
     },
     /// Create a new task
+    #[clap(visible_aliases(["add", "new"]))]
     Create {
         /// task name
         name: String,
@@ -76,7 +77,7 @@ enum Command {
     Status {
         /// task ID
         id: String,
-        /// status (o - OPEN, i - IN_PROGRESS, c - CLOSED)
+        /// status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
         status: String,
     },
     /// Get a property
@@ -178,6 +179,7 @@ enum Command {
     /// Delete all tasks
     Clear,
     /// Set configuration parameters
+    #[clap(visible_aliases(["cfg"]))]
     Config {
         #[command(subcommand)]
         subcommand: ConfigCommand,
@@ -187,6 +189,7 @@ enum Command {
 #[derive(Subcommand)]
 enum CommentCommand {
     /// Add a comment
+    #[clap(visible_aliases(["create", "new"]))]
     Add {
         /// task ID
         task_id: String,
@@ -244,6 +247,7 @@ enum ConfigCommand {
 #[derive(Subcommand)]
 enum StatusCommand {
     /// Add a status
+    #[clap(visible_aliases(["create", "add"]))]
     Add {
         /// status name
         name: String,
