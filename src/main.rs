@@ -255,6 +255,7 @@ enum StatusCommand {
         is_done: Option<bool>,
     },
     /// Delete a status
+    #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
         /// status name
         name: String,
