@@ -77,6 +77,26 @@ impl StatusManager {
         self.set_statuses(Self::get_defaults())
     }
 
+    pub fn add_status(&mut self, name: String, shortcut: String, color: String, is_done: bool) -> Result<(), String> {
+        let status = Status {
+            name,
+            shortcut,
+            color,
+            is_done,
+        };
+        self.statuses.push(status);
+        save_config(&self.statuses)
+    }
+
+    pub fn delete_status(&mut self, name: String) -> Result<(), String> {
+        let prev_status_count = self.statuses.len();
+        self.statuses.retain(|s| s.name != name);
+        match prev_status_count == self.statuses.len() {
+            true => Err("Status not found".to_string()),
+            false => save_config(&self.statuses),
+        }
+    }
+
     pub fn format_status<'a>(&self, status: &'a str, no_color: bool) -> AnsiString<'a> {
         match no_color {
             false => {

@@ -7,7 +7,7 @@ extern crate gittask;
 
 use clap::{Parser, Subcommand};
 
-use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_config_get, task_config_list, task_config_set, task_config_status_export, task_config_status_get, task_config_status_import, task_config_status_list, task_config_status_reset, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
+use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_config_get, task_config_list, task_config_set, task_config_status_add, task_config_status_delete, task_config_status_export, task_config_status_get, task_config_status_import, task_config_status_list, task_config_status_reset, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -243,14 +243,30 @@ enum ConfigCommand {
 
 #[derive(Subcommand)]
 enum StatusCommand {
-    /// Get task status
+    /// Add a status
+    Add {
+        /// status name
+        name: String,
+        /// status shortcut
+        shortcut: String,
+        /// status color
+        color: String,
+        /// is it a final status?
+        is_done: Option<bool>,
+    },
+    /// Delete a status
+    Delete {
+        /// status name
+        name: String,
+    },
+    /// Get task status parameter
     Get {
         /// status name
         name: String,
         /// status parameter
         param: String,
     },
-    /// Set task status configuration
+    /// Set task status parameter
     Set {
         /// status name
         name: String,
@@ -315,6 +331,8 @@ fn task_config(subcommand: ConfigCommand) {
 
 fn task_config_status(subcommand: StatusCommand) {
     match subcommand {
+        StatusCommand::Add { name, shortcut, color, is_done } => task_config_status_add(name, shortcut, color, is_done),
+        StatusCommand::Delete { name } => task_config_status_delete(name),
         StatusCommand::Get { name, param } => task_config_status_get(name, param),
         StatusCommand::Set { name, param, value } => task_config_status_set(name, param, value),
         StatusCommand::List => task_config_status_list(),

@@ -197,10 +197,20 @@ Configure task statuses:
     git task config status set CLOSED name FINISHED
     git task config status set FINISHED shortcut f
 
+Add and delete statuses:
+
+    git task config status add ARCHIVE a Magenta true
+    git task config status delete ARCHIVE
+    git task config status delete a
+
 You can export status config, edit it manually and import it back:
 
     git task config status export --pretty >statuses.json
     git task config status import <statuses.json
+
+If everything went wrong:
+
+    git task config status reset
 
 ### help
 

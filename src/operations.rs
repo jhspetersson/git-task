@@ -736,6 +736,23 @@ pub(crate) fn task_config_list() {
     println!("task.ref");
 }
 
+pub(crate) fn task_config_status_add(name: String, shortcut: String, color: String, is_done: Option<bool>) {
+    let mut status_manager = StatusManager::new();
+    match status_manager.add_status(name, shortcut, color, is_done.unwrap_or(false)) {
+        Ok(_) => println!("Status has been added"),
+        Err(e) => eprintln!("ERROR: {e}")
+    }
+}
+
+pub(crate) fn task_config_status_delete(name: String) {
+    let mut status_manager = StatusManager::new();
+    let name = status_manager.get_full_status_name(&name);
+    match status_manager.delete_status(name) {
+        Ok(_) => println!("Status has been deleted"),
+        Err(e) => eprintln!("ERROR: {e}")
+    }
+}
+
 pub(crate) fn task_config_status_get(name: String, param: String) {
     let status_manager = StatusManager::new();
     match status_manager.get_property(&name, &param) {
