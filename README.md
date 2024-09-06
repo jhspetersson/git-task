@@ -109,6 +109,11 @@ Edit task property in the default git editor.
 
     git task edit 1 description
 
+For Windows, we recommend anything, but `notepad`. `Notepad++` is just fine.
+You can set it up this way:
+
+    git config --global core.editor "C:\\Program Files\\Notepad++\\notepad++.exe"
+
 ### comment
 
 Add or remove comments:
