@@ -53,7 +53,7 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
 pub(crate) fn task_status(id: String, status: String) {
     let status_manager = StatusManager::new();
     let status = status_manager.get_full_status_name(&status);
-    task_set(id, "status".to_string(), status);
+    task_set(id, "status".to_string(), Some(status), false);
 }
 
 pub(crate) fn task_get(id: String, prop_name: String) {
@@ -69,9 +69,10 @@ pub(crate) fn task_get(id: String, prop_name: String) {
     }
 }
 
-pub(crate) fn task_set(id: String, prop_name: String, value: String) {
+pub(crate) fn task_set(id: String, prop_name: String, value: Option<String>, delete: bool) {
     match prop_name.as_str() {
         "id" => {
+            let value = value.unwrap();
             match gittask::update_task_id(&id, &value) {
                 Ok(_) => {
                     println!("Task ID {id} -> {value} updated");
@@ -85,7 +86,11 @@ pub(crate) fn task_set(id: String, prop_name: String, value: String) {
         _ => {
             match gittask::find_task(&id) {
                 Ok(Some(mut task)) => {
-                    task.set_property(prop_name, value);
+                    if delete {
+                        task.delete_property(&prop_name);
+                    } else {
+                        task.set_property(prop_name, value.unwrap());
+                    }
 
                     match gittask::update_task(task) {
                         Ok(_) => println!("Task ID {id} updated"),

@@ -112,9 +112,14 @@ Prints task property.
 
 ### set
 
-Sets task property.
+Sets task property:
 
     git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!"
+
+Delete property:
+
+    git task set 1 foo bar
+    git task set 1 foo --delete
 
 ### edit
 

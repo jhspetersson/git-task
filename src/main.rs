@@ -94,7 +94,10 @@ enum Command {
         /// property name
         prop_name: String,
         /// property value
-        value: String,
+        value: Option<String>,
+        /// Delete the property
+        #[arg(short, long, conflicts_with = "value", visible_aliases = ["del", "remove", "rem"])]
+        delete: bool,
     },
     /// Edit a property
     Edit {
@@ -305,7 +308,7 @@ fn main() {
         Some(Command::Create { name, description, no_desc, push, remote }) => task_create(name, description, no_desc, push, remote),
         Some(Command::Status { id, status }) => task_status(id, status),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
-        Some(Command::Set { id, prop_name, value }) => task_set(id, prop_name, value),
+        Some(Command::Set { id, prop_name, value, delete }) => task_set(id, prop_name, value, delete),
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
