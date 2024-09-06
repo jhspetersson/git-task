@@ -1,7 +1,9 @@
+use std::env::VarError;
 use std::fs::File;
 use std::io::{IsTerminal, Read, Write};
 use std::process::Command;
 use std::time::{Duration, UNIX_EPOCH};
+
 use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
 use nu_ansi_term::Color;
 
@@ -56,13 +58,12 @@ pub fn get_text_from_editor(text: Option<&String>) -> Option<String> {
         write!(file, "{}", text).ok()?;
     }
 
-    let editor = match gittask::get_config_value("core.editor") {
-        Ok(s) => s,
-        _ => std::env::var("VISUAL")
-            .or_else(|_| std::env::var("EDITOR"))
-            .or_else(|_| Ok::<String, std::env::VarError>("vi".to_string()))
-            .unwrap()
-    };
+    let editor = std::env::var("GIT_EDITOR")
+        .or_else(|_| gittask::get_config_value("core.editor"))
+        .or_else(|_| std::env::var("VISUAL"))
+        .or_else(|_| std::env::var("EDITOR"))
+        .or_else(|_| Ok::<String, VarError>("vi".to_string()))
+        .unwrap();
 
     let mut status = Command::new(editor)
         .arg(tmp_file.path().to_str()?)
