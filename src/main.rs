@@ -5,6 +5,7 @@ mod util;
 
 extern crate gittask;
 
+use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
 use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_config_get, task_config_list, task_config_set, task_config_status_add, task_config_status_delete, task_config_status_export, task_config_status_get, task_config_status_import, task_config_status_list, task_config_status_reset, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
@@ -312,10 +313,10 @@ enum StatusCommand {
     Reset,
 }
 
-fn main() {
+fn main() -> ExitCode {
     let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
-    match args.command {
+    let success = match args.command {
         Some(Command::List { status, keyword, from, until, author, columns, sort, limit, no_color }) => task_list(status, keyword, from, until, author, columns, sort, limit, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
         Some(Command::Create { name, description, no_desc, push, remote }) => task_create(name, description, no_desc, push, remote),
@@ -332,11 +333,12 @@ fn main() {
         Some(Command::Delete { ids, push, remote }) => task_delete(ids, push, remote),
         Some(Command::Clear) => task_clear(),
         Some(Command::Config { subcommand }) => task_config(subcommand),
-        None => { }
-    }
+        None => false
+    };
+    if success { ExitCode::SUCCESS } else { ExitCode::FAILURE }
 }
 
-fn task_comment(subcommand: CommentCommand) {
+fn task_comment(subcommand: CommentCommand) -> bool {
     match subcommand {
         CommentCommand::Add { task_id, text, push, remote } => task_comment_add(task_id, text, push, remote),
         CommentCommand::Edit { task_id, comment_id, push, remote } => task_comment_edit(task_id, comment_id, push, remote),
@@ -344,7 +346,7 @@ fn task_comment(subcommand: CommentCommand) {
     }
 }
 
-fn task_config(subcommand: ConfigCommand) {
+fn task_config(subcommand: ConfigCommand) -> bool {
     match subcommand {
         ConfigCommand::Get { param } => task_config_get(param),
         ConfigCommand::Set { param, value, move_ref } => task_config_set(param, value, move_ref),
@@ -353,7 +355,7 @@ fn task_config(subcommand: ConfigCommand) {
     }
 }
 
-fn task_config_status(subcommand: StatusCommand) {
+fn task_config_status(subcommand: StatusCommand) -> bool {
     match subcommand {
         StatusCommand::Add { name, shortcut, color, is_done } => task_config_status_add(name, shortcut, color, is_done),
         StatusCommand::Delete { name, force } => task_config_status_delete(name, force),

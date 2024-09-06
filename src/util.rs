@@ -89,3 +89,13 @@ pub fn get_text_from_editor(text: Option<&String>) -> Option<String> {
 
     Some(contents)
 }
+
+pub fn success_message(message: String) -> bool {
+    println!("{message}");
+    true
+}
+
+pub fn error_message(message: String) -> bool {
+    eprintln!("{message}");
+    false
+}

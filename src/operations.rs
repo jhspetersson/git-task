@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use chrono::{Local, TimeZone};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{Cyan, DarkGray, Fixed};
@@ -9,9 +8,9 @@ use gittask::{Comment, Task};
 use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_comment, update_github_issue_status};
 use crate::status;
 use crate::status::StatusManager;
-use crate::util::{capitalize, colorize_string, format_datetime, get_text_from_editor, parse_date, read_from_pipe};
+use crate::util::{capitalize, colorize_string, error_message, format_datetime, get_text_from_editor, parse_date, read_from_pipe, success_message};
 
-pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: Option<String>) {
+pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: Option<String>) -> bool {
     let description = match description {
         Some(description) => description,
         None => match no_desc {
@@ -26,7 +25,7 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
     match gittask::create_task(task.unwrap()) {
         Ok(task) => {
             println!("Task ID {} created", task.get_id().unwrap());
-
+            let mut success = false;
             if push {
                 match get_user_repo(remote) {
                     Ok((user, repo)) => {
@@ -35,7 +34,10 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
                             Ok(id) => {
                                 println!("Sync: Created REMOTE task ID {id}");
                                 match gittask::update_task_id(&task.get_id().unwrap(), &id) {
-                                    Ok(_) => println!("Task ID {} -> {} updated", task.get_id().unwrap(), id),
+                                    Ok(_) => {
+                                        println!("Task ID {} -> {} updated", task.get_id().unwrap(), id);
+                                        success = true;
+                                    },
                                     Err(e) => eprintln!("ERROR: {e}")
                                 }
                             },
@@ -45,31 +47,32 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
                     Err(e) => eprintln!("ERROR: {e}")
                 }
             }
+            success
         },
-        Err(e) => eprintln!("ERROR: {e}")
-    };
-}
-
-pub(crate) fn task_status(id: String, status: String) {
-    let status_manager = StatusManager::new();
-    let status = status_manager.get_full_status_name(&status);
-    task_set(id, "status".to_string(), Some(status), false);
-}
-
-pub(crate) fn task_get(id: String, prop_name: String) {
-    match gittask::find_task(&id) {
-        Ok(Some(task)) => {
-            match task.get_property(&prop_name) {
-                Some(value) => println!("{value}"),
-                None => eprintln!("Task property {prop_name} not found")
-            }
-        },
-        Ok(None) => eprintln!("Task ID {id} not found"),
-        Err(e) => eprintln!("ERROR: {e}"),
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
 
-pub(crate) fn task_set(id: String, prop_name: String, value: Option<String>, delete: bool) {
+pub(crate) fn task_status(id: String, status: String) -> bool {
+    let status_manager = StatusManager::new();
+    let status = status_manager.get_full_status_name(&status);
+    task_set(id, "status".to_string(), Some(status), false)
+}
+
+pub(crate) fn task_get(id: String, prop_name: String) -> bool {
+    match gittask::find_task(&id) {
+        Ok(Some(task)) => {
+            match task.get_property(&prop_name) {
+                Some(value) => success_message(format!("{value}")),
+                None => error_message(format!("Task property {prop_name} not found"))
+            }
+        },
+        Ok(None) => error_message(format!("Task ID {id} not found")),
+        Err(e) => error_message(format!("ERROR: {e}")),
+    }
+}
+
+pub(crate) fn task_set(id: String, prop_name: String, value: Option<String>, delete: bool) -> bool {
     match prop_name.as_str() {
         "id" => {
             let value = value.unwrap();
@@ -79,8 +82,9 @@ pub(crate) fn task_set(id: String, prop_name: String, value: Option<String>, del
                     if let Err(e) = gittask::delete_tasks(&[&id]) {
                         eprintln!("ERROR: {e}");
                     }
+                    true
                 },
-                Err(e) => eprintln!("ERROR: {e}"),
+                Err(e) => error_message(format!("ERROR: {e}")),
             }
         },
         _ => {
@@ -93,18 +97,18 @@ pub(crate) fn task_set(id: String, prop_name: String, value: Option<String>, del
                     }
 
                     match gittask::update_task(task) {
-                        Ok(_) => println!("Task ID {id} updated"),
-                        Err(e) => eprintln!("ERROR: {e}"),
+                        Ok(_) => success_message(format!("Task ID {id} updated")),
+                        Err(e) => error_message(format!("ERROR: {e}")),
                     }
                 },
-                Ok(None) => eprintln!("Task ID {id} not found"),
-                Err(e) => eprintln!("ERROR: {e}"),
+                Ok(None) => error_message(format!("Task ID {id} not found")),
+                Err(e) => error_message(format!("ERROR: {e}")),
             }
         }
     }
 }
 
-pub(crate) fn task_edit(id: String, prop_name: String) {
+pub(crate) fn task_edit(id: String, prop_name: String) -> bool {
     match gittask::find_task(&id) {
         Ok(Some(mut task)) => {
             match prop_name.as_str() {
@@ -118,11 +122,12 @@ pub(crate) fn task_edit(id: String, prop_name: String) {
                                     if let Err(e) = gittask::delete_tasks(&[&id]) {
                                         eprintln!("ERROR: {e}");
                                     }
+                                    true
                                 },
-                                Err(e) => eprintln!("ERROR: {e}"),
+                                Err(e) => error_message(format!("ERROR: {e}")),
                             }
                         },
-                        None => eprintln!("Editing failed"),
+                        None => error_message("Editing failed".to_string()),
                     }
                 },
                 _ => {
@@ -132,30 +137,29 @@ pub(crate) fn task_edit(id: String, prop_name: String) {
                                 Some(text) => {
                                     task.set_property(prop_name, text);
                                     match gittask::update_task(task) {
-                                        Ok(_) => println!("Task ID {id} updated"),
-                                        Err(e) => eprintln!("ERROR: {e}"),
+                                        Ok(_) => success_message(format!("Task ID {id} updated")),
+                                        Err(e) => error_message(format!("ERROR: {e}")),
                                     }
                                 },
-                                None => eprintln!("Editing failed"),
+                                None => error_message("Editing failed".to_string()),
                             }
                         },
-                        None => eprintln!("Task property {prop_name} not found")
+                        None => error_message(format!("Task property {prop_name} not found"))
                     }
                 }
             }
         },
-        Ok(None) => eprintln!("Task ID {id} not found"),
-        Err(e) => eprintln!("ERROR: {e}"),
+        Ok(None) => error_message(format!("Task ID {id} not found")),
+        Err(e) => error_message(format!("ERROR: {e}")),
     }
 }
 
-pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool, remote: Option<String>) {
+pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool, remote: Option<String>) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             let text = text.or_else(|| get_text_from_editor(None));
             if text.is_none() {
-                eprintln!("No text specified");
-                return;
+                return error_message("No text specified".to_string());
             }
             let text = text.unwrap();
 
@@ -163,7 +167,7 @@ pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool
             match gittask::update_task(task) {
                 Ok(_) => {
                     println!("Task ID {task_id} updated");
-
+                    let mut success = false;
                     if push {
                         match get_user_repo(remote) {
                             Ok((user, repo)) => {
@@ -172,37 +176,39 @@ pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool
                                     Ok(remote_comment_id) => {
                                         println!("Created REMOTE comment ID {}", remote_comment_id);
                                         match gittask::update_comment_id(&task_id, &comment.get_id().unwrap(), &remote_comment_id) {
-                                            Ok(_) => println!("Comment ID {} -> {} updated", &comment.get_id().unwrap(), remote_comment_id),
+                                            Ok(_) => {
+                                                println!("Comment ID {} -> {} updated", &comment.get_id().unwrap(), remote_comment_id);
+                                                success = true;
+                                            },
                                             Err(e) => eprintln!("ERROR: {e}"),
                                         }
                                     },
-                                    Err(e) => eprintln!("ERROR creating REMOTE comment: {}", e)
+                                    Err(e) => eprintln!("ERROR creating REMOTE comment: {e}")
                                 }
                             },
                             Err(e) => eprintln!("ERROR: {e}"),
                         }
                     }
+                    success
                 },
-                Err(e) => eprintln!("ERROR: {e}"),
+                Err(e) => error_message(format!("ERROR: {e}")),
             }
         },
-        Ok(None) => eprintln!("Task ID {task_id} not found"),
-        Err(e) => eprintln!("ERROR: {e}"),
+        Ok(None) => error_message(format!("Task ID {task_id} not found")),
+        Err(e) => error_message(format!("ERROR: {e}")),
     }
 }
 
-pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool, remote: Option<String>) {
+pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool, remote: Option<String>) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             let mut comments = task.get_comments().clone();
             if comments.is_none() || comments.as_ref().unwrap().is_empty() {
-                eprintln!("Task has no comments");
-                return;
+                return error_message("Task has no comments".to_string());
             }
             let comment = comments.as_mut().unwrap().iter_mut().find(|comment| comment.get_id().unwrap() == comment_id);
             if comment.is_none() {
-                eprintln!("Comment not found");
-                return;
+                return error_message("Comment not found".to_string());
             }
             let comment = comment.unwrap();
             match get_text_from_editor(Some(&comment.get_text())) {
@@ -213,36 +219,37 @@ pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool,
                     match gittask::update_task(task) {
                         Ok(_) => {
                             println!("Task ID {task_id} updated");
-
+                            let mut success = false;
                             if push {
                                 match get_user_repo(remote) {
                                     Ok((user, repo)) => {
                                         let comment_id = comment_id.clone().parse().unwrap();
 
                                         match update_github_comment(&user, &repo, comment_id, text) {
-                                            Ok(_) => println!("Sync: REMOTE comment ID {comment_id} has been updated"),
+                                            Ok(_) => {
+                                                println!("Sync: REMOTE comment ID {comment_id} has been updated");
+                                                success = true;
+                                            },
                                             Err(e) => eprintln!("ERROR: {e}")
                                         }
                                     },
                                     Err(e) => eprintln!("ERROR: {e}"),
                                 }
                             }
+                            success
                         },
-                        Err(e) => eprintln!("ERROR: {e}"),
+                        Err(e) => error_message(format!("ERROR: {e}")),
                     }
                 },
-                None => {
-                    eprintln!("No text specified");
-                    return;
-                }
+                None => error_message("No text specified".to_string())
             }
         },
-        Ok(None) => eprintln!("Task ID {task_id} not found"),
-        Err(e) => eprintln!("ERROR: {e}"),
+        Ok(None) => error_message(format!("Task ID {task_id} not found")),
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
 
-pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: bool, remote: Option<String>) {
+pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: bool, remote: Option<String>) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             match task.delete_comment(&comment_id) {
@@ -250,47 +257,50 @@ pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: boo
                     match gittask::update_task(task) {
                         Ok(_) => {
                             println!("Task ID {task_id} updated");
-
+                            let mut success = false;
                             if push {
                                 match get_user_repo(remote) {
                                     Ok((user, repo)) => {
                                         let comment_id = comment_id.clone().parse().unwrap();
                                         match delete_github_comment(&user, &repo, comment_id) {
-                                            Ok(_) => println!("Sync: REMOTE comment ID {comment_id} has been deleted"),
+                                            Ok(_) => {
+                                                println!("Sync: REMOTE comment ID {comment_id} has been deleted");
+                                                success = true;
+                                            },
                                             Err(e) => eprintln!("ERROR: {e}")
                                         }
                                     },
                                     Err(e) => eprintln!("ERROR: {e}"),
                                 }
                             }
+                            success
                         },
-                        Err(e) => eprintln!("ERROR: {e}"),
+                        Err(e) => error_message(format!("ERROR: {e}")),
                     }
                 },
-                Err(e) => eprintln!("ERROR: {e}"),
+                Err(e) => error_message(format!("ERROR: {e}")),
             }
         },
-        Ok(None) => eprintln!("Task ID {task_id} not found"),
-        Err(e) => eprintln!("ERROR: {e}"),
+        Ok(None) => error_message(format!("Task ID {task_id} not found")),
+        Err(e) => error_message(format!("ERROR: {e}")),
     }
 }
 
-pub(crate) fn task_import(ids: Option<Vec<String>>, format: Option<String>) {
+pub(crate) fn task_import(ids: Option<Vec<String>>, format: Option<String>) -> bool {
     if let Some(format) = format {
         if format.to_lowercase() != "json" {
-            eprintln!("Only JSON format is supported");
-            return;
+            return error_message("Only JSON format is supported".to_string());
         }
     }
 
     if let Some(input) = read_from_pipe() {
-        import_from_input(ids, &input);
+        import_from_input(ids, &input)
     } else {
-        eprintln!("Can't read from pipe");
+        error_message("Can't read from pipe".to_string())
     }
 }
 
-fn import_from_input(ids: Option<Vec<String>>, input: &String) {
+fn import_from_input(ids: Option<Vec<String>>, input: &String) -> bool {
     if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(input) {
         for task in tasks {
             let id = task.get_id().unwrap().to_string();
@@ -306,12 +316,13 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) {
                 Err(e) => eprintln!("ERROR: {e}"),
             }
         }
+        true
     } else {
-        eprintln!("Can't deserialize input");
+        error_message("Can't deserialize input".to_string())
     }
 }
 
-pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: Option<String>, remote: Option<String>, no_comments: bool) {
+pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: Option<String>, remote: Option<String>, no_comments: bool) -> bool {
     match get_user_repo(remote) {
         Ok((user, repo)) => {
             println!("Importing tasks from {user}/{repo}...");
@@ -329,6 +340,7 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                         None => eprintln!("Task ID {id} not found")
                     }
                 }
+                true
             } else {
                 let status_manager = StatusManager::new();
                 let state = match status {
@@ -343,7 +355,7 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                 let tasks = list_github_issues(user.to_string(), repo.to_string(), !no_comments, limit, state);
 
                 if tasks.is_empty() {
-                    println!("No tasks found");
+                    success_message("No tasks found".to_string())
                 } else {
                     for task in tasks {
                         match gittask::create_task(task) {
@@ -351,10 +363,11 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                             Err(e) => eprintln!("ERROR: {e}"),
                         }
                     }
+                    true
                 }
             }
         },
-        Err(e) => eprintln!("ERROR: {e}")
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
 
@@ -380,11 +393,10 @@ fn get_user_repo(remote: Option<String>) -> Result<(String, String), String> {
     }
 }
 
-pub(crate) fn task_export(ids: Option<Vec<String>>, format: Option<String>, pretty: bool) {
+pub(crate) fn task_export(ids: Option<Vec<String>>, format: Option<String>, pretty: bool) -> bool {
     if let Some(format) = format {
         if format.to_lowercase() != "json" {
-            eprintln!("Only JSON format is supported");
-            return;
+            return error_message("Only JSON format is supported".to_string());
         }
     }
 
@@ -406,19 +418,18 @@ pub(crate) fn task_export(ids: Option<Vec<String>>, format: Option<String>, pret
             let func = if pretty { serde_json::to_string_pretty } else { serde_json::to_string };
 
             if let Ok(result) = func(&result) {
-                println!("{}", result);
+                success_message(result)
             } else {
-                eprintln!("ERROR serializing task list");
+                error_message("ERROR serializing task list".to_string())
             }
         },
-        Err(e) => eprintln!("ERROR: {e}")
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
 
-pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: bool, no_color: bool) {
+pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: bool, no_color: bool) -> bool {
     if ids.is_empty() {
-        eprintln!("Select one or more task IDs");
-        return;
+        return error_message("Select one or more task IDs".to_string());
     }
 
     match get_user_repo(remote) {
@@ -452,7 +463,7 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
                                 }
                             }
                         } else {
-                            eprintln!("Nothing to sync");
+                            println!("Nothing to sync");
                         }
                     } else {
                         eprintln!("Sync: REMOTE task ID {id} NOT found");
@@ -480,11 +491,12 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
                         }
                     }
                 } else {
-                    eprintln!("Sync: LOCAL task ID {id} NOT found");
+                    eprintln!("Sync: LOCAL task ID {id} NOT found")
                 }
             }
+            true
         },
-        Err(e) => eprintln!("ERROR: {e}")
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
 
@@ -502,40 +514,48 @@ fn create_remote_comment(runtime: &tokio::runtime::Runtime, user: &String, repo:
     }
 }
 
-pub(crate) fn task_delete(ids: Vec<String>, push: bool, remote: Option<String>) {
+pub(crate) fn task_delete(ids: Vec<String>, push: bool, remote: Option<String>) -> bool {
     let ids = ids.iter().map(|s| s.as_str()).collect::<Vec<_>>();
     match gittask::delete_tasks(&ids) {
-        Ok(_) => println!("Task(s) {} deleted", ids.join(", ")),
-        Err(e) => eprintln!("ERROR: {e}"),
-    }
-
-    if push {
-        match get_user_repo(remote) {
-            Ok((user, repo)) => {
-                for id in ids {
-                    match delete_github_issue(&user, &repo, id.parse().unwrap()) {
-                        Ok(_) => println!("Sync: REMOTE task ID {id} has been deleted"),
-                        Err(e) => eprintln!("ERROR: {e}")
-                    }
+        Ok(_) => {
+            println!("Task(s) {} deleted", ids.join(", "));
+            let mut success = false;
+            if push {
+                match get_user_repo(remote) {
+                    Ok((user, repo)) => {
+                        for id in ids {
+                            match delete_github_issue(&user, &repo, id.parse().unwrap()) {
+                                Ok(_) => println!("Sync: REMOTE task ID {id} has been deleted"),
+                                Err(e) => eprintln!("ERROR: {e}")
+                            }
+                        }
+                        success = true;
+                    },
+                    Err(e) => eprintln!("ERROR: {e}"),
                 }
-            },
-            Err(e) => eprintln!("ERROR: {e}"),
-        }
+            }
+
+            success
+        },
+        Err(e) => error_message(format!("ERROR: {e}")),
     }
 }
 
-pub(crate) fn task_clear() {
+pub(crate) fn task_clear() -> bool {
     match gittask::clear_tasks() {
-        Ok(task_count) => println!("{task_count} task(s) deleted"),
-        Err(e) => eprintln!("ERROR: {e}"),
+        Ok(task_count) => success_message(format!("{task_count} task(s) deleted")),
+        Err(e) => error_message(format!("ERROR: {e}")),
     }
 }
 
-pub(crate) fn task_show(id: String, no_color: bool) {
+pub(crate) fn task_show(id: String, no_color: bool) -> bool {
     match gittask::find_task(&id) {
-        Ok(Some(task)) => print_task(task, no_color),
-        Ok(None) => eprintln!("Task ID {id} not found"),
-        Err(e) => eprintln!("ERROR: {e}"),
+        Ok(Some(task)) => {
+            print_task(task, no_color);
+            true
+        },
+        Ok(None) => error_message(format!("Task ID {id} not found")),
+        Err(e) => error_message(format!("ERROR: {e}")),
     }
 }
 
@@ -623,7 +643,7 @@ pub(crate) fn task_list(status: Option<String>,
              columns: Option<Vec<String>>,
              sort: Option<Vec<String>>,
              limit: Option<usize>,
-             no_color: bool) {
+             no_color: bool) -> bool {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
             tasks.sort_by(|a, b| {
@@ -715,9 +735,11 @@ pub(crate) fn task_list(status: Option<String>,
 
                 count += 1;
             }
+
+            true
         },
         Err(e) => {
-            eprintln!("ERROR: {e}");
+            error_message(format!("ERROR: {e}"))
         }
     }
 }
@@ -757,7 +779,7 @@ fn print_column(column: &String, value: &String, no_color: bool, status_manager:
     }
 }
 
-pub(crate) fn task_stats(no_color: bool) {
+pub(crate) fn task_stats(no_color: bool) -> bool {
     match gittask::list_tasks() {
         Ok(tasks) => {
             let mut total = 0;
@@ -797,71 +819,71 @@ pub(crate) fn task_stats(no_color: bool) {
                     println!("{}: {}", format_author(&author.0, no_color), author.1);
                 }
             }
+            true
         },
-        Err(e) => eprintln!("ERROR: {e}")
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
 
-pub(crate) fn task_config_get(param: String) {
+pub(crate) fn task_config_get(param: String) -> bool {
     match param.as_str() {
-        "task.ref" => println!("{}", gittask::get_ref_path()),
-        _ => eprintln!("Unknown parameter: {}", param)
+        "task.ref" => success_message(format!("{}", gittask::get_ref_path())),
+        _ => error_message(format!("Unknown parameter: {param}"))
     }
 }
 
-pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) {
+pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> bool {
     match param.as_str() {
         "task.ref" => {
             match gittask::set_ref_path(&value, move_ref) {
-                Ok(_) => println!("{param} has been updated"),
-                Err(e) => eprintln!("ERROR: {e}")
+                Ok(_) => success_message(format!("{param} has been updated")),
+                Err(e) => error_message(format!("ERROR: {e}"))
             }
         },
-        _ => eprintln!("Unknown parameter: {}", param)
+        _ => error_message(format!("Unknown parameter: {param}"))
     }
 }
 
-pub(crate) fn task_config_list() {
-    println!("task.ref");
+pub(crate) fn task_config_list() -> bool {
+    success_message("task.ref".to_string())
 }
 
-pub(crate) fn task_config_status_add(name: String, shortcut: String, color: String, is_done: Option<bool>) {
+pub(crate) fn task_config_status_add(name: String, shortcut: String, color: String, is_done: Option<bool>) -> bool {
     let mut status_manager = StatusManager::new();
     match status_manager.add_status(name, shortcut, color, is_done.unwrap_or(false)) {
-        Ok(_) => println!("Status has been added"),
-        Err(e) => eprintln!("ERROR: {e}")
+        Ok(_) => success_message("Status has been added".to_string()),
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
 
-pub(crate) fn task_config_status_delete(name: String, force: bool) {
+pub(crate) fn task_config_status_delete(name: String, force: bool) -> bool {
     let mut status_manager = StatusManager::new();
     let name = status_manager.get_full_status_name(&name);
 
     if !force {
         if let Ok(tasks) = gittask::list_tasks() {
-            let task_exist = tasks.iter().any(|task| task.get_property("status").unwrap() == name.as_str());
-            if task_exist {
-                eprintln!("Can't delete a status, some tasks still have it. Use --force option to override.");
-                return;
+            let task_exists = tasks.iter().any(|task| task.get_property("status").unwrap() == name.as_str());
+            if task_exists {
+                return error_message("Can't delete a status, some tasks still have it. Use --force option to override.".to_string());
             }
         }
     }
 
     match status_manager.delete_status(name) {
-        Ok(_) => println!("Status has been deleted"),
-        Err(e) => eprintln!("ERROR: {e}")
+        Ok(_) => success_message("Status has been deleted".to_string()),
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
 
-pub(crate) fn task_config_status_get(name: String, param: String) {
+pub(crate) fn task_config_status_get(name: String, param: String) -> bool {
     let status_manager = StatusManager::new();
     match status_manager.get_property(&name, &param) {
-        Some(value) => println!("{}", value),
-        None => eprintln!("Unknown status {} or property: {}", name, param)
+        Some(value) => success_message(value),
+        None => error_message(format!("Unknown status {name} or property: {param}"))
     }
 }
 
-pub(crate) fn task_config_status_set(name: String, param: String, value: String) {
+pub(crate) fn task_config_status_set(name: String, param: String, value: String) -> bool {
     let mut status_manager = StatusManager::new();
     match status_manager.set_property(&name, &param, &value) {
         Ok(prev_value) => {
@@ -883,51 +905,54 @@ pub(crate) fn task_config_status_set(name: String, param: String, value: String)
                     Err(e) => eprintln!("ERROR: {e}")
                 }
             }
+
+            true
         },
-        Err(e) => eprintln!("ERROR: {e}")
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
 
-pub(crate) fn task_config_status_list() {
+pub(crate) fn task_config_status_list() -> bool {
     let status_manager = StatusManager::new();
     println!("Name\tShortcut\tColor\tIs DONE");
     status_manager.get_statuses().iter().for_each(|status| {
         println!("{}\t{}\t{}\t{}", status.get_name(), status.get_shortcut(), status.get_color(), status.is_done());
-    })
+    });
+    true
 }
 
-pub(crate) fn task_config_status_import() {
+pub(crate) fn task_config_status_import() -> bool {
     if let Some(input) = read_from_pipe() {
         match status::parse_statuses(input) {
             Ok(statuses) => {
                 let mut status_manager = StatusManager::new();
                 match status_manager.set_statuses(statuses) {
-                    Ok(_) => println!("Import successful"),
-                    Err(e) => eprintln!("ERROR: {e}")
+                    Ok(_) => success_message("Import successful".to_string()),
+                    Err(e) => error_message(format!("ERROR: {e}"))
                 }
             },
-            Err(e) => eprintln!("{e}")
+            Err(e) => error_message(e)
         }
     } else {
-        eprintln!("Can't read from pipe");
+        error_message("Can't read from pipe".to_string())
     }
 }
 
-pub(crate) fn task_config_status_export(pretty: bool) {
+pub(crate) fn task_config_status_export(pretty: bool) -> bool {
     let status_manager = StatusManager::new();
     let func = if pretty { serde_json::to_string_pretty } else { serde_json::to_string };
 
     if let Ok(result) = func(&status_manager.get_statuses()) {
-        println!("{}", result);
+        success_message(result)
     } else {
-        eprintln!("ERROR serializing status list");
+        error_message("ERROR serializing status list".to_string())
     }
 }
 
-pub(crate) fn task_config_status_reset() {
+pub(crate) fn task_config_status_reset() -> bool {
     let mut status_manager = StatusManager::new();
     match status_manager.set_defaults() {
-        Ok(_) => println!("Statuses have been reset"),
-        Err(e) => eprintln!("ERROR: {e}")
+        Ok(_) => success_message("Statuses have been reset".to_string()),
+        Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
