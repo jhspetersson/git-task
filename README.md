@@ -22,6 +22,18 @@ Or import issues from GitHub (`GITHUB_TOKEN` or `GITHUB_API_TOKEN` env variable 
 
     git task pull
 
+## Concepts
+
+`git-task` maintains a collection of tasks, which are essentially an integer ID and a set of properties.
+
+Some properties are special: `name`, `description`, `author`, `created` and `status`. You can add custom properties for every task.
+
+Tasks can have comments that are also addressed by their ID.
+
+Status can be anything, but it expected to be one of the several defined statuses. 
+By default, there are three: `OPEN` for new tasks, `IN_PROGRESS` for the tasks that are in development, `CLOSED` for complete ones.
+You can freely edit this list.
+
 ## Commands
 
 ### list
@@ -90,6 +102,7 @@ Creates a new task.
 Updates task status.
 
     git task status 1 IN_PROGRESS
+    git task status 1 i
 
 ### get
 
@@ -201,6 +214,10 @@ Configure task statuses:
     git task config status set CLOSED color Magenta
     git task config status set CLOSED name FINISHED
     git task config status set FINISHED shortcut f
+
+Colors available:
+
+    Black, DarkGray, Red, LightRed, Green, LightGreen, Yellow, LightYellow, Blue, LightBlue, Purple, LightPurple, Magenta, LightMagenta, Cyan, LightCyan, White, LightGray
 
 Add and delete statuses:
 
