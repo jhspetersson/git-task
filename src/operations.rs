@@ -770,9 +770,20 @@ pub(crate) fn task_config_status_add(name: String, shortcut: String, color: Stri
     }
 }
 
-pub(crate) fn task_config_status_delete(name: String) {
+pub(crate) fn task_config_status_delete(name: String, force: bool) {
     let mut status_manager = StatusManager::new();
     let name = status_manager.get_full_status_name(&name);
+
+    if !force {
+        if let Ok(tasks) = gittask::list_tasks() {
+            let task_exist = tasks.iter().any(|task| task.get_property("status").unwrap() == name.as_str());
+            if task_exist {
+                eprintln!("Can't delete a status, some tasks still have it. Use --force option to override.");
+                return;
+            }
+        }
+    }
+
     match status_manager.delete_status(name) {
         Ok(_) => println!("Status has been deleted"),
         Err(e) => eprintln!("ERROR: {e}")

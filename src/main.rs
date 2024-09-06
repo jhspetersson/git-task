@@ -258,6 +258,8 @@ enum StatusCommand {
     Delete {
         /// status name
         name: String,
+        #[arg(short, long)]
+        force: bool,
     },
     /// Get task status parameter
     Get {
@@ -332,7 +334,7 @@ fn task_config(subcommand: ConfigCommand) {
 fn task_config_status(subcommand: StatusCommand) {
     match subcommand {
         StatusCommand::Add { name, shortcut, color, is_done } => task_config_status_add(name, shortcut, color, is_done),
-        StatusCommand::Delete { name } => task_config_status_delete(name),
+        StatusCommand::Delete { name, force } => task_config_status_delete(name, force),
         StatusCommand::Get { name, param } => task_config_status_get(name, param),
         StatusCommand::Set { name, param, value } => task_config_status_set(name, param, value),
         StatusCommand::List => task_config_status_list(),
