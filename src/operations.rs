@@ -6,7 +6,7 @@ use nu_ansi_term::Color::{Cyan, DarkGray, Fixed};
 use octocrab::models::IssueState::{Closed, Open};
 use octocrab::params::State;
 use gittask::{Comment, Task};
-use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_issue_status};
+use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_comment, update_github_issue_status};
 use crate::status;
 use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, format_datetime, get_text_from_editor, parse_date, read_from_pipe};
@@ -149,9 +149,16 @@ pub(crate) fn task_edit(id: String, prop_name: String) {
     }
 }
 
-pub(crate) fn task_comment_add(task_id: String, text: String, push: bool, remote: Option<String>) {
+pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool, remote: Option<String>) {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
+            let text = text.or_else(|| get_text_from_editor(None));
+            if text.is_none() {
+                eprintln!("No text specified");
+                return;
+            }
+            let text = text.unwrap();
+
             let comment = task.add_comment(None, HashMap::new(), text);
             match gittask::update_task(task) {
                 Ok(_) => {
@@ -177,6 +184,57 @@ pub(crate) fn task_comment_add(task_id: String, text: String, push: bool, remote
                     }
                 },
                 Err(e) => eprintln!("ERROR: {e}"),
+            }
+        },
+        Ok(None) => eprintln!("Task ID {task_id} not found"),
+        Err(e) => eprintln!("ERROR: {e}"),
+    }
+}
+
+pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool, remote: Option<String>) {
+    match gittask::find_task(&task_id) {
+        Ok(Some(mut task)) => {
+            let mut comments = task.get_comments().clone();
+            if comments.is_none() || comments.as_ref().unwrap().is_empty() {
+                eprintln!("Task has no comments");
+                return;
+            }
+            let comment = comments.as_mut().unwrap().iter_mut().find(|comment| comment.get_id().unwrap() == comment_id);
+            if comment.is_none() {
+                eprintln!("Comment not found");
+                return;
+            }
+            let comment = comment.unwrap();
+            match get_text_from_editor(Some(&comment.get_text())) {
+                Some(text) => {
+                    comment.set_text(text.clone());
+                    task.set_comments(comments.unwrap());
+
+                    match gittask::update_task(task) {
+                        Ok(_) => {
+                            println!("Task ID {task_id} updated");
+
+                            if push {
+                                match get_user_repo(remote) {
+                                    Ok((user, repo)) => {
+                                        let comment_id = comment_id.clone().parse().unwrap();
+
+                                        match update_github_comment(&user, &repo, comment_id, text) {
+                                            Ok(_) => println!("Sync: REMOTE comment ID {comment_id} has been updated"),
+                                            Err(e) => eprintln!("ERROR: {e}")
+                                        }
+                                    },
+                                    Err(e) => eprintln!("ERROR: {e}"),
+                                }
+                            }
+                        },
+                        Err(e) => eprintln!("ERROR: {e}"),
+                    }
+                },
+                None => {
+                    eprintln!("No text specified");
+                    return;
+                }
             }
         },
         Ok(None) => eprintln!("Task ID {task_id} not found"),

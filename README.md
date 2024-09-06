@@ -134,10 +134,15 @@ You can set it up this way:
 
 ### comment
 
-Add or remove comments:
+Add, edit or remove comments:
 
     git task comment add 1 "This is a comment to my first task"
+    git task comment edit 1 1
     git task comment del 1 1
+
+You can sync comments with the remote source:
+
+    git task comment edit 159 2334900009 --push
 
 ### import
 

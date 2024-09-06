@@ -154,6 +154,21 @@ async fn update_issue_status(user: &str, repo: &str, n: u64, state: IssueState) 
     crab.issues(user, repo).update(n).state(state).send().await.is_ok()
 }
 
+pub fn update_github_comment(user: &String, repo: &String, n: u64, text: String) -> Result<(), String> {
+    match get_token_from_env() {
+        Some(_) => get_runtime().block_on(update_comment(user, repo, n, text)),
+        None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
+    }
+}
+
+async fn update_comment(user: &String, repo: &String, n: u64, text: String) -> Result<(), String> {
+    let crab = get_octocrab_instance().await;
+    match crab.issues(user, repo).update_comment(CommentId(n), text).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string())
+    }
+}
+
 pub fn delete_github_issue(user: &String, repo: &String, n: u64) -> Result<(), String> {
     match get_token_from_env() {
         Some(token) => {

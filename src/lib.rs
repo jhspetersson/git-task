@@ -175,6 +175,10 @@ impl Comment {
     pub fn get_text(&self) -> String {
         self.text.to_string()
     }
+
+    pub fn set_text(&mut self, text: String) {
+        self.text = text;
+    }
 }
 
 macro_rules! map_err {

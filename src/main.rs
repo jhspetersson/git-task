@@ -7,7 +7,7 @@ extern crate gittask;
 
 use clap::{Parser, Subcommand};
 
-use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_config_get, task_config_list, task_config_set, task_config_status_add, task_config_status_delete, task_config_status_export, task_config_status_get, task_config_status_import, task_config_status_list, task_config_status_reset, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
+use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_config_get, task_config_list, task_config_set, task_config_status_add, task_config_status_delete, task_config_status_export, task_config_status_get, task_config_status_import, task_config_status_list, task_config_status_reset, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -197,8 +197,21 @@ enum CommentCommand {
         /// task ID
         task_id: String,
         /// comment text
-        text: String,
+        text: Option<String>,
         /// Also push comment to the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+    },
+    /// Edit a comment
+    Edit {
+        /// task ID
+        task_id: String,
+        /// comment ID
+        comment_id: String,
+        /// Also update comment on the remote source (e.g., GitHub)
         #[arg(short, long)]
         push: bool,
         /// Use this remote if there are several of them
@@ -326,6 +339,7 @@ fn main() {
 fn task_comment(subcommand: CommentCommand) {
     match subcommand {
         CommentCommand::Add { task_id, text, push, remote } => task_comment_add(task_id, text, push, remote),
+        CommentCommand::Edit { task_id, comment_id, push, remote } => task_comment_edit(task_id, comment_id, push, remote),
         CommentCommand::Delete { task_id, comment_id, push, remote } => task_comment_delete(task_id, comment_id, push, remote),
     }
 }
