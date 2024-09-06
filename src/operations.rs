@@ -73,7 +73,12 @@ pub(crate) fn task_set(id: String, prop_name: String, value: String) {
     match prop_name.as_str() {
         "id" => {
             match gittask::update_task_id(&id, &value) {
-                Ok(_) => println!("Task ID {id} -> {value} updated"),
+                Ok(_) => {
+                    println!("Task ID {id} -> {value} updated");
+                    if let Err(e) = gittask::delete_tasks(&[&id]) {
+                        eprintln!("ERROR: {e}");
+                    }
+                },
                 Err(e) => eprintln!("ERROR: {e}"),
             }
         },
@@ -97,20 +102,41 @@ pub(crate) fn task_set(id: String, prop_name: String, value: String) {
 pub(crate) fn task_edit(id: String, prop_name: String) {
     match gittask::find_task(&id) {
         Ok(Some(mut task)) => {
-            match task.get_property(&prop_name) {
-                Some(value) => {
-                    match get_text_from_editor(Some(value)) {
+            match prop_name.as_str() {
+                "id" => {
+                    match get_text_from_editor(Some(&task.get_id().unwrap())) {
                         Some(text) => {
-                            task.set_property(prop_name, text);
+                            task.set_id(text.clone());
                             match gittask::update_task(task) {
-                                Ok(_) => println!("Task ID {id} updated"),
+                                Ok(_) => {
+                                    println!("Task ID {id} -> {text} updated");
+                                    if let Err(e) = gittask::delete_tasks(&[&id]) {
+                                        eprintln!("ERROR: {e}");
+                                    }
+                                },
                                 Err(e) => eprintln!("ERROR: {e}"),
                             }
                         },
                         None => eprintln!("Editing failed"),
                     }
                 },
-                None => eprintln!("Task property {prop_name} not found")
+                _ => {
+                    match task.get_property(&prop_name) {
+                        Some(value) => {
+                            match get_text_from_editor(Some(value)) {
+                                Some(text) => {
+                                    task.set_property(prop_name, text);
+                                    match gittask::update_task(task) {
+                                        Ok(_) => println!("Task ID {id} updated"),
+                                        Err(e) => eprintln!("ERROR: {e}"),
+                                    }
+                                },
+                                None => eprintln!("Editing failed"),
+                            }
+                        },
+                        None => eprintln!("Task property {prop_name} not found")
+                    }
+                }
             }
         },
         Ok(None) => eprintln!("Task ID {id} not found"),
