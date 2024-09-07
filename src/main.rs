@@ -1,4 +1,4 @@
-mod github;
+mod connectors;
 mod operations;
 mod status;
 mod util;

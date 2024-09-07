@@ -1,11 +1,11 @@
 use std::collections::HashMap;
+
 use chrono::{Local, TimeZone};
 use nu_ansi_term::AnsiString;
 use nu_ansi_term::Color::{Cyan, DarkGray, Fixed};
-use octocrab::models::IssueState::{Closed, Open};
-use octocrab::params::State;
+
 use gittask::{Comment, Task};
-use crate::github::{create_github_comment, create_github_issue, delete_github_comment, delete_github_issue, get_github_issue, get_runtime, list_github_issues, list_github_origins, update_github_comment, update_github_issue_status};
+use crate::connectors::{get_matching_remote_connectors, RemoteConnector, RemoteTaskState};
 use crate::status;
 use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, error_message, format_datetime, get_text_from_editor, parse_date, read_from_pipe, success_message};
@@ -28,9 +28,8 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
             let mut success = false;
             if push {
                 match get_user_repo(remote) {
-                    Ok((user, repo)) => {
-                        let runtime = get_runtime();
-                        match create_github_issue(&runtime, &user, &repo, &task) {
+                    Ok((connector, user, repo)) => {
+                        match connector.create_remote_task(&user, &repo, &task) {
                             Ok(id) => {
                                 println!("Sync: Created REMOTE task ID {id}");
                                 match gittask::update_task_id(&task.get_id().unwrap(), &id) {
@@ -170,9 +169,8 @@ pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool
                     let mut success = false;
                     if push {
                         match get_user_repo(remote) {
-                            Ok((user, repo)) => {
-                                let runtime = get_runtime();
-                                match create_github_comment(&runtime, &user, &repo, &task_id, &comment) {
+                            Ok((connector, user, repo)) => {
+                                match connector.create_remote_comment(&user, &repo, &task_id, &comment) {
                                     Ok(remote_comment_id) => {
                                         println!("Created REMOTE comment ID {}", remote_comment_id);
                                         match gittask::update_comment_id(&task_id, &comment.get_id().unwrap(), &remote_comment_id) {
@@ -222,10 +220,8 @@ pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool,
                             let mut success = false;
                             if push {
                                 match get_user_repo(remote) {
-                                    Ok((user, repo)) => {
-                                        let comment_id = comment_id.clone().parse().unwrap();
-
-                                        match update_github_comment(&user, &repo, comment_id, text) {
+                                    Ok((connector, user, repo)) => {
+                                        match connector.update_remote_comment(&user, &repo, &comment_id, text) {
                                             Ok(_) => {
                                                 println!("Sync: REMOTE comment ID {comment_id} has been updated");
                                                 success = true;
@@ -260,9 +256,8 @@ pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: boo
                             let mut success = false;
                             if push {
                                 match get_user_repo(remote) {
-                                    Ok((user, repo)) => {
-                                        let comment_id = comment_id.clone().parse().unwrap();
-                                        match delete_github_comment(&user, &repo, comment_id) {
+                                    Ok((connector, user, repo)) => {
+                                        match connector.delete_remote_comment(&user, &repo, &comment_id) {
                                             Ok(_) => {
                                                 println!("Sync: REMOTE comment ID {comment_id} has been deleted");
                                                 success = true;
@@ -324,13 +319,12 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) -> bool {
 
 pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: Option<String>, remote: Option<String>, no_comments: bool) -> bool {
     match get_user_repo(remote) {
-        Ok((user, repo)) => {
+        Ok((connector, user, repo)) => {
             println!("Importing tasks from {user}/{repo}...");
 
             if ids.is_some() {
-                let runtime = get_runtime();
                 for id in ids.unwrap() {
-                    match get_github_issue(&runtime, &user, &repo, id.parse().unwrap(), !no_comments) {
+                    match connector.get_remote_task(&user, &repo, &id, !no_comments) {
                         Some(task) => {
                             match gittask::create_task(task) {
                                 Ok(_) => println!("Task ID {id} imported"),
@@ -347,12 +341,16 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                     Some(s) => {
                         let status = status_manager.get_full_status_name(&s);
                         let is_done = status_manager.get_property(&status, "is_done").unwrap().parse::<bool>().unwrap();
-                        if is_done { State::Closed } else { State::Open }
+                        if is_done { RemoteTaskState::Closed } else { RemoteTaskState::Open }
                     },
-                    None => State::All
+                    None => RemoteTaskState::All
                 };
 
-                let tasks = list_github_issues(user.to_string(), repo.to_string(), !no_comments, limit, state);
+                let task_statuses = vec![
+                    status_manager.get_starting_status(),
+                    status_manager.get_final_status(),
+                ];
+                let tasks = connector.list_remote_tasks(user.to_string(), repo.to_string(), !no_comments, limit, state, task_statuses);
 
                 if tasks.is_empty() {
                     success_message("No tasks found".to_string())
@@ -371,23 +369,19 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
     }
 }
 
-fn get_user_repo(remote: Option<String>) -> Result<(String, String), String> {
+fn get_user_repo(remote: Option<String>) -> Result<(Box<&'static dyn RemoteConnector>, String, String), String> {
     match gittask::list_remotes(remote) {
         Ok(remotes) => {
-            match list_github_origins(remotes) {
-                Ok(user_repo) => {
-                    if user_repo.is_empty() {
-                        return Err("No GitHub remotes".to_string());
-                    }
-
-                    if user_repo.len() > 1 {
-                        return Err("More than one GitHub remote found. Please specify with --remote option.".to_owned());
-                    }
-
-                    Ok(user_repo.first().unwrap().clone())
-                },
-                Err(e) => Err(e)
+            let user_repo = get_matching_remote_connectors(remotes);
+            if user_repo.is_empty() {
+                return Err("No GitHub remotes".to_string());
             }
+
+            if user_repo.len() > 1 {
+                return Err("More than one GitHub remote found. Please specify with --remote option.".to_owned());
+            }
+
+            Ok(user_repo.first().unwrap().clone())
         },
         Err(e) => Err(e)
     }
@@ -433,41 +427,42 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
     }
 
     match get_user_repo(remote) {
-        Ok((user, repo)) => {
-            let runtime = get_runtime();
+        Ok((connector, user, repo)) => {
             let status_manager = StatusManager::new();
             for id in ids {
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
                     println!("Sync: LOCAL task ID {id} found");
-                    let remote_task = get_github_issue(&runtime, &user, &repo, id.parse().unwrap(), !no_comments);
+                    let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments);
                     if let Some(remote_task) = remote_task {
                         println!("Sync: REMOTE task ID {id} found");
                         let local_status = local_task.get_property("status").unwrap();
                         let remote_status = remote_task.get_property("status").unwrap();
                         if local_status != remote_status {
                             println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
-                            let state = if local_status == "CLOSED" { Closed } else { Open };
-                            let result = update_github_issue_status(&runtime, &user, &repo, id.parse().unwrap(), state);
-                            if result {
-                                println!("Sync: REMOTE task ID {id} has been updated");
+                            let state = if local_status == "CLOSED" { RemoteTaskState::Closed } else { RemoteTaskState::Open };
+                            match connector.update_remote_task_status(&user, &repo, &id, state) {
+                                Ok(_) => {
+                                    println!("Sync: REMOTE task ID {id} has been updated");
 
-                                if !no_comments {
-                                    let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().map(|comment| comment.get_id().unwrap()).collect();
-                                    for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
-                                        let local_comment_id = comment.get_id().unwrap();
-                                        if !remote_comment_ids.contains(&local_comment_id) {
-                                            create_remote_comment(&runtime, &user, &repo, &id, &comment);
+                                    if !no_comments {
+                                        let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().map(|comment| comment.get_id().unwrap()).collect();
+                                        for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
+                                            let local_comment_id = comment.get_id().unwrap();
+                                            if !remote_comment_ids.contains(&local_comment_id) {
+                                                create_remote_comment(&connector, &user, &repo, &id, &comment);
+                                            }
                                         }
                                     }
-                                }
+                                },
+                                Err(e) => eprintln!("ERROR: {e}")
                             }
                         } else {
                             println!("Nothing to sync");
                         }
                     } else {
                         eprintln!("Sync: REMOTE task ID {id} NOT found");
-                        match create_github_issue(&runtime, &user, &repo, &local_task) {
+                        match connector.create_remote_task(&user, &repo, &local_task) {
                             Ok(id) => {
                                 println!("Sync: Created REMOTE task ID {id}");
                                 if local_task.get_id().unwrap() != id {
@@ -481,7 +476,7 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
                                     if let Some(comments) = local_task.get_comments() {
                                         if !comments.is_empty() {
                                             for comment in comments {
-                                                create_remote_comment(&runtime, &user, &repo, &id, &comment);
+                                                create_remote_comment(&connector, &user, &repo, &id, &comment);
                                             }
                                         }
                                     }
@@ -500,9 +495,9 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
     }
 }
 
-fn create_remote_comment(runtime: &tokio::runtime::Runtime, user: &String, repo: &String, id: &String, comment: &Comment) {
+fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &String, repo: &String, id: &String, comment: &Comment) {
     let local_comment_id = comment.get_id().unwrap();
-    match create_github_comment(&runtime, user, repo, id, comment) {
+    match connector.create_remote_comment(user, repo, id, comment) {
         Ok(remote_comment_id) => {
             println!("Created REMOTE comment ID {}", remote_comment_id);
             match gittask::update_comment_id(&id, &local_comment_id, &remote_comment_id) {
@@ -522,9 +517,9 @@ pub(crate) fn task_delete(ids: Vec<String>, push: bool, remote: Option<String>) 
             let mut success = false;
             if push {
                 match get_user_repo(remote) {
-                    Ok((user, repo)) => {
+                    Ok((connector, user, repo)) => {
                         for id in ids {
-                            match delete_github_issue(&user, &repo, id.parse().unwrap()) {
+                            match connector.delete_remote_task(&user, &repo, &id.to_string()) {
                                 Ok(_) => println!("Sync: REMOTE task ID {id} has been deleted"),
                                 Err(e) => eprintln!("ERROR: {e}")
                             }

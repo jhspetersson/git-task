@@ -142,6 +142,12 @@ impl StatusManager {
         self.statuses.first().unwrap().name.clone()
     }
 
+    pub fn get_final_status(&self) -> String {
+        self.statuses.iter().find_map(|saved_status| {
+            if saved_status.is_done { Some(saved_status.name.clone()) } else { None }
+        }).unwrap()
+    }
+
     pub fn get_property(&self, status: &str, property: &str) -> Option<String> {
         self.statuses.iter().find_map(|saved_status| {
             if status == saved_status.name.as_str() {
