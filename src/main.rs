@@ -264,7 +264,7 @@ enum ConfigCommand {
 #[derive(Subcommand)]
 enum StatusCommand {
     /// Add a status
-    #[clap(visible_aliases(["create", "add"]))]
+    #[clap(visible_aliases(["create", "new"]))]
     Add {
         /// status name
         name: String,
