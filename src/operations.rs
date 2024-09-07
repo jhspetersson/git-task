@@ -429,6 +429,7 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
     match get_user_repo(remote) {
         Ok((connector, user, repo)) => {
             let status_manager = StatusManager::new();
+            let no_color = check_no_color(no_color);
             for id in ids {
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
@@ -546,6 +547,7 @@ pub(crate) fn task_clear() -> bool {
 pub(crate) fn task_show(id: String, no_color: bool) -> bool {
     match gittask::find_task(&id) {
         Ok(Some(task)) => {
+            let no_color = check_no_color(no_color);
             print_task(task, no_color);
             true
         },
@@ -675,6 +677,7 @@ pub(crate) fn task_list(status: Option<String>,
             let until = parse_date(until);
 
             let status_manager = StatusManager::new();
+            let no_color = check_no_color(no_color);
 
             let mut count = 0;
             for task in tasks {
@@ -780,6 +783,7 @@ pub(crate) fn task_stats(no_color: bool) -> bool {
             let mut total = 0;
             let mut status_stats = HashMap::<String, i32>::new();
             let mut author_stats = HashMap::<String, i32>::new();
+            let no_color = check_no_color(no_color);
 
             for task in tasks {
                 total += 1;
@@ -950,4 +954,10 @@ pub(crate) fn task_config_status_reset() -> bool {
         Ok(_) => success_message("Statuses have been reset".to_string()),
         Err(e) => error_message(format!("ERROR: {e}"))
     }
+}
+
+fn check_no_color(no_color: bool) -> bool {
+    no_color
+        || gittask::get_config_value("color.ui").unwrap_or_else(|_| "true".to_string()) == "false"
+        || std::env::var("NO_COLOR").unwrap_or_else(|_| "0".to_string()) == "1"
 }
