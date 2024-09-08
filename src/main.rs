@@ -124,6 +124,9 @@ enum Command {
     Export {
         /// space separated task IDs
         ids: Option<Vec<String>>,
+        /// Filter by status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
+        #[arg(short, long, value_delimiter = ',')]
+        status: Option<Vec<String>>,
         /// Output format (only JSON is currently supported)
         #[arg(short, long)]
         format: Option<String>,
@@ -326,7 +329,7 @@ fn main() -> ExitCode {
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
-        Some(Command::Export { ids, format, pretty }) => task_export(ids, format, pretty),
+        Some(Command::Export { ids, status, format, pretty }) => task_export(ids, status, format, pretty),
         Some(Command::Pull { ids, limit, status, remote, no_comments }) => task_pull(ids, limit, status, remote, no_comments),
         Some(Command::Push { ids, remote, no_comments, no_color }) => task_push(ids, remote, no_comments, no_color),
         Some(Command::Stats { no_color }) => task_stats(no_color),
