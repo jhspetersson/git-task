@@ -22,8 +22,8 @@ enum Command {
     /// List all tasks
     List {
         /// Filter by status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
-        #[arg(short, long)]
-        status: Option<String>,
+        #[arg(short, long, value_delimiter = ',')]
+        status: Option<Vec<String>>,
         /// Filter by keyword
         #[arg(short, long)]
         keyword: Option<String>,

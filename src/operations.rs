@@ -632,7 +632,7 @@ fn format_author(author: &str, no_color: bool) -> AnsiString {
     if no_color { author.into() } else { Cyan.paint(author) }
 }
 
-pub(crate) fn task_list(status: Option<String>,
+pub(crate) fn task_list(status: Option<Vec<String>>,
              keyword: Option<String>,
              from: Option<String>,
              until: Option<String>,
@@ -677,13 +677,17 @@ pub(crate) fn task_list(status: Option<String>,
             let until = parse_date(until);
 
             let status_manager = StatusManager::new();
+            let statuses = match status {
+                Some(statuses) => Some(statuses.iter().map(|s| status_manager.get_full_status_name(s)).collect::<Vec<_>>()),
+                None => None
+            };
             let no_color = check_no_color(no_color);
 
             let mut count = 0;
             for task in tasks {
-                if status.as_ref().is_some() {
+                if let Some(ref statuses) = statuses {
                     let task_status = task.get_property("status").unwrap();
-                    if status_manager.get_full_status_name(status.as_ref().unwrap()).as_str() != task_status {
+                    if !statuses.contains(&task_status) {
                         continue;
                     }
                 }

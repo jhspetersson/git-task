@@ -55,6 +55,11 @@ Show only tasks with a custom status:
 
     git task list --status DEPLOYED
 
+Show tasks that are new or in progress:
+
+    git task list -s OPEN,IN_PROGRESS
+    git task list -s o,i
+
 Filter by keyword:
 
     git task list -k linux
