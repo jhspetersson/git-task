@@ -8,7 +8,7 @@ use gittask::{Comment, Task};
 use crate::connectors::{get_matching_remote_connectors, RemoteConnector, RemoteTaskState};
 use crate::status;
 use crate::status::StatusManager;
-use crate::util::{capitalize, colorize_string, error_message, format_datetime, get_text_from_editor, parse_date, read_from_pipe, success_message};
+use crate::util::{capitalize, colorize_string, error_message, format_datetime, get_text_from_editor, parse_date, read_from_pipe, success_message, ExpandRange};
 
 pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: Option<String>) -> bool {
     let description = match description {
@@ -297,6 +297,14 @@ pub(crate) fn task_import(ids: Option<Vec<String>>, format: Option<String>) -> b
 
 fn import_from_input(ids: Option<Vec<String>>, input: &String) -> bool {
     if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(input) {
+        let ids = match ids {
+            Some(ids) => {
+                let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+                Some(ids)
+            },
+            None => None
+        };
+
         for task in tasks {
             let id = task.get_id().unwrap().to_string();
 
@@ -321,6 +329,14 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
     match get_user_repo(remote) {
         Ok((connector, user, repo)) => {
             println!("Importing tasks from {user}/{repo}...");
+
+            let ids = match ids {
+                Some(ids) => {
+                    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+                    Some(ids)
+                },
+                None => None
+            };
 
             if ids.is_some() {
                 for id in ids.unwrap() {
@@ -405,6 +421,14 @@ pub(crate) fn task_export(ids: Option<Vec<String>>, status: Option<Vec<String>>,
                 None => None
             };
 
+            let ids = match ids {
+                Some(ids) => {
+                    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+                    Some(ids)
+                },
+                None => None
+            };
+
             for task in tasks {
                 if let Some(ids) = &ids {
                     if !ids.contains(&task.get_id().unwrap()) {
@@ -438,6 +462,8 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
     if ids.is_empty() {
         return error_message("Select one or more task IDs".to_string());
     }
+
+    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
 
     match get_user_repo(remote) {
         Ok((connector, user, repo)) => {
@@ -524,7 +550,8 @@ fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &S
 }
 
 pub(crate) fn task_delete(ids: Vec<String>, push: bool, remote: Option<String>) -> bool {
-    let ids = ids.iter().map(|s| s.as_str()).collect::<Vec<_>>();
+    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+    let ids = ids.iter().map(|id| id.as_str()).collect::<Vec<_>>();
     match gittask::delete_tasks(&ids) {
         Ok(_) => {
             println!("Task(s) {} deleted", ids.join(", "));

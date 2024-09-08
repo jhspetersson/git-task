@@ -7,6 +7,29 @@ use std::time::{Duration, UNIX_EPOCH};
 use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
 use nu_ansi_term::Color;
 
+use std::iter::Iterator;
+
+pub trait ExpandRange {
+    fn expand_range(self) -> impl Iterator<Item = String>;
+}
+
+impl<I> ExpandRange for I
+where
+    I: Iterator<Item = String>
+{
+    fn expand_range(self) -> impl Iterator<Item = String> {
+        self.flat_map(|s| {
+            if let Some((start, end)) = s.split_once("..") {
+                let start_num = start.parse::<u64>().unwrap();
+                let end_num = end.parse::<u64>().unwrap();
+                (start_num..=end_num).map(|n| n.to_string()).collect::<Vec<_>>()
+            } else {
+                vec![s]
+            }
+        })
+    }
+}
+
 pub fn capitalize(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
