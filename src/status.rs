@@ -69,8 +69,14 @@ impl StatusManager {
     }
 
     pub fn set_statuses(&mut self, statuses: Vec<Status>) -> Result<(), String> {
-        self.statuses = statuses;
-        save_config(&self.statuses)
+        let name_contains_comma = statuses.iter().find(|s| s.name.contains(",") || s.shortcut.contains(",")).is_some();
+        match name_contains_comma {
+            true => Err("Status name and shortcut can't contain comma".to_string()),
+            false => {
+                self.statuses = statuses;
+                save_config(&self.statuses)
+            }
+        }
     }
 
     pub fn set_defaults(&mut self) -> Result<(), String> {
@@ -78,6 +84,10 @@ impl StatusManager {
     }
 
     pub fn add_status(&mut self, name: String, shortcut: String, color: String, is_done: bool) -> Result<(), String> {
+        if name.contains(",") || shortcut.contains(",") {
+            return Err("Status name and shortcut can't contain comma".to_string());
+        }
+
         let status = Status {
             name,
             shortcut,
@@ -149,6 +159,10 @@ impl StatusManager {
             Some(saved_status) => {
                 let set_result = match property.as_str() {
                     "name" => {
+                        if value.contains(",") {
+                            return Err("Status name can't contain comma".to_string());
+                        }
+
                         let prev_value = saved_status.name.clone();
                         if statuses.iter().find(|status| status.name == value.to_string()).is_some() {
                             Err("Name already exists for another status".to_string())
@@ -158,6 +172,10 @@ impl StatusManager {
                         }
                     },
                     "shortcut" => {
+                        if value.contains(",") {
+                            return Err("Status shortcut can't contain comma".to_string());
+                        }
+
                         if statuses.iter().find(|status| status.shortcut == value.to_string()).is_some() {
                             Err("Shortcut already exists for another status".to_string())
                         } else {
