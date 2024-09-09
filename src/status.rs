@@ -1,6 +1,6 @@
 use nu_ansi_term::AnsiString;
-use nu_ansi_term::Color::{Black, Blue, Cyan, DarkGray, Default, Green, LightBlue, LightCyan, LightGray, LightGreen, LightMagenta, LightPurple, LightRed, LightYellow, Magenta, Purple, Red, White, Yellow};
 use serde::{Deserialize, Serialize};
+use crate::util::str_to_color;
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Status {
@@ -103,30 +103,8 @@ impl StatusManager {
                 let status_color = self.statuses.iter().find_map(|saved_status| {
                     if status == saved_status.name { Some(saved_status.color.clone()) } else { None }
                 }).or_else(|| Some("Default".to_string())).unwrap();
-
-                let status_color = match status_color.as_str() {
-                    "Black" => Black,
-                    "DarkGray" => DarkGray,
-                    "Red" => Red,
-                    "LightRed" => LightRed,
-                    "Green" => Green,
-                    "LightGreen" => LightGreen,
-                    "Yellow" => Yellow,
-                    "LightYellow" => LightYellow,
-                    "Blue" => Blue,
-                    "LightBlue" => LightBlue,
-                    "Purple" => Purple,
-                    "LightPurple" => LightPurple,
-                    "Magenta" => Magenta,
-                    "LightMagenta" => LightMagenta,
-                    "Cyan" => Cyan,
-                    "LightCyan" => LightCyan,
-                    "White" => White,
-                    "LightGray" => LightGray,
-                    _ => Default
-                };
-
-                status_color.paint(&*status)
+                let status_color = str_to_color(&status_color);
+                status_color.paint(status)
             },
             true => status.into()
         }
