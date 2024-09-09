@@ -8,6 +8,7 @@ use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
 use nu_ansi_term::Color;
 
 use std::iter::Iterator;
+use nu_ansi_term::Color::{Black, Blue, Cyan, DarkGray, Default, Fixed, Green, LightBlue, LightCyan, LightGray, LightGreen, LightMagenta, LightPurple, LightRed, LightYellow, Magenta, Purple, Red, White, Yellow};
 
 pub trait ExpandRange {
     fn expand_range(self) -> impl Iterator<Item = String>;
@@ -35,6 +36,33 @@ pub fn capitalize(s: &str) -> String {
     match c.next() {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
+    }
+}
+
+pub fn str_to_color(s: &str) -> Color {
+    match s {
+        "Black" => Black,
+        "DarkGray" => DarkGray,
+        "Red" => Red,
+        "LightRed" => LightRed,
+        "Green" => Green,
+        "LightGreen" => LightGreen,
+        "Yellow" => Yellow,
+        "LightYellow" => LightYellow,
+        "Blue" => Blue,
+        "LightBlue" => LightBlue,
+        "Purple" => Purple,
+        "LightPurple" => LightPurple,
+        "Magenta" => Magenta,
+        "LightMagenta" => LightMagenta,
+        "Cyan" => Cyan,
+        "LightCyan" => LightCyan,
+        "White" => White,
+        "LightGray" => LightGray,
+        s => match s.parse::<u8>() {
+            Ok(n) => Fixed(n),
+            _ => Default
+        }
     }
 }
 

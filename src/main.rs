@@ -1,5 +1,6 @@
 mod connectors;
 mod operations;
+mod property;
 mod status;
 mod util;
 
@@ -8,7 +9,7 @@ extern crate gittask;
 use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
-use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_config_get, task_config_list, task_config_set, task_config_status_add, task_config_status_delete, task_config_status_export, task_config_status_get, task_config_status_import, task_config_status_list, task_config_status_reset, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
+use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_config_get, task_config_list, task_config_properties_export, task_config_properties_import, task_config_properties_reset, task_config_set, task_config_status_add, task_config_status_delete, task_config_status_export, task_config_status_get, task_config_status_import, task_config_status_list, task_config_status_reset, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
@@ -262,6 +263,12 @@ enum ConfigCommand {
         #[command(subcommand)]
         subcommand: StatusCommand,
     },
+    /// Configure task properties
+    #[clap(visible_aliases(["props", "prop"]))]
+    Properties {
+        #[command(subcommand)]
+        subcommand: PropertiesCommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -316,6 +323,20 @@ enum StatusCommand {
     Reset,
 }
 
+#[derive(Subcommand)]
+enum PropertiesCommand {
+    /// Import task properties from JSON
+    Import,
+    /// Export task properties
+    Export {
+        /// Prettify output
+        #[arg(short, long)]
+        pretty: bool,
+    },
+    /// Reset properties configuration to default
+    Reset,
+}
+
 fn main() -> ExitCode {
     let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
@@ -355,6 +376,7 @@ fn task_config(subcommand: ConfigCommand) -> bool {
         ConfigCommand::Set { param, value, move_ref } => task_config_set(param, value, move_ref),
         ConfigCommand::List => task_config_list(),
         ConfigCommand::Status { subcommand } => task_config_status(subcommand),
+        ConfigCommand::Properties { subcommand } => task_config_properties(subcommand),
     }
 }
 
@@ -368,5 +390,13 @@ fn task_config_status(subcommand: StatusCommand) -> bool {
         StatusCommand::Import => task_config_status_import(),
         StatusCommand::Export { pretty } => task_config_status_export(pretty),
         StatusCommand::Reset => task_config_status_reset(),
+    }
+}
+
+fn task_config_properties(subcommand: PropertiesCommand) -> bool {
+    match subcommand {
+        PropertiesCommand::Import => task_config_properties_import(),
+        PropertiesCommand::Export { pretty } => task_config_properties_export(pretty),
+        PropertiesCommand::Reset => task_config_properties_reset(),
     }
 }

@@ -255,6 +255,12 @@ If everything went wrong:
 
     git task config status reset
 
+You can also export, manually edit and import back task properties configuration. That's useful when you want to change default colors for properties like author or any custom one.
+
+    git task config props export
+    git task config props import
+    git task config props reset
+
 ### help
 
 Show available commands or their arguments.
