@@ -52,10 +52,14 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
     }
 }
 
-pub(crate) fn task_status(id: String, status: String) -> bool {
+pub(crate) fn task_status(ids: Vec<String>, status: String) -> bool {
     let status_manager = StatusManager::new();
     let status = status_manager.get_full_status_name(&status);
-    task_set(id, "status".to_string(), Some(status), false)
+    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+    for id in ids {
+        task_set(id, "status".to_string(), Some(status.clone()), false);
+    }
+    true
 }
 
 pub(crate) fn task_get(id: String, prop_name: String) -> bool {

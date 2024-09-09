@@ -77,9 +77,11 @@ enum Command {
     },
     /// Update task status
     Status {
-        /// task ID
-        id: String,
+        /// task IDs
+        #[clap(required = true)]
+        ids: Vec<String>,
         /// status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
+        #[clap(required = true)]
         status: String,
     },
     /// Get a property
@@ -347,7 +349,7 @@ fn main() -> ExitCode {
         Some(Command::List { status, keyword, from, until, author, columns, sort, limit, no_color }) => task_list(status, keyword, from, until, author, columns, sort, limit, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
         Some(Command::Create { name, description, no_desc, push, remote }) => task_create(name, description, no_desc, push, remote),
-        Some(Command::Status { id, status }) => task_status(id, status),
+        Some(Command::Status { ids, status }) => task_status(ids, status),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
         Some(Command::Set { id, prop_name, value, delete }) => task_set(id, prop_name, value, delete),
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),

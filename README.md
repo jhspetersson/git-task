@@ -108,6 +108,7 @@ Updates task status.
 
     git task status 1 IN_PROGRESS
     git task status 1 i
+    git task status 2..5 10 12 c
 
 ### get
 
