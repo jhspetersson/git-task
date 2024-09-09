@@ -403,7 +403,7 @@ fn get_user_repo(remote: Option<String>) -> Result<(Box<&'static dyn RemoteConne
     }
 }
 
-pub(crate) fn task_export(ids: Option<Vec<String>>, status: Option<Vec<String>>, format: Option<String>, pretty: bool) -> bool {
+pub(crate) fn task_export(ids: Option<Vec<String>>, status: Option<Vec<String>>, limit: Option<usize>, format: Option<String>, pretty: bool) -> bool {
     if let Some(format) = format {
         if format.to_lowercase() != "json" {
             return error_message("Only JSON format is supported".to_string());
@@ -429,6 +429,7 @@ pub(crate) fn task_export(ids: Option<Vec<String>>, status: Option<Vec<String>>,
                 None => None
             };
 
+            let mut count = 0;
             for task in tasks {
                 if let Some(ids) = &ids {
                     if !ids.contains(&task.get_id().unwrap()) {
@@ -443,7 +444,14 @@ pub(crate) fn task_export(ids: Option<Vec<String>>, status: Option<Vec<String>>,
                     }
                 }
 
+                if let Some(limit) = limit {
+                    if count >= limit {
+                        break;
+                    }
+                }
+
                 result.push(task);
+                count += 1;
             }
 
             let func = if pretty { serde_json::to_string_pretty } else { serde_json::to_string };

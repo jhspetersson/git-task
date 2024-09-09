@@ -165,6 +165,7 @@ Export all or selected tasks, only JSON output format is currently supported.
     git task export --pretty 2 3 4 5 10 12 >my_tasks.json
     git task export --pretty 2..5 10 12 >my_tasks.json
     git task export --status o,i
+    git task export --limit 50
 
 ### pull
 
