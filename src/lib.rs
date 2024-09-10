@@ -427,15 +427,17 @@ pub fn set_config_value(key: &str, value: &str) -> Result<(), String> {
 pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
     let repo = map_err!(Repository::open("."));
 
-    let mut current_reference = map_err!(repo.find_reference(&get_ref_path()));
-    let commit = map_err!(current_reference.peel_to_commit());
-    map_err!(repo.reference(ref_path, commit.id(), true, "task.ref migrated"));
+    let current_reference = repo.find_reference(&get_ref_path());
+    if let Ok(current_reference) = &current_reference {
+        let commit = map_err!(current_reference.peel_to_commit());
+        map_err!(repo.reference(ref_path, commit.id(), true, "task.ref migrated"));
+    }
 
     let mut config = map_err!(repo.config());
     map_err!(config.set_str("task.ref", ref_path));
 
-    if move_ref {
-        map_err!(current_reference.delete());
+    if move_ref && current_reference.is_ok() {
+        map_err!(current_reference.unwrap().delete());
     }
 
     Ok(())
