@@ -488,12 +488,22 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
                     let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments);
                     if let Some(remote_task) = remote_task {
                         println!("Sync: REMOTE task ID {id} found");
+
                         let local_status = local_task.get_property("status").unwrap();
+                        let local_name = local_task.get_property("name").unwrap();
+                        let local_text = local_task.get_property("description").unwrap();
+
                         let remote_status = remote_task.get_property("status").unwrap();
-                        if local_status != remote_status {
-                            println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
-                            let state = if local_status == "CLOSED" { RemoteTaskState::Closed } else { RemoteTaskState::Open };
-                            match connector.update_remote_task_status(&user, &repo, &id, state) {
+                        let remote_name = remote_task.get_property("name").unwrap();
+                        let remote_text = remote_task.get_property("description").unwrap();
+
+                        if local_name != remote_name || local_text != remote_text || local_status != remote_status {
+                            if local_status != remote_status {
+                                println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
+                            }
+                            let state = if status_manager.is_done(local_status) { RemoteTaskState::Closed } else { RemoteTaskState::Open };
+
+                            match connector.update_remote_task(&user, &repo, &id, local_name, local_text, state) {
                                 Ok(_) => {
                                     println!("Sync: REMOTE task ID {id} has been updated");
 
@@ -514,6 +524,7 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
                         }
                     } else {
                         eprintln!("Sync: REMOTE task ID {id} NOT found");
+
                         match connector.create_remote_task(&user, &repo, &local_task) {
                             Ok(id) => {
                                 println!("Sync: Created REMOTE task ID {id}");

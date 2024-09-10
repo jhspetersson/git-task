@@ -136,6 +136,12 @@ impl StatusManager {
         }).unwrap()
     }
 
+    pub fn is_done(&self, status: &str) -> bool {
+        self.statuses.iter().find_map(|saved_status| {
+            if saved_status.name == status { Some(saved_status.is_done) } else { None }
+        }).unwrap_or(false)
+    }
+
     pub fn get_property(&self, status: &str, property: &str) -> Option<String> {
         self.statuses.iter().find_map(|saved_status| {
             if status == saved_status.name.as_str() {

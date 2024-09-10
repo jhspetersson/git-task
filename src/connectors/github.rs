@@ -44,21 +44,27 @@ impl RemoteConnector for GithubRemoteConnector {
     }
 
     fn create_remote_task(&self, user: &String, repo: &String, task: &Task) -> Result<String, String> {
-        RUNTIME.block_on(create_issue(user, repo, task))
+        match get_token_from_env() {
+            Some(_) => RUNTIME.block_on(create_issue(user, repo, task)),
+            None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
+        }
     }
 
     fn create_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment: &Comment) -> Result<String, String> {
-        RUNTIME.block_on(create_comment(user, repo, task_id, comment))
+        match get_token_from_env() {
+            Some(_) => RUNTIME.block_on(create_comment(user, repo, task_id, comment)),
+            None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
+        }
     }
 
-    fn update_remote_task_status(&self, user: &str, repo: &str, task_id: &String, state: RemoteTaskState) -> Result<(), String> {
+    fn update_remote_task(&self, user: &str, repo: &str, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
         match get_token_from_env() {
             Some(_) => {
                 let state = match state {
                     RemoteTaskState::Closed => IssueState::Closed,
                     _ => IssueState::Open,
                 };
-                RUNTIME.block_on(update_issue_status(user, repo, task_id.parse().unwrap(), state))
+                RUNTIME.block_on(update_issue(user, repo, task_id.parse().unwrap(), name, text, state))
             },
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
         }
@@ -236,9 +242,9 @@ async fn create_comment(user: &String, repo: &String, task_id: &String, comment:
     }
 }
 
-async fn update_issue_status(user: &str, repo: &str, n: u64, state: IssueState) -> Result<(), String> {
+async fn update_issue(user: &str, repo: &str, n: u64, title: &str, body: &str, state: IssueState) -> Result<(), String> {
     let crab = get_octocrab_instance().await;
-    match crab.issues(user, repo).update(n).state(state).send().await {
+    match crab.issues(user, repo).update(n).title(title).body(body).state(state).send().await {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string())
     }
