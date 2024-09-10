@@ -440,3 +440,17 @@ pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{get_ref_path, set_ref_path};
+
+    #[test]
+    fn test_ref_path() {
+        assert_eq!(get_ref_path(), "refs/tasks/tasks");
+        assert!(set_ref_path("refs/heads/git-task", true).is_ok());
+        assert_eq!(get_ref_path(), "refs/heads/git-task");
+        assert!(set_ref_path("refs/tasks/tasks", true).is_ok());
+        assert_eq!(get_ref_path(), "refs/tasks/tasks");
+    }
+}
