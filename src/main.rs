@@ -295,6 +295,7 @@ enum StatusCommand {
     Delete {
         /// status name
         name: String,
+        /// Delete a status even there are tasks that have it
         #[arg(short, long)]
         force: bool,
     },
@@ -345,6 +346,7 @@ enum PropertiesCommand {
     Delete {
         /// property name
         name: String,
+        /// Delete a property even there are tasks that have it
         #[arg(short, long)]
         force: bool,
     },
