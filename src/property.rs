@@ -10,6 +10,20 @@ pub struct Property {
     enum_values: Option<Vec<PropertyEnumValue>>,
 }
 
+impl Property {
+    pub(crate) fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn get_value_type(&self) -> &str {
+        &self.value_type
+    }
+
+    pub(crate) fn get_color(&self) -> &str {
+        &self.color
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 struct PropertyEnumValue {
     name: String,
@@ -123,6 +137,77 @@ impl PropertyManager {
                 }
             },
             None => value.into()
+        }
+    }
+
+    pub fn get_parameter(&self, property: &str, parameter: &str) -> Option<String> {
+        self.properties.iter().find_map(|saved_prop| {
+            if property == saved_prop.name.as_str() {
+                match parameter {
+                    "name" => return Some(saved_prop.name.clone()),
+                    "value_type" => return Some(saved_prop.value_type.clone()),
+                    "color" => return Some(saved_prop.color.clone()),
+                    _ => None
+                }
+            } else { None }
+        })
+    }
+
+    pub fn set_parameter(&mut self, property: &String, parameter: &String, value: &String) -> Result<(), String> {
+        let properties = self.properties.clone();
+        let property = self.properties.iter_mut().find(|saved_prop| {
+            property == saved_prop.name.as_str()
+        });
+        match property {
+            Some(saved_prop) => {
+                let set_result = match parameter.as_str() {
+                    "name" => {
+                        if properties.iter().find(|property| property.name == value.to_string()).is_some() {
+                            Err("Name already exists for another property".to_string())
+                        } else {
+                            saved_prop.name = value.clone();
+                            Ok(())
+                        }
+                    },
+                    "value_type" => {
+                        saved_prop.value_type = value.clone(); Ok(())
+                    },
+                    "color" => {
+                        saved_prop.color = value.clone(); Ok(())
+                    },
+                    _ => Err("Unknown property".to_string())
+                };
+                match set_result {
+                    Ok(_) => {
+                        match Self::save_config(&self.properties) {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(e)
+                        }
+                    },
+                    Err(e) => Err(e)
+                }
+            }
+            None => Err("No such property".into())
+        }
+    }
+
+    pub fn add_property(&mut self, name: String, value_type: String, color: String) -> Result<(), String> {
+        let property = Property {
+            name,
+            value_type,
+            color,
+            enum_values: None,
+        };
+        self.properties.push(property);
+        Self::save_config(&self.properties)
+    }
+
+    pub fn delete_property(&mut self, name: &String) -> Result<(), String> {
+        let prev_prop_count = self.properties.len();
+        self.properties.retain(|s| s.name != *name);
+        match prev_prop_count == self.properties.len() {
+            true => Err("Property not found".to_string()),
+            false => Self::save_config(&self.properties),
         }
     }
 }

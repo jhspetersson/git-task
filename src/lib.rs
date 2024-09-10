@@ -91,6 +91,10 @@ impl Task {
         self.props.insert(prop, value);
     }
 
+    pub fn has_property(&self, prop: &str) -> bool {
+        self.props.contains_key(prop)
+    }
+
     pub fn delete_property(&mut self, prop: &str) {
         self.props.remove(prop);
     }

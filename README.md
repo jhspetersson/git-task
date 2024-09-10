@@ -242,6 +242,10 @@ Colors available:
 
     Black, DarkGray, Red, LightRed, Green, LightGreen, Yellow, LightYellow, Blue, LightBlue, Purple, LightPurple, Magenta, LightMagenta, Cyan, LightCyan, White, LightGray
 
+Or one-byte value like:
+    
+    239
+
 Add and delete statuses:
 
     git task config status add ARCHIVE a Magenta true

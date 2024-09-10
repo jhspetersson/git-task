@@ -1001,6 +1001,79 @@ pub(crate) fn task_config_status_reset() -> bool {
     }
 }
 
+pub(crate) fn task_config_properties_add(name: String, value_type: String, color: String) -> bool {
+    let mut prop_manager = PropertyManager::new();
+    match prop_manager.add_property(name.clone(), value_type, color) {
+        Ok(_) => success_message(format!("Property {name} has been added")),
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}
+
+pub(crate) fn task_config_properties_delete(name: String, force: bool) -> bool {
+    let mut prop_manager = PropertyManager::new();
+
+    if !force {
+        if let Ok(tasks) = gittask::list_tasks() {
+            let task_exists = tasks.iter().any(|task| task.has_property(&name));
+            if task_exists {
+                return error_message("Can't delete a property, some tasks still have it. Use --force option to override.".to_string());
+            }
+        }
+    }
+
+    match prop_manager.delete_property(&name) {
+        Ok(_) => success_message(format!("Property {name} has been deleted")),
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}
+
+pub(crate) fn task_config_properties_get(name: String, param: String) -> bool {
+    let prop_manager = PropertyManager::new();
+    match prop_manager.get_parameter(&name, &param) {
+        Some(value) => success_message(value),
+        None => error_message(format!("Unknown property {name} or parameter: {param}"))
+    }
+}
+
+pub(crate) fn task_config_properties_set(name: String, param: String, value: String) -> bool {
+    let mut prop_manager = PropertyManager::new();
+    match prop_manager.set_parameter(&name, &param, &value) {
+        Ok(_) => {
+            println!("{name} {param} has been updated");
+
+            if param.as_str() == "name" {
+                match gittask::list_tasks() {
+                    Ok(tasks) => {
+                        for mut task in tasks {
+                            if task.has_property(&name) {
+                                let task_prop_value = task.get_property(&name).unwrap();
+                                task.set_property(value.clone(), task_prop_value.to_string());
+                                task.delete_property(&name);
+                                if let Err(e) = gittask::update_task(task) {
+                                    eprintln!("ERROR: {e}");
+                                }
+                            }
+                        }
+                    },
+                    Err(e) => eprintln!("ERROR: {e}")
+                }
+            }
+
+            true
+        },
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}
+
+pub(crate) fn task_config_properties_list() -> bool {
+    let prop_manager = PropertyManager::new();
+    println!("Name\tValue type\tColor");
+    prop_manager.get_properties().iter().for_each(|property| {
+        println!("{}\t{}\t{}", property.get_name(), property.get_value_type(), property.get_color());
+    });
+    true
+}
+
 pub(crate) fn task_config_properties_import() -> bool {
     if let Some(input) = read_from_pipe() {
         match PropertyManager::parse_properties(input) {
