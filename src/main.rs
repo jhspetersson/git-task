@@ -9,7 +9,8 @@ extern crate gittask;
 use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 
-use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_config_get, task_config_list, task_config_properties_add, task_config_properties_delete, task_config_properties_enum_add, task_config_properties_enum_delete, task_config_properties_enum_get, task_config_properties_enum_set, task_config_properties_export, task_config_properties_get, task_config_properties_import, task_config_properties_list, task_config_properties_reset, task_config_properties_set, task_config_set, task_config_status_add, task_config_status_delete, task_config_status_export, task_config_status_get, task_config_status_import, task_config_status_list, task_config_status_reset, task_config_status_set, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
+use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
+use crate::operations::config::*;
 
 #[derive(Parser)]
 #[command(arg_required_else_help(true))]
