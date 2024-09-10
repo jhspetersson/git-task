@@ -1,13 +1,12 @@
 use std::env::VarError;
 use std::fs::File;
 use std::io::{IsTerminal, Read, Write};
+use std::iter::Iterator;
 use std::process::Command;
 use std::time::{Duration, UNIX_EPOCH};
 
 use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
 use nu_ansi_term::Color;
-
-use std::iter::Iterator;
 use nu_ansi_term::Color::{Black, Blue, Cyan, DarkGray, Default, Fixed, Green, LightBlue, LightCyan, LightGray, LightGreen, LightMagenta, LightPurple, LightRed, LightYellow, Magenta, Purple, Red, White, Yellow};
 
 pub trait ExpandRange {

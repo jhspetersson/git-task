@@ -1,5 +1,6 @@
 use nu_ansi_term::AnsiString;
 use serde::{Deserialize, Serialize};
+
 use crate::util::str_to_color;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -209,7 +210,6 @@ impl StatusManager {
             None => Err("No such status".into())
         }
     }
-
 }
 
 fn read_config() -> Result<Vec<Status>, String> {

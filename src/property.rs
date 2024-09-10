@@ -1,5 +1,6 @@
 use nu_ansi_term::AnsiString;
 use serde::{Deserialize, Serialize};
+
 use crate::util::{format_datetime, str_to_color};
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -228,10 +229,7 @@ impl PropertyManager {
         let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
         match property {
             Some(property) => {
-                let mut enum_values = match property.enum_values.clone() {
-                    Some(enum_values) => enum_values,
-                    None => vec![]
-                };
+                let mut enum_values = property.enum_values.clone().unwrap_or_else(|| vec![]);
                 enum_values.push(PropertyEnumValue {
                     name: enum_value_name,
                     color: enum_value_color,
@@ -266,10 +264,7 @@ impl PropertyManager {
         let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
         match property {
             Some(property) => {
-                let mut enum_values = match property.enum_values.clone() {
-                    Some(enum_values) => enum_values,
-                    None => vec![]
-                };
+                let mut enum_values = property.enum_values.clone().unwrap_or_else(|| vec![]);
                 let enum_value = enum_values.iter_mut().find(|saved_enum| saved_enum.name == enum_value_name);
                 match enum_value {
                     Some(enum_value) => {
@@ -288,10 +283,7 @@ impl PropertyManager {
         let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
         match property {
             Some(property) => {
-                let mut enum_values = match property.enum_values.clone() {
-                    Some(enum_values) => enum_values,
-                    None => vec![]
-                };
+                let mut enum_values = property.enum_values.clone().unwrap_or_else(|| vec![]);
                 let prev_enum_count = enum_values.len();
                 enum_values.retain(|saved_enum| saved_enum.name != enum_value_name);
                 match prev_enum_count == enum_values.len() {

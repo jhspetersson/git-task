@@ -265,7 +265,7 @@ pub fn clear_tasks() -> Result<u64, String> {
     let parents = vec![parent_commit];
     let me = &map_err!(repo.signature());
 
-    map_err!(repo.commit(Some(&get_ref_path()), me, me, "delete task", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path()), me, me, "clear tasks", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task_count)
 }
