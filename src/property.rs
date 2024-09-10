@@ -108,7 +108,16 @@ impl PropertyManager {
                 match no_color {
                     true => value.into(),
                     false => {
-                        let color = str_to_color(&property.color);
+                        let color = match &property.enum_values {
+                            Some(enum_values) => {
+                                enum_values.iter()
+                                    .find(|pev| pev.name == value)
+                                    .map(|pev| &pev.color)
+                                    .unwrap_or_else(|| &property.color)
+                            },
+                            None => &property.color
+                        };
+                        let color = str_to_color(&color);
                         color.paint(value)
                     }
                 }
