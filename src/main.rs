@@ -352,14 +352,14 @@ enum PropertiesCommand {
     Get {
         /// property name
         name: String,
-        /// property parameter
+        /// property parameter (name, color or value_type)
         param: String,
     },
     /// Set task property parameter
     Set {
         /// property name
         name: String,
-        /// property parameter
+        /// property parameter (name, color or value_type)
         param: String,
         /// property value
         value: String,

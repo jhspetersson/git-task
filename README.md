@@ -261,6 +261,12 @@ If everything went wrong:
 
     git task config status reset
 
+Configure known task properties (you can add any other if you wish to any task):
+
+    git task config props add client_name string Cyan
+    git task config props set client_name color Blue
+    git task config props delete client_name
+
 You can also export, manually edit and import back task properties configuration. That's useful when you want to change default colors for properties like author or any custom one.
 
     git task config props export
