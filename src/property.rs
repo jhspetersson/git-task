@@ -243,6 +243,25 @@ impl PropertyManager {
         }
     }
 
+    pub fn get_enum_property(&self, name: String, enum_value_name: String) -> Result<String, String> {
+        let property = self.properties.iter().find(|saved_prop| saved_prop.name == name);
+        match property {
+            Some(property) => {
+                match &property.enum_values {
+                    Some(enum_values) => {
+                        let enum_value = enum_values.iter().find(|saved_enum| saved_enum.name == enum_value_name);
+                        match enum_value {
+                            Some(enum_value) => Ok(enum_value.color.clone()),
+                            None => Err("Property not found".to_string()),
+                        }
+                    },
+                    None => Err("Property has no enum values".to_string())
+                }
+            },
+            None => Err("Property not found".to_string())
+        }
+    }
+
     pub fn set_enum_property(&mut self, name: String, enum_value_name: String, enum_value_color: String) -> Result<(), String> {
         let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
         match property {

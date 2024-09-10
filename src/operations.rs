@@ -1124,7 +1124,15 @@ pub(crate) fn task_config_properties_reset() -> bool {
 pub(crate) fn task_config_properties_enum_add(name: String, enum_value_name: String, enum_value_color: String) -> bool {
     let mut prop_manager = PropertyManager::new();
     match prop_manager.add_enum_property(name, enum_value_name, enum_value_color) {
-        Ok(_) => success_message(format!("Property enum has been added")),
+        Ok(_) => success_message("Property enum has been added".to_string()),
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}
+
+pub(crate) fn task_config_properties_enum_get(name: String, enum_value_name: String) -> bool {
+    let prop_manager = PropertyManager::new();
+    match prop_manager.get_enum_property(name, enum_value_name) {
+        Ok(s) => success_message(s),
         Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
@@ -1132,7 +1140,7 @@ pub(crate) fn task_config_properties_enum_add(name: String, enum_value_name: Str
 pub(crate) fn task_config_properties_enum_set(name: String, enum_value_name: String, enum_value_color: String) -> bool {
     let mut prop_manager = PropertyManager::new();
     match prop_manager.set_enum_property(name, enum_value_name, enum_value_color) {
-        Ok(_) => success_message(format!("Property enum has been updated")),
+        Ok(_) => success_message("Property enum has been updated".to_string()),
         Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
@@ -1140,7 +1148,7 @@ pub(crate) fn task_config_properties_enum_set(name: String, enum_value_name: Str
 pub(crate) fn task_config_properties_enum_delete(name: String, enum_value_name: String) -> bool {
     let mut prop_manager = PropertyManager::new();
     match prop_manager.delete_enum_property(name, enum_value_name) {
-        Ok(_) => success_message(format!("Property enum has been deleted")),
+        Ok(_) => success_message("Property enum has been deleted".to_string()),
         Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
