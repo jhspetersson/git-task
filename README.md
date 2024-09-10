@@ -2,7 +2,7 @@
 
 Local-first task manager/bug tracker within your git repository which can import issues from GitHub.
 
-Current state: PoC, but it works for me.
+[![build](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml/badge.svg)](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml)
 
 ## Installation
 
