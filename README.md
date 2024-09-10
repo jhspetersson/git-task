@@ -267,7 +267,13 @@ Configure known task properties (you can add any other if you wish to any task):
     git task config props set client_name color Blue
     git task config props delete client_name
 
-You can also export, manually edit and import back task properties configuration. That's useful when you want to change default colors for properties like author or any custom one.
+You can also set up their own colors for specific values of the properties (assuming you've already added `priority` property):
+
+    git task config prop enum add priority HIGH Red
+    git task config prop enum set priority HIGH Magenta
+    git task config prop enum del priority HIGH
+
+You can also export, manually edit and import back task properties configuration.
 
     git task config props export
     git task config props import

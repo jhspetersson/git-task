@@ -1012,9 +1012,9 @@ pub(crate) fn task_config_status_reset() -> bool {
     }
 }
 
-pub(crate) fn task_config_properties_add(name: String, value_type: String, color: String) -> bool {
+pub(crate) fn task_config_properties_add(name: String, value_type: String, color: String, enum_values: Option<Vec<String>>) -> bool {
     let mut prop_manager = PropertyManager::new();
-    match prop_manager.add_property(name.clone(), value_type, color) {
+    match prop_manager.add_property(name.clone(), value_type, color, enum_values) {
         Ok(_) => success_message(format!("Property {name} has been added")),
         Err(e) => error_message(format!("ERROR: {e}"))
     }
@@ -1117,6 +1117,30 @@ pub(crate) fn task_config_properties_reset() -> bool {
     let mut prop_manager = PropertyManager::new();
     match prop_manager.set_defaults() {
         Ok(_) => success_message("Properties have been reset".to_string()),
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}
+
+pub(crate) fn task_config_properties_enum_add(name: String, enum_value_name: String, enum_value_color: String) -> bool {
+    let mut prop_manager = PropertyManager::new();
+    match prop_manager.add_enum_property(name, enum_value_name, enum_value_color) {
+        Ok(_) => success_message(format!("Property enum has been added")),
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}
+
+pub(crate) fn task_config_properties_enum_set(name: String, enum_value_name: String, enum_value_color: String) -> bool {
+    let mut prop_manager = PropertyManager::new();
+    match prop_manager.set_enum_property(name, enum_value_name, enum_value_color) {
+        Ok(_) => success_message(format!("Property enum has been updated")),
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}
+
+pub(crate) fn task_config_properties_enum_delete(name: String, enum_value_name: String) -> bool {
+    let mut prop_manager = PropertyManager::new();
+    match prop_manager.delete_enum_property(name, enum_value_name) {
+        Ok(_) => success_message(format!("Property enum has been deleted")),
         Err(e) => error_message(format!("ERROR: {e}"))
     }
 }

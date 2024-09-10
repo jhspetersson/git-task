@@ -30,6 +30,19 @@ struct PropertyEnumValue {
     color: String,
 }
 
+impl PropertyEnumValue {
+    fn from(source: Vec<String>) -> Vec<PropertyEnumValue> {
+        let mut result = vec![];
+        for i in 0..=source.len()/2 {
+            result.push(PropertyEnumValue{
+                name: source[i * 2].clone(),
+                color: source[i * 2 + 1].clone(),
+            })
+        }
+        result
+    }
+}
+
 pub struct PropertyManager {
     properties: Vec<Property>,
 }
@@ -191,12 +204,12 @@ impl PropertyManager {
         }
     }
 
-    pub fn add_property(&mut self, name: String, value_type: String, color: String) -> Result<(), String> {
+    pub fn add_property(&mut self, name: String, value_type: String, color: String, enum_values: Option<Vec<String>>) -> Result<(), String> {
         let property = Property {
             name,
             value_type,
             color,
-            enum_values: None,
+            enum_values: enum_values.map_or_else(|| None, |enum_values| Some(PropertyEnumValue::from(enum_values))),
         };
         self.properties.push(property);
         Self::save_config(&self.properties)
@@ -208,6 +221,69 @@ impl PropertyManager {
         match prev_prop_count == self.properties.len() {
             true => Err("Property not found".to_string()),
             false => Self::save_config(&self.properties),
+        }
+    }
+
+    pub fn add_enum_property(&mut self, name: String, enum_value_name: String, enum_value_color: String) -> Result<(), String> {
+        let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
+        match property {
+            Some(property) => {
+                let mut enum_values = match property.enum_values.clone() {
+                    Some(enum_values) => enum_values,
+                    None => vec![]
+                };
+                enum_values.push(PropertyEnumValue {
+                    name: enum_value_name,
+                    color: enum_value_color,
+                });
+                property.enum_values = Some(enum_values);
+                Self::save_config(&self.properties)
+            },
+            None => Err("Property not found".to_string())
+        }
+    }
+
+    pub fn set_enum_property(&mut self, name: String, enum_value_name: String, enum_value_color: String) -> Result<(), String> {
+        let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
+        match property {
+            Some(property) => {
+                let mut enum_values = match property.enum_values.clone() {
+                    Some(enum_values) => enum_values,
+                    None => vec![]
+                };
+                let enum_value = enum_values.iter_mut().find(|saved_enum| saved_enum.name == enum_value_name);
+                match enum_value {
+                    Some(enum_value) => {
+                        enum_value.color = enum_value_color;
+                        property.enum_values = Some(enum_values);
+                        Self::save_config(&self.properties)
+                    },
+                    None => Err("Enum value not found. To add a new value use `git task config props enum add` command".to_string())
+                }
+            },
+            None => Err("Property not found".to_string())
+        }
+    }
+
+    pub fn delete_enum_property(&mut self, name: String, enum_value_name: String) -> Result<(), String> {
+        let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
+        match property {
+            Some(property) => {
+                let mut enum_values = match property.enum_values.clone() {
+                    Some(enum_values) => enum_values,
+                    None => vec![]
+                };
+                let prev_enum_count = enum_values.len();
+                enum_values.retain(|saved_enum| saved_enum.name != enum_value_name);
+                match prev_enum_count == enum_values.len() {
+                    true => Err("Enum value not found".to_string()),
+                    false => {
+                        property.enum_values = Some(enum_values);
+                        Self::save_config(&self.properties)
+                    },
+                }
+            },
+            None => Err("Property not found".to_string())
         }
     }
 }
