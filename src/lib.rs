@@ -445,7 +445,8 @@ pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod test {
-    use crate::{create_task, get_current_timestamp, get_next_id, get_ref_path, set_ref_path, Task};
+    use std::collections::HashMap;
+    use crate::{create_task, delete_tasks, find_task, get_current_timestamp, get_next_id, get_ref_path, set_ref_path, update_task, Task};
 
     #[test]
     fn test_ref_path() {
@@ -457,16 +458,49 @@ mod test {
     }
 
     #[test]
-    fn test_create_task() {
+    fn test_create_update_delete_task() {
         let id = get_next_id().unwrap_or_else(|_| "1".to_string());
         let task = Task::construct_task("Test task".to_string(), "Description goes here".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
-        let task_result = create_task(task);
-        assert!(task_result.is_ok());
-        let task = task_result.unwrap();
-        assert_eq!(task.get_id(), Some(id));
+        let create_result = create_task(task);
+        assert!(create_result.is_ok());
+        let mut task = create_result.unwrap();
+        assert_eq!(task.get_id(), Some(id.clone()));
         assert_eq!(task.get_property("name").unwrap(), "Test task");
         assert_eq!(task.get_property("description").unwrap(), "Description goes here");
         assert_eq!(task.get_property("status").unwrap(), "OPEN");
         assert!(task.has_property("created"));
+
+        task.set_property("description".to_string(), "Updated description".to_string());
+        let comment_props = HashMap::from([("author".to_string(), "Some developer".to_string())]);
+        task.add_comment(None, comment_props, "This is a comment".to_string());
+        task.set_property("custom_prop".to_string(), "Custom content".to_string());
+        let update_result = update_task(task);
+        assert!(update_result.is_ok());
+        assert_eq!(update_result.unwrap(), id.clone());
+
+        let find_result = find_task(&id);
+        assert!(find_result.is_ok());
+        let task = find_result.unwrap();
+        assert!(task.is_some());
+        let task = task.unwrap();
+        assert_eq!(task.get_id(), Some(id.clone()));
+        assert_eq!(task.get_property("description").unwrap(), "Updated description");
+        let comments = task.get_comments().clone();
+        assert!(comments.is_some());
+        let comments = comments.unwrap();
+        assert_eq!(comments.len(), 1);
+        let comment = comments.first().unwrap();
+        assert_eq!(comment.get_text(), "This is a comment".to_string());
+        let comment_props = comment.clone().props;
+        assert_eq!(comment_props.get("author").unwrap(), &"Some developer".to_string());
+        assert_eq!(task.get_property("custom_prop").unwrap(), "Custom content");
+
+        let delete_result = delete_tasks(&[&id]);
+        assert!(delete_result.is_ok());
+
+        let find_result = find_task(&id);
+        assert!(find_result.is_ok());
+        let task = find_result.unwrap();
+        assert!(task.is_none());
     }
 }
