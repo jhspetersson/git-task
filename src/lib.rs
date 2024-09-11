@@ -284,7 +284,7 @@ pub fn create_task(mut task: Task) -> Result<Task, String> {
     };
 
     if task.get_id().is_none() {
-        let id = get_next_id().unwrap_or("1".to_string());
+        let id = get_next_id().unwrap_or_else(|_| "1".to_string());
         task.set_id(id);
     }
     let string_content = serde_json::to_string(&task).unwrap();
@@ -458,7 +458,7 @@ mod test {
 
     #[test]
     fn test_create_task() {
-        let id = get_next_id().unwrap();
+        let id = get_next_id().unwrap_or_else(|_| "1".to_string());
         let task = Task::construct_task("Test task".to_string(), "Description goes here".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let task_result = create_task(task);
         assert!(task_result.is_ok());
