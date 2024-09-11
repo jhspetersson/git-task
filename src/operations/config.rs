@@ -215,9 +215,18 @@ pub(crate) fn task_config_properties_set(name: String, param: String, value: Str
 
 pub(crate) fn task_config_properties_list() -> bool {
     let prop_manager = PropertyManager::new();
-    println!("Name\tValue type\tColor");
+    println!("Name\tValue type\tColor\tEnum values");
     prop_manager.get_properties().iter().for_each(|property| {
-        println!("{}\t{}\t{}", property.get_name(), property.get_value_type(), property.get_color());
+        let enums = match property.get_enum_values() {
+            Some(enum_values) => {
+                enum_values.iter()
+                    .map(|saved_enum| saved_enum.get_name().to_string() + "," + saved_enum.get_color())
+                    .collect::<Vec<_>>()
+                    .join(";")
+            },
+            None => String::new()
+        };
+        println!("{}\t{}\t{}\t{}", property.get_name(), property.get_value_type(), property.get_color(), enums);
     });
     true
 }
