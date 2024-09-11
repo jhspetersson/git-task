@@ -450,8 +450,8 @@ mod test {
     #[test]
     fn test_ref_path() {
         let ref_path = get_ref_path();
-        assert!(set_ref_path("refs/heads/git-task", true).is_ok());
-        assert_eq!(get_ref_path(), "refs/heads/git-task");
+        assert!(set_ref_path("refs/heads/test-git-task", true).is_ok());
+        assert_eq!(get_ref_path(), "refs/heads/test-git-task");
         assert!(set_ref_path(&ref_path, true).is_ok());
         assert_eq!(get_ref_path(), ref_path);
     }
