@@ -23,10 +23,14 @@ impl Property {
     pub(crate) fn get_color(&self) -> &str {
         &self.color
     }
+
+    pub(crate) fn get_enum_values(&self) -> &Option<Vec<PropertyEnumValue>> {
+        &self.enum_values
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct PropertyEnumValue {
+pub struct PropertyEnumValue {
     name: String,
     color: String,
 }
@@ -41,6 +45,14 @@ impl PropertyEnumValue {
             })
         }
         result
+    }
+
+    pub(crate) fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    pub(crate) fn get_color(&self) -> &str {
+        &self.color
     }
 }
 

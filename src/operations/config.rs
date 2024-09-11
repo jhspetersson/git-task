@@ -258,6 +258,25 @@ pub(crate) fn task_config_properties_reset() -> bool {
     }
 }
 
+pub(crate) fn task_config_properties_enum_list(name: String) -> bool {
+    let prop_manager = PropertyManager::new();
+    let property = prop_manager.get_properties().iter().find(|saved_prop| saved_prop.get_name() == name);
+    match property {
+        Some(property) => {
+            match property.get_enum_values() {
+                Some(enum_values) => {
+                    for enum_value in enum_values {
+                        println!("{} {}", enum_value.get_name(), enum_value.get_color());
+                    }
+                    true
+                },
+                None => error_message("Property has no enum values".to_string())
+            }
+        },
+        None => error_message("Property not found".to_string())
+    }
+}
+
 pub(crate) fn task_config_properties_enum_add(name: String, enum_value_name: String, enum_value_color: String) -> bool {
     let mut prop_manager = PropertyManager::new();
     match prop_manager.add_enum_property(name, enum_value_name, enum_value_color) {

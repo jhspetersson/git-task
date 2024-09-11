@@ -392,6 +392,11 @@ enum PropertiesCommand {
 
 #[derive(Subcommand)]
 enum PropertiesEnumCommand {
+    /// List enum values of a property
+    List {
+        /// property name
+        name: String,
+    },
     /// Add a property enum value
     #[clap(visible_aliases(["create", "new"]))]
     Add {
@@ -500,6 +505,7 @@ fn task_config_properties(subcommand: PropertiesCommand) -> bool {
 
 fn task_config_properties_enum(subcommand: PropertiesEnumCommand) -> bool {
     match subcommand {
+        PropertiesEnumCommand::List { name } => task_config_properties_enum_list(name),
         PropertiesEnumCommand::Add { name, enum_value_name, enum_value_color } => task_config_properties_enum_add(name, enum_value_name, enum_value_color),
         PropertiesEnumCommand::Get { name, enum_value_name } => task_config_properties_enum_get(name, enum_value_name),
         PropertiesEnumCommand::Set { name, enum_value_name, enum_value_color } => task_config_properties_enum_set(name, enum_value_name, enum_value_color),

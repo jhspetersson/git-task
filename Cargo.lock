@@ -486,6 +486,7 @@ dependencies = [
  "futures-util",
  "git2",
  "graphql_client",
+ "log",
  "nu-ansi-term",
  "octocrab",
  "regex",

@@ -282,6 +282,7 @@ You can also set up their own colors for specific values of the properties (assu
     git task config prop enum add priority HIGH Red
     git task config prop enum get priority HIGH
     git task config prop enum set priority HIGH Magenta
+    git task config prop enum list priority    
     git task config prop enum del priority HIGH
 
 You can also export, manually edit and import back task properties configuration.
