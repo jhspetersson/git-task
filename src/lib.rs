@@ -445,14 +445,28 @@ pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
 
 #[cfg(test)]
 mod test {
-    use crate::{get_ref_path, set_ref_path};
+    use crate::{create_task, get_current_timestamp, get_next_id, get_ref_path, set_ref_path, Task};
 
     #[test]
     fn test_ref_path() {
-        assert_eq!(get_ref_path(), "refs/tasks/tasks");
+        let ref_path = get_ref_path();
         assert!(set_ref_path("refs/heads/git-task", true).is_ok());
         assert_eq!(get_ref_path(), "refs/heads/git-task");
-        assert!(set_ref_path("refs/tasks/tasks", true).is_ok());
-        assert_eq!(get_ref_path(), "refs/tasks/tasks");
+        assert!(set_ref_path(&ref_path, true).is_ok());
+        assert_eq!(get_ref_path(), ref_path);
+    }
+
+    #[test]
+    fn test_create_task() {
+        let id = get_next_id().unwrap();
+        let task = Task::construct_task("Test task".to_string(), "Description goes here".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let task_result = create_task(task);
+        assert!(task_result.is_ok());
+        let task = task_result.unwrap();
+        assert_eq!(task.get_id(), Some(id));
+        assert_eq!(task.get_property("name").unwrap(), "Test task");
+        assert_eq!(task.get_property("description").unwrap(), "Description goes here");
+        assert_eq!(task.get_property("status").unwrap(), "OPEN");
+        assert!(task.has_property("created"));
     }
 }
