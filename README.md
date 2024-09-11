@@ -221,7 +221,17 @@ Deletes all tasks.
 Maintain configuration parameters.
 
     git task config list
+    git task config get task.list.columns
+    git task config get task.sort
     git task config get task.ref
+
+Customize sorting:
+
+    git task config set task.list.sort "created desc"
+
+Customize columns:
+
+    git task config set task.list.columns id,author,status,name
 
 By default `git-task` saves everything under a custom ref. You can change that to a regular branch like this:
 

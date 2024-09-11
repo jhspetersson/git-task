@@ -705,6 +705,15 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
              no_color: bool) -> bool {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
+            let sort = match sort {
+                Some(sort) => Some(sort),
+                None => match gittask::get_config_value("task.list.sort") {
+                    Ok(sort) => {
+                        Some(sort.split(",").map(|s| s.trim().to_string()).collect())
+                    },
+                    _ => None
+                }
+            };
             tasks.sort_by(|a, b| {
                 match &sort {
                     Some(sort) if !sort.is_empty() => {
@@ -746,6 +755,16 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
             let no_color = check_no_color(no_color);
 
             let prop_manager = PropertyManager::new();
+
+            let columns = match columns {
+                Some(columns) => Some(columns),
+                None => match gittask::get_config_value("task.list.columns") {
+                    Ok(list_columns) => {
+                        Some(list_columns.split(",").map(|s| s.trim().to_string()).collect())
+                    },
+                    _ => None
+                }
+            };
 
             let mut count = 0;
             for task in tasks {
