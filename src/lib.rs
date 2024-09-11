@@ -461,7 +461,6 @@ mod test {
         let id = get_next_id().unwrap_or_else(|_| "1".to_string());
         let task = Task::construct_task("Test task".to_string(), "Description goes here".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let task_result = create_task(task);
-        assert_eq!(task_result.clone().err().unwrap(), "what");
         assert!(task_result.is_ok());
         let task = task_result.unwrap();
         assert_eq!(task.get_id(), Some(id));
