@@ -31,7 +31,7 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    fn list_remote_tasks(&self, user: String, repo: String, with_comments: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: Vec<String>) -> Vec<Task> {
+    fn list_remote_tasks(&self, user: String, repo: String, with_comments: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Vec<Task> {
         let state = match state {
             RemoteTaskState::Open => State::Open,
             RemoteTaskState::Closed => State::Closed,
@@ -40,8 +40,8 @@ impl RemoteConnector for GithubRemoteConnector {
         RUNTIME.block_on(list_issues(user, repo, with_comments, limit, state, task_statuses))
     }
 
-    fn get_remote_task(&self, user: &String, repo: &String, task_id: &String, with_comments: bool) -> Option<Task> {
-        RUNTIME.block_on(get_issue(&user, &repo, task_id.parse().unwrap(), with_comments))
+    fn get_remote_task(&self, user: &String, repo: &String, task_id: &String, with_comments: bool, task_statuses: &Vec<String>) -> Option<Task> {
+        RUNTIME.block_on(get_issue(&user, &repo, task_id.parse().unwrap(), with_comments, task_statuses))
     }
 
     fn create_remote_task(&self, user: &String, repo: &String, task: &Task) -> Result<String, String> {
@@ -139,7 +139,7 @@ impl RemoteConnector for GithubRemoteConnector {
 )]
 struct DeleteIssue;
 
-async fn list_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>, state: State, task_statuses: Vec<String>) -> Vec<Task> {
+async fn list_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>, state: State, task_statuses: &Vec<String>) -> Vec<Task> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
     let stream = crab.issues(&user, &repo)
@@ -197,14 +197,14 @@ async fn list_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Commen
     result
 }
 
-async fn get_issue(user: &String, repo: &String, n: u64, with_comments: bool) -> Option<Task> {
+async fn get_issue(user: &String, repo: &String, n: u64, with_comments: bool, task_statuses: &Vec<String>) -> Option<Task> {
     let crab = get_octocrab_instance().await;
     let issue = crab.issues(user, repo).get(n).await;
     match issue {
         Ok(issue) => {
             let mut props = HashMap::new();
             props.insert(String::from("name"), issue.title);
-            props.insert(String::from("status"), if issue.state == IssueState::Open { String::from("OPEN") } else { String::from("CLOSED") } );
+            props.insert(String::from("status"), if issue.state == IssueState::Open { task_statuses.get(0).unwrap().clone() } else { task_statuses.get(1).unwrap().clone() } );
             props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
             props.insert(String::from("created"), issue.created_at.timestamp().to_string());
             props.insert(String::from("author"), issue.user.login);

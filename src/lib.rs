@@ -18,7 +18,7 @@ pub struct Task {
     comments: Option<Vec<Comment>>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Comment {
     id: Option<String>,
     props: HashMap<String, String>,

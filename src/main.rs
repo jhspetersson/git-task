@@ -142,7 +142,7 @@ enum Command {
         #[arg(short, long)]
         pretty: bool,
     },
-    /// Import tasks from a remote source (e.g., GitHub)
+    /// Pull tasks from a remote source (e.g., GitHub)
     Pull {
         /// space separated task IDs
         ids: Option<Vec<String>>,

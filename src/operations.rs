@@ -334,7 +334,7 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) -> bool {
 pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: Option<String>, remote: Option<String>, no_comments: bool) -> bool {
     match get_user_repo(remote) {
         Ok((connector, user, repo)) => {
-            println!("Importing tasks from {user}/{repo}...");
+            println!("Pulling tasks from {user}/{repo}...");
 
             let ids = match ids {
                 Some(ids) => {
@@ -344,12 +344,19 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                 None => None
             };
 
+            let status_manager = StatusManager::new();
+            let task_statuses = vec![
+                status_manager.get_starting_status(),
+                status_manager.get_final_status(),
+            ];
+
             if ids.is_some() {
                 for id in ids.unwrap() {
-                    match connector.get_remote_task(&user, &repo, &id, !no_comments) {
+                    match connector.get_remote_task(&user, &repo, &id, !no_comments, &task_statuses) {
                         Some(task) => {
-                            match gittask::create_task(task) {
-                                Ok(_) => println!("Task ID {id} imported"),
+                            match import_remote_task(task, no_comments) {
+                                Ok(Some(id)) => println!("Task ID {id} updated"),
+                                Ok(None) => println!("Task ID {id} skipped, nothing to update"),
                                 Err(e) => eprintln!("ERROR: {e}"),
                             }
                         },
@@ -358,7 +365,6 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                 }
                 true
             } else {
-                let status_manager = StatusManager::new();
                 let state = match status {
                     Some(s) => {
                         let status = status_manager.get_full_status_name(&s);
@@ -368,18 +374,16 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                     None => RemoteTaskState::All
                 };
 
-                let task_statuses = vec![
-                    status_manager.get_starting_status(),
-                    status_manager.get_final_status(),
-                ];
-                let tasks = connector.list_remote_tasks(user.to_string(), repo.to_string(), !no_comments, limit, state, task_statuses);
+                let tasks = connector.list_remote_tasks(user.to_string(), repo.to_string(), !no_comments, limit, state, &task_statuses);
 
                 if tasks.is_empty() {
                     success_message("No tasks found".to_string())
                 } else {
                     for task in tasks {
-                        match gittask::create_task(task) {
-                            Ok(task) => println!("Task ID {} imported", task.get_id().unwrap()),
+                        let task_id = task.get_id().unwrap();
+                        match import_remote_task(task, no_comments) {
+                            Ok(Some(id)) => println!("Task ID {id} updated"),
+                            Ok(None) => println!("Task ID {task_id} skipped, nothing to update"),
                             Err(e) => eprintln!("ERROR: {e}"),
                         }
                     }
@@ -389,6 +393,45 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
         },
         Err(e) => error_message(format!("ERROR: {e}"))
     }
+}
+
+fn import_remote_task(remote_task: Task, no_comments: bool) -> Result<Option<String>, String> {
+    match gittask::find_task(&remote_task.get_id().unwrap()) {
+        Ok(Some(mut local_task)) => {
+            if local_task.get_property("name") == remote_task.get_property("name")
+                && local_task.get_property("description") == remote_task.get_property("description")
+                && local_task.get_property("status") == remote_task.get_property("status")
+                && (no_comments || comments_are_equal(local_task.get_comments(), remote_task.get_comments())) {
+                Ok(None)
+            } else {
+                local_task.set_property("name".to_string(), remote_task.get_property("name").unwrap().to_string());
+                local_task.set_property("description".to_string(), remote_task.get_property("description").unwrap().to_string());
+                local_task.set_property("status".to_string(), remote_task.get_property("status").unwrap().to_string());
+                if !no_comments {
+                    if let Some(comments) = remote_task.get_comments() {
+                        local_task.set_comments(comments.to_vec());
+                    }
+                }
+
+                match gittask::update_task(local_task) {
+                    Ok(id) => Ok(Some(id)),
+                    Err(e) => Err(e),
+                }
+            }
+        },
+        Ok(None) => match gittask::create_task(remote_task) {
+            Ok(local_task) => Ok(Some(local_task.get_id().unwrap())),
+            Err(e) => Err(e),
+        },
+        Err(e) => Err(e)
+    }
+}
+
+fn comments_are_equal(local_comments: &Option<Vec<Comment>>, remote_comments: &Option<Vec<Comment>>) -> bool {
+    (local_comments.is_none() && remote_comments.is_none())
+    || (local_comments.is_some() && remote_comments.is_some()
+        && local_comments.clone().unwrap() == remote_comments.clone().unwrap()
+    )
 }
 
 fn get_user_repo(remote: Option<String>) -> Result<(Box<&'static dyn RemoteConnector>, String, String), String> {
@@ -482,12 +525,16 @@ pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: b
     match get_user_repo(remote) {
         Ok((connector, user, repo)) => {
             let status_manager = StatusManager::new();
+            let task_statuses = vec![
+                status_manager.get_starting_status(),
+                status_manager.get_final_status(),
+            ];
             let no_color = check_no_color(no_color);
             for id in ids {
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
                     println!("Sync: LOCAL task ID {id} found");
-                    let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments);
+                    let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments, &task_statuses);
                     if let Some(remote_task) = remote_task {
                         println!("Sync: REMOTE task ID {id} found");
 
