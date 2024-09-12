@@ -27,6 +27,12 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
             }
         },
         "task.ref" => {
+            let value = match value {
+                value if !value.contains('/') => "refs/heads/".to_string() + value.as_str(),
+                value if !value.starts_with('/') && !value.ends_with('/') => "refs/".to_string() + value.as_str(),
+                value => value,
+            };
+
             match gittask::set_ref_path(&value, move_ref) {
                 Ok(_) => success_message(format!("{param} has been updated")),
                 Err(e) => error_message(format!("ERROR: {e}"))
