@@ -1,5 +1,6 @@
 pub(crate) mod config;
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use chrono::{Local, TimeZone};
@@ -694,6 +695,51 @@ fn print_comment(comment: &Comment, prop_manager: &PropertyManager, no_color: bo
     println!("{}", comment.get_text());
 }
 
+fn make_comparison(first: &Task, second: &Task, prop: &str, value_type: &str) -> Ordering {
+    match prop {
+        "id" => {
+            let first_value = match first.get_id() {
+                Some(value) => value.parse::<u64>().unwrap_or(0),
+                _ => 0,
+            };
+            let second_value = match second.get_id() {
+                Some(value) => value.parse::<u64>().unwrap_or(0),
+                _ => 0,
+            };
+
+            first_value.cmp(&second_value)
+        },
+        _ => {
+            match value_type {
+                "integer" => {
+                    let first_value = match first.get_property(prop) {
+                        Some(value) => value.parse::<u64>().unwrap_or(0),
+                        _ => 0,
+                    };
+                    let second_value = match second.get_property(prop) {
+                        Some(value) => value.parse::<u64>().unwrap_or(0),
+                        _ => 0,
+                    };
+
+                    first_value.cmp(&second_value)
+                },
+                _ => {
+                    let first_value = match first.get_property(prop) {
+                        Some(value) => value.to_lowercase(),
+                        _ => String::new(),
+                    };
+                    let second_value = match second.get_property(prop) {
+                        Some(value) => value.to_lowercase(),
+                        _ => String::new(),
+                    };
+
+                    first_value.cmp(&second_value)
+                }
+            }
+        }
+    }
+}
+
 pub(crate) fn task_list(status: Option<Vec<String>>,
              keyword: Option<String>,
              from: Option<String>,
@@ -705,6 +751,7 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
              no_color: bool) -> bool {
     match gittask::list_tasks() {
         Ok(mut tasks) => {
+            let prop_manager = PropertyManager::new();
             let sort = match sort {
                 Some(sort) => Some(sort),
                 None => match gittask::get_config_value("task.list.sort") {
@@ -723,12 +770,12 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                             let comparison;
                             if s.to_lowercase().ends_with(" desc") {
                                 s = s[..(s.len() - "desc".len())].trim();
-                                comparison = b.get_property(&s).unwrap_or(&String::new()).to_lowercase().cmp(&a.get_property(&s).unwrap_or(&String::new()).to_lowercase());
+                                comparison = make_comparison(b, a, s, &prop_manager.get_parameter(&s, "value_type").unwrap_or_else(|| String::from("")));
                             } else {
                                 if s.to_lowercase().ends_with(" asc") {
                                     s = s[..(s.len() - "asc".len())].trim();
                                 }
-                                comparison = a.get_property(&s).unwrap_or(&String::new()).to_lowercase().cmp(&b.get_property(&s).unwrap_or(&String::new()).to_lowercase());
+                                comparison = make_comparison(a, b, s, &prop_manager.get_parameter(&s, "value_type").unwrap_or_else(|| String::from("")));
                             }
 
                             if ordering.is_none() {
@@ -753,8 +800,6 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                 None => None
             };
             let no_color = check_no_color(no_color);
-
-            let prop_manager = PropertyManager::new();
 
             let columns = match columns {
                 Some(columns) => Some(columns),
