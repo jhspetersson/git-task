@@ -55,7 +55,7 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
 }
 
 pub(crate) fn task_config_list() -> bool {
-    success_message("task.list.columns\ntask.list.sort\ntask.ref".to_string())
+    success_message("task.list.columns\ntask.list.sort\ntask.status.open\ntask.status.closed\ntask.ref".to_string())
 }
 
 pub(crate) fn task_config_status_add(name: String, shortcut: String, color: String, is_done: Option<bool>) -> bool {

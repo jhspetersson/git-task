@@ -27,6 +27,7 @@ Or import issues from GitHub (`GITHUB_TOKEN` or `GITHUB_API_TOKEN` env variable 
 `git-task` maintains a collection of tasks, which are essentially an integer ID and a set of properties.
 
 Some properties are special: `name`, `description`, `author`, `created` and `status`. You can add custom properties for every task.
+It's possible to define conditional color highlighting depending on the value of the property. 
 
 Tasks can have comments that are also addressed by their ID.
 
