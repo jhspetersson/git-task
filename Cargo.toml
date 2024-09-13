@@ -1,6 +1,15 @@
 [package]
 name = "git-task"
 version = "0.1.0"
+authors = ["jhspetersson <jhspetersson@gmail.com>"]
+description = "Local-first task manager/bug tracker within your git repository which can sync issues with remote sources."
+keywords = ["git", "task", "manager", "bug", "tracker"]
+categories = ["command-line-utilities", "command-line-interface"]
+documentation = "https://github.com/jhspetersson/git-task/blob/master/README.md"
+homepage = "https://github.com/jhspetersson/git-task"
+repository = "https://github.com/jhspetersson/git-task"
+readme = "README.md"
+license = "MIT"
 edition = "2021"
 
 [lib]
