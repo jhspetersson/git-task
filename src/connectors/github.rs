@@ -31,7 +31,7 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    fn list_remote_tasks(&self, user: String, repo: String, with_comments: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Vec<Task> {
+    fn list_remote_tasks(&self, user: &String, repo: &String, with_comments: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Vec<Task> {
         let state = match state {
             RemoteTaskState::Open => State::Open,
             RemoteTaskState::Closed => State::Closed,
@@ -58,7 +58,7 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    fn update_remote_task(&self, user: &str, repo: &str, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
+    fn update_remote_task(&self, user: &String, repo: &String, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
         match get_token_from_env() {
             Some(_) => {
                 let state = match state {
@@ -71,7 +71,7 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    fn update_remote_comment(&self, user: &String, repo: &String, comment_id: &String, text: String) -> Result<(), String> {
+    fn update_remote_comment(&self, user: &String, repo: &String, comment_id: &String, text: &String) -> Result<(), String> {
         match get_token_from_env() {
             Some(_) => RUNTIME.block_on(update_comment(user, repo, comment_id.parse().unwrap(), text)),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
@@ -139,10 +139,10 @@ impl RemoteConnector for GithubRemoteConnector {
 )]
 struct DeleteIssue;
 
-async fn list_issues(user: String, repo: String, with_comments: bool, limit: Option<usize>, state: State, task_statuses: &Vec<String>) -> Vec<Task> {
+async fn list_issues(user: &String, repo: &String, with_comments: bool, limit: Option<usize>, state: State, task_statuses: &Vec<String>) -> Vec<Task> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
-    let stream = crab.issues(&user, &repo)
+    let stream = crab.issues(user, repo)
         .list()
         .state(state)
         .per_page(100)
@@ -243,7 +243,7 @@ async fn create_comment(user: &String, repo: &String, task_id: &String, comment:
     }
 }
 
-async fn update_issue(user: &str, repo: &str, n: u64, title: &str, body: &str, state: IssueState) -> Result<(), String> {
+async fn update_issue(user: &String, repo: &String, n: u64, title: &String, body: &String, state: IssueState) -> Result<(), String> {
     let crab = get_octocrab_instance().await;
     match crab.issues(user, repo).update(n).title(title).body(body).state(state).send().await {
         Ok(_) => Ok(()),
@@ -251,7 +251,7 @@ async fn update_issue(user: &str, repo: &str, n: u64, title: &str, body: &str, s
     }
 }
 
-async fn update_comment(user: &String, repo: &String, n: u64, text: String) -> Result<(), String> {
+async fn update_comment(user: &String, repo: &String, n: u64, text: &String) -> Result<(), String> {
     let crab = get_octocrab_instance().await;
     match crab.issues(user, repo).update_comment(CommentId(n), text).await {
         Ok(_) => Ok(()),

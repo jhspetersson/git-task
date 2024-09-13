@@ -243,7 +243,7 @@ pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool,
                             if push {
                                 match get_user_repo(remote) {
                                     Ok((connector, user, repo)) => {
-                                        match connector.update_remote_comment(&user, &repo, &comment_id, text) {
+                                        match connector.update_remote_comment(&user, &repo, &comment_id, &text) {
                                             Ok(_) => {
                                                 println!("Sync: REMOTE comment ID {comment_id} has been updated");
                                                 success = true;
@@ -390,7 +390,7 @@ pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: 
                     None => RemoteTaskState::All
                 };
 
-                let tasks = connector.list_remote_tasks(user.to_string(), repo.to_string(), !no_comments, limit, state, &task_statuses);
+                let tasks = connector.list_remote_tasks(&user, &repo, !no_comments, limit, state, &task_statuses);
 
                 if tasks.is_empty() {
                     success_message("No tasks found".to_string())
