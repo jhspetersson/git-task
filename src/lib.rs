@@ -382,7 +382,7 @@ pub fn update_comment_id(task_id: &str, id: &str, new_id: &str) -> Result<(), St
     Ok(())
 }
 
-pub fn list_remotes(remote: Option<String>) -> Result<Vec<String>, String> {
+pub fn list_remotes(remote: &Option<String>) -> Result<Vec<String>, String> {
     let repo = map_err!(Repository::open("."));
     let remotes = map_err!(repo.remotes());
     Ok(remotes.iter()

@@ -12,7 +12,7 @@ use crate::property::PropertyManager;
 use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_date, read_from_pipe, success_message, ExpandRange};
 
-pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: Option<String>) -> bool {
+pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: &Option<String>) -> bool {
     let description = match description {
         Some(description) => description,
         None => match no_desc {
@@ -54,13 +54,18 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
     }
 }
 
-pub(crate) fn task_status(ids: Vec<String>, status: String) -> bool {
+pub(crate) fn task_status(ids: Vec<String>, status: String, push: bool, remote: &Option<String>, no_color: bool) -> bool {
     let status_manager = StatusManager::new();
     let status = status_manager.get_full_status_name(&status);
     let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
-    for id in ids {
-        task_set(id, "status".to_string(), Some(status.clone()), false);
+    for id in &ids {
+        task_set(id, "status".to_string(), Some(status.clone()), false, push, remote, no_color);
     }
+
+    if push {
+        task_push(ids, remote, false, no_color);
+    }
+
     true
 }
 
@@ -77,7 +82,7 @@ pub(crate) fn task_get(id: String, prop_name: String) -> bool {
     }
 }
 
-pub(crate) fn task_set(id: String, prop_name: String, value: Option<String>, delete: bool) -> bool {
+pub(crate) fn task_set(id: &String, prop_name: String, value: Option<String>, delete: bool, push: bool, remote: &Option<String>, no_color: bool) -> bool {
     match prop_name.as_str() {
         "id" => {
             let value = value.unwrap();
@@ -86,6 +91,9 @@ pub(crate) fn task_set(id: String, prop_name: String, value: Option<String>, del
                     println!("Task ID {id} -> {value} updated");
                     if let Err(e) = gittask::delete_tasks(&[&id]) {
                         eprintln!("ERROR: {e}");
+                    }
+                    if push {
+                        task_push(vec![id.to_string()], remote, false, no_color);
                     }
                     true
                 },
@@ -102,7 +110,15 @@ pub(crate) fn task_set(id: String, prop_name: String, value: Option<String>, del
                     }
 
                     match gittask::update_task(task) {
-                        Ok(_) => success_message(format!("Task ID {id} updated")),
+                        Ok(_) => {
+                            println!("Task ID {id} updated");
+
+                            if push {
+                                task_push(vec![id.to_string()], remote, false, no_color);
+                            }
+
+                            true
+                        },
                         Err(e) => error_message(format!("ERROR: {e}")),
                     }
                 },
@@ -159,7 +175,7 @@ pub(crate) fn task_edit(id: String, prop_name: String) -> bool {
     }
 }
 
-pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool, remote: Option<String>) -> bool {
+pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool, remote: &Option<String>) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             let text = text.or_else(|| get_text_from_editor(None));
@@ -203,7 +219,7 @@ pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool
     }
 }
 
-pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool, remote: Option<String>) -> bool {
+pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool, remote: &Option<String>) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             let mut comments = task.get_comments().clone();
@@ -251,7 +267,7 @@ pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool,
     }
 }
 
-pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: bool, remote: Option<String>) -> bool {
+pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: bool, remote: &Option<String>) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             match task.delete_comment(&comment_id) {
@@ -331,7 +347,7 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) -> bool {
     }
 }
 
-pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: Option<String>, remote: Option<String>, no_comments: bool) -> bool {
+pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: Option<String>, remote: &Option<String>, no_comments: bool) -> bool {
     match get_user_repo(remote) {
         Ok((connector, user, repo)) => {
             println!("Pulling tasks from {user}/{repo}...");
@@ -434,7 +450,7 @@ fn comments_are_equal(local_comments: &Option<Vec<Comment>>, remote_comments: &O
     )
 }
 
-fn get_user_repo(remote: Option<String>) -> Result<(Box<&'static dyn RemoteConnector>, String, String), String> {
+fn get_user_repo(remote: &Option<String>) -> Result<(Box<&'static dyn RemoteConnector>, String, String), String> {
     match gittask::list_remotes(remote) {
         Ok(remotes) => {
             let user_repo = get_matching_remote_connectors(remotes);
@@ -515,7 +531,7 @@ pub(crate) fn task_export(ids: Option<Vec<String>>, status: Option<Vec<String>>,
     }
 }
 
-pub(crate) fn task_push(ids: Vec<String>, remote: Option<String>, no_comments: bool, no_color: bool) -> bool {
+pub(crate) fn task_push(ids: Vec<String>, remote: &Option<String>, no_comments: bool, no_color: bool) -> bool {
     if ids.is_empty() {
         return error_message("Select one or more task IDs".to_string());
     }
@@ -621,7 +637,7 @@ fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &S
     }
 }
 
-pub(crate) fn task_delete(ids: Vec<String>, push: bool, remote: Option<String>) -> bool {
+pub(crate) fn task_delete(ids: Vec<String>, push: bool, remote: &Option<String>) -> bool {
     let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
     let ids = ids.iter().map(|id| id.as_str()).collect::<Vec<_>>();
     match gittask::delete_tasks(&ids) {

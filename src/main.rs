@@ -79,12 +79,21 @@ enum Command {
     },
     /// Update task status
     Status {
-        /// task IDs
+        /// one or more task IDs
         #[clap(required = true)]
         ids: Vec<String>,
         /// status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
         #[clap(required = true)]
         status: String,
+        /// Also push task(s) to the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Disable colors
+        #[arg(long)]
+        no_color: bool,
     },
     /// Get a property
     Get {
@@ -104,6 +113,15 @@ enum Command {
         /// Delete the property
         #[arg(short, long, conflicts_with = "value", visible_aliases = ["del", "remove", "rem"])]
         delete: bool,
+        /// Also push task to the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Disable colors
+        #[arg(long)]
+        no_color: bool,
     },
     /// Edit a property
     Edit {
@@ -439,18 +457,18 @@ fn main() -> ExitCode {
     let success = match args.command {
         Some(Command::List { status, keyword, from, until, author, columns, sort, limit, no_color }) => task_list(status, keyword, from, until, author, columns, sort, limit, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
-        Some(Command::Create { name, description, no_desc, push, remote }) => task_create(name, description, no_desc, push, remote),
-        Some(Command::Status { ids, status }) => task_status(ids, status),
+        Some(Command::Create { name, description, no_desc, push, remote }) => task_create(name, description, no_desc, push, &remote),
+        Some(Command::Status { ids, status, push, remote, no_color }) => task_status(ids, status, push, &remote, no_color),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
-        Some(Command::Set { id, prop_name, value, delete }) => task_set(id, prop_name, value, delete),
+        Some(Command::Set { id, prop_name, value, delete, push, remote, no_color }) => task_set(&id, prop_name, value, delete, push, &remote, no_color),
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, status, limit, format, pretty }) => task_export(ids, status, limit, format, pretty),
-        Some(Command::Pull { ids, limit, status, remote, no_comments }) => task_pull(ids, limit, status, remote, no_comments),
-        Some(Command::Push { ids, remote, no_comments, no_color }) => task_push(ids, remote, no_comments, no_color),
+        Some(Command::Pull { ids, limit, status, remote, no_comments }) => task_pull(ids, limit, status, &remote, no_comments),
+        Some(Command::Push { ids, remote, no_comments, no_color }) => task_push(ids, &remote, no_comments, no_color),
         Some(Command::Stats { no_color }) => task_stats(no_color),
-        Some(Command::Delete { ids, push, remote }) => task_delete(ids, push, remote),
+        Some(Command::Delete { ids, push, remote }) => task_delete(ids, push, &remote),
         Some(Command::Clear) => task_clear(),
         Some(Command::Config { subcommand }) => task_config(subcommand),
         None => false
@@ -460,9 +478,9 @@ fn main() -> ExitCode {
 
 fn task_comment(subcommand: CommentCommand) -> bool {
     match subcommand {
-        CommentCommand::Add { task_id, text, push, remote } => task_comment_add(task_id, text, push, remote),
-        CommentCommand::Edit { task_id, comment_id, push, remote } => task_comment_edit(task_id, comment_id, push, remote),
-        CommentCommand::Delete { task_id, comment_id, push, remote } => task_comment_delete(task_id, comment_id, push, remote),
+        CommentCommand::Add { task_id, text, push, remote } => task_comment_add(task_id, text, push, &remote),
+        CommentCommand::Edit { task_id, comment_id, push, remote } => task_comment_edit(task_id, comment_id, push, &remote),
+        CommentCommand::Delete { task_id, comment_id, push, remote } => task_comment_delete(task_id, comment_id, push, &remote),
     }
 }
 
