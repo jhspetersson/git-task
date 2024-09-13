@@ -128,13 +128,21 @@ impl StatusManager {
     }
 
     pub fn get_starting_status(&self) -> String {
-        self.statuses.first().unwrap().name.clone()
+        match gittask::get_config_value("task.status.open") {
+            Ok(s) => s,
+            _ => self.statuses.first().unwrap().name.clone()
+        }
     }
 
     pub fn get_final_status(&self) -> String {
-        self.statuses.iter().find_map(|saved_status| {
-            if saved_status.is_done { Some(saved_status.name.clone()) } else { None }
-        }).unwrap()
+        match gittask::get_config_value("task.status.closed") {
+            Ok(s) => s,
+            _ => {
+                self.statuses.iter().find_map(|saved_status| {
+                    if saved_status.is_done { Some(saved_status.name.clone()) } else { None }
+                }).unwrap()
+            }
+        }
     }
 
     pub fn is_done(&self, status: &str) -> bool {

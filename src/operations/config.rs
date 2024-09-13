@@ -26,6 +26,18 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
                 Err(e) => error_message(format!("ERROR: {e}"))
             }
         },
+        "task.status.open" => {
+            match gittask::set_config_value(&param, &value) {
+                Ok(_) => success_message(format!("{param} has been updated")),
+                Err(e) => error_message(format!("ERROR: {e}"))
+            }
+        },
+        "task.status.closed" => {
+            match gittask::set_config_value(&param, &value) {
+                Ok(_) => success_message(format!("{param} has been updated")),
+                Err(e) => error_message(format!("ERROR: {e}"))
+            }
+        },
         "task.ref" => {
             let value = match value {
                 value if !value.contains('/') => "refs/heads/".to_string() + value.as_str(),

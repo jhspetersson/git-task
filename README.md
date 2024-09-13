@@ -34,6 +34,8 @@ Status can be anything, but it expected to be one of the several defined statuse
 By default, there are three: `OPEN` for new tasks, `IN_PROGRESS` for the tasks that are in development, `CLOSED` for complete ones.
 You can freely edit this list.
 
+However, for the sake of sync with GitHub there are two config options to map remote `OPEN` and `CLOSED` statuses with local ones.
+
 ## Commands
 
 ### list
@@ -222,7 +224,9 @@ Maintain configuration parameters.
 
     git task config list
     git task config get task.list.columns
-    git task config get task.sort
+    git task config get task.list.sort
+    git task config get task.status.open
+    git task config get task.status.closed
     git task config get task.ref
 
 Customize sorting:
@@ -247,6 +251,7 @@ Configure task statuses:
     git task config status set CLOSED color Magenta
     git task config status set CLOSED name FINISHED
     git task config status set FINISHED shortcut f
+    git task config set task.status.closed FINISHED
 
 Colors available:
 
