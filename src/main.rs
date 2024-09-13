@@ -14,7 +14,7 @@ use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_
 use crate::operations::config::*;
 
 #[derive(Parser)]
-#[command(arg_required_else_help(true))]
+#[command(version, about = "Local-first task manager/bug tracker within your git repository which can sync issues from GitHub.", arg_required_else_help(true))]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
