@@ -8,6 +8,7 @@ pub struct Property {
     name: String,
     value_type: String,
     color: String,
+    style: Option<String>,
     enum_values: Option<Vec<PropertyEnumValue>>,
 }
 
@@ -24,6 +25,10 @@ impl Property {
         &self.color
     }
 
+    pub(crate) fn get_style(&self) -> Option<&str> {
+        self.style.as_deref()
+    }
+
     pub(crate) fn get_enum_values(&self) -> &Option<Vec<PropertyEnumValue>> {
         &self.enum_values
     }
@@ -33,6 +38,7 @@ impl Property {
 pub struct PropertyEnumValue {
     name: String,
     color: String,
+    style: Option<String>,
 }
 
 impl PropertyEnumValue {
@@ -42,6 +48,7 @@ impl PropertyEnumValue {
             result.push(PropertyEnumValue{
                 name: source[i * 2].clone(),
                 color: source[i * 2 + 1].clone(),
+                style: None,
             })
         }
         result
@@ -53,6 +60,10 @@ impl PropertyEnumValue {
 
     pub(crate) fn get_color(&self) -> &str {
         &self.color
+    }
+
+    pub(crate) fn get_style(&self) -> Option<&str> {
+        self.style.as_deref()
     }
 }
 
@@ -75,30 +86,35 @@ impl PropertyManager {
                 name: "id".to_string(),
                 value_type: "integer".to_string(),
                 color: "DarkGray".to_string(),
+                style: None,
                 enum_values: None,
             },
             Property {
                 name: "name".to_string(),
                 value_type: "string".to_string(),
                 color: "Default".to_string(),
+                style: None,
                 enum_values: None,
             },
             Property {
                 name: "created".to_string(),
                 value_type: "datetime".to_string(),
                 color: "239".to_string(),
+                style: None,
                 enum_values: None,
             },
             Property {
                 name: "author".to_string(),
                 value_type: "string".to_string(),
                 color: "Cyan".to_string(),
+                style: None,
                 enum_values: None,
             },
             Property {
                 name: "description".to_string(),
                 value_type: "text".to_string(),
                 color: "Default".to_string(),
+                style: None,
                 enum_values: None,
             },
         ]
@@ -148,16 +164,16 @@ impl PropertyManager {
                 match no_color {
                     true => value.into(),
                     false => {
-                        let color = match &property.enum_values {
+                        let (color, style) = match &property.enum_values {
                             Some(enum_values) => {
                                 enum_values.iter()
                                     .find(|pev| pev.name == value)
-                                    .map(|pev| &pev.color)
-                                    .unwrap_or_else(|| &property.color)
+                                    .map(|pev| (&pev.color, &pev.style))
+                                    .unwrap_or_else(|| (&property.color, &None))
                             },
-                            None => &property.color
+                            None => (&property.color, &property.style)
                         };
-                        let color = str_to_color(&color);
+                        let color = str_to_color(&color, style);
                         color.paint(value)
                     }
                 }
@@ -201,6 +217,9 @@ impl PropertyManager {
                     "color" => {
                         saved_prop.color = value.clone(); Ok(())
                     },
+                    "style" => {
+                        saved_prop.style = Some(value.clone()); Ok(())
+                    },
                     _ => Err("Unknown property".to_string())
                 };
                 match set_result {
@@ -217,11 +236,13 @@ impl PropertyManager {
         }
     }
 
-    pub fn add_property(&mut self, name: String, value_type: String, color: String, enum_values: Option<Vec<String>>) -> Result<(), String> {
+    pub fn add_property(&mut self, name: String, value_type: String, color: String, style: Option<String>, enum_values: Option<Vec<String>>) -> Result<(), String> {
         let property = Property {
             name,
             value_type,
+            style,
             color,
+
             enum_values: enum_values.map_or_else(|| None, |enum_values| Some(PropertyEnumValue::from(enum_values))),
         };
         self.properties.push(property);
@@ -237,7 +258,7 @@ impl PropertyManager {
         }
     }
 
-    pub fn add_enum_property(&mut self, name: String, enum_value_name: String, enum_value_color: String) -> Result<(), String> {
+    pub fn add_enum_property(&mut self, name: String, enum_value_name: String, enum_value_color: String, enum_value_style: Option<String>) -> Result<(), String> {
         let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
         match property {
             Some(property) => {
@@ -245,6 +266,7 @@ impl PropertyManager {
                 enum_values.push(PropertyEnumValue {
                     name: enum_value_name,
                     color: enum_value_color,
+                    style: enum_value_style,
                 });
                 property.enum_values = Some(enum_values);
                 Self::save_config(&self.properties)
@@ -261,7 +283,7 @@ impl PropertyManager {
                     Some(enum_values) => {
                         let enum_value = enum_values.iter().find(|saved_enum| saved_enum.name == enum_value_name);
                         match enum_value {
-                            Some(enum_value) => Ok(enum_value.color.clone()),
+                            Some(enum_value) => Ok(enum_value.color.clone() + (if enum_value.get_style().is_some() { ", " } else { "" }) + enum_value.get_style().unwrap_or_else(|| "")),
                             None => Err("Property not found".to_string()),
                         }
                     },
@@ -272,7 +294,7 @@ impl PropertyManager {
         }
     }
 
-    pub fn set_enum_property(&mut self, name: String, enum_value_name: String, enum_value_color: String) -> Result<(), String> {
+    pub fn set_enum_property(&mut self, name: String, enum_value_name: String, enum_value_color: String, enum_value_style: Option<String>) -> Result<(), String> {
         let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
         match property {
             Some(property) => {
@@ -281,6 +303,7 @@ impl PropertyManager {
                 match enum_value {
                     Some(enum_value) => {
                         enum_value.color = enum_value_color;
+                        enum_value.style = enum_value_style;
                         property.enum_values = Some(enum_values);
                         Self::save_config(&self.properties)
                     },

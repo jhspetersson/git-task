@@ -6,7 +6,7 @@ use std::process::Command;
 use std::time::{Duration, UNIX_EPOCH};
 
 use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
-use nu_ansi_term::Color;
+use nu_ansi_term::{Color, Style};
 use nu_ansi_term::Color::{Black, Blue, Cyan, DarkGray, Default, Fixed, Green, LightBlue, LightCyan, LightGray, LightGreen, LightMagenta, LightPurple, LightRed, LightYellow, Magenta, Purple, Red, White, Yellow};
 
 pub trait ExpandRange {
@@ -38,8 +38,8 @@ pub fn capitalize(s: &str) -> String {
     }
 }
 
-pub fn str_to_color(s: &str) -> Color {
-    match s {
+pub fn str_to_color(color: &str, style: &Option<String>) -> Style {
+    let color = match color {
         "Black" => Black,
         "DarkGray" => DarkGray,
         "Red" => Red,
@@ -62,6 +62,22 @@ pub fn str_to_color(s: &str) -> Color {
             Ok(n) => Fixed(n),
             _ => Default
         }
+    };
+
+    match style {
+        Some(s) => {
+            let mut color = color.normal();
+            let values = s.split(",").collect::<Vec<&str>>();
+            for value in values {
+                match value {
+                    "bold" => color = color.bold(),
+                    "underline" => color = color.underline(),
+                    _ => {}
+                }
+            }
+            color
+        },
+        None => color.normal()
     }
 }
 

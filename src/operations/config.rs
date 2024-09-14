@@ -169,7 +169,7 @@ pub(crate) fn task_config_status_reset() -> bool {
 
 pub(crate) fn task_config_properties_add(name: String, value_type: String, color: String, enum_values: Option<Vec<String>>) -> bool {
     let mut prop_manager = PropertyManager::new();
-    match prop_manager.add_property(name.clone(), value_type, color, enum_values) {
+    match prop_manager.add_property(name.clone(), value_type, color, None, enum_values) {
         Ok(_) => success_message(format!("Property {name} has been added")),
         Err(e) => error_message(format!("ERROR: {e}"))
     }
@@ -233,18 +233,18 @@ pub(crate) fn task_config_properties_set(name: String, param: String, value: Str
 
 pub(crate) fn task_config_properties_list() -> bool {
     let prop_manager = PropertyManager::new();
-    println!("Name\tValue type\tColor\tEnum values");
+    println!("Name\tValue type\tColor\tStyle\tEnum values");
     prop_manager.get_properties().iter().for_each(|property| {
         let enums = match property.get_enum_values() {
             Some(enum_values) => {
                 enum_values.iter()
-                    .map(|saved_enum| saved_enum.get_name().to_string() + "," + saved_enum.get_color())
+                    .map(|saved_enum| saved_enum.get_name().to_string() + "," + saved_enum.get_color() + (if saved_enum.get_style().is_some() { "," } else { "" }) + saved_enum.get_style().unwrap_or_else(|| ""))
                     .collect::<Vec<_>>()
                     .join(";")
             },
             None => String::new()
         };
-        println!("{}\t{}\t{}\t{}", property.get_name(), property.get_value_type(), property.get_color(), enums);
+        println!("{}\t{}\t{}\t{}\t{}", property.get_name(), property.get_value_type(), property.get_color(), property.get_style().unwrap_or_else(|| ""), enums);
     });
     true
 }
@@ -293,7 +293,7 @@ pub(crate) fn task_config_properties_enum_list(name: String) -> bool {
             match property.get_enum_values() {
                 Some(enum_values) => {
                     for enum_value in enum_values {
-                        println!("{} {}", enum_value.get_name(), enum_value.get_color());
+                        println!("{} {} {}", enum_value.get_name(), enum_value.get_color(), enum_value.get_style().unwrap_or_else(|| ""));
                     }
                     true
                 },
@@ -304,9 +304,9 @@ pub(crate) fn task_config_properties_enum_list(name: String) -> bool {
     }
 }
 
-pub(crate) fn task_config_properties_enum_add(name: String, enum_value_name: String, enum_value_color: String) -> bool {
+pub(crate) fn task_config_properties_enum_add(name: String, enum_value_name: String, enum_value_color: String, enum_value_style: Option<String>) -> bool {
     let mut prop_manager = PropertyManager::new();
-    match prop_manager.add_enum_property(name, enum_value_name, enum_value_color) {
+    match prop_manager.add_enum_property(name, enum_value_name, enum_value_color, enum_value_style) {
         Ok(_) => success_message("Property enum has been added".to_string()),
         Err(e) => error_message(format!("ERROR: {e}"))
     }
@@ -320,9 +320,9 @@ pub(crate) fn task_config_properties_enum_get(name: String, enum_value_name: Str
     }
 }
 
-pub(crate) fn task_config_properties_enum_set(name: String, enum_value_name: String, enum_value_color: String) -> bool {
+pub(crate) fn task_config_properties_enum_set(name: String, enum_value_name: String, enum_value_color: String, enum_value_style: Option<String>) -> bool {
     let mut prop_manager = PropertyManager::new();
-    match prop_manager.set_enum_property(name, enum_value_name, enum_value_color) {
+    match prop_manager.set_enum_property(name, enum_value_name, enum_value_color, enum_value_style) {
         Ok(_) => success_message("Property enum has been updated".to_string()),
         Err(e) => error_message(format!("ERROR: {e}"))
     }

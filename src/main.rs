@@ -424,6 +424,8 @@ enum PropertiesEnumCommand {
         enum_value_name: String,
         /// property enum color
         enum_value_color: String,
+        /// property enum style (e.g., bold or underline)
+        enum_value_style: Option<String>,
     },
     /// Get a color of enum value
     Get {
@@ -440,6 +442,8 @@ enum PropertiesEnumCommand {
         enum_value_name: String,
         /// property enum color
         enum_value_color: String,
+        /// property enum color
+        enum_value_style: Option<String>,
     },
     /// Delete a property enum value
     #[clap(visible_aliases(["del", "remove", "rem"]))]
@@ -524,9 +528,9 @@ fn task_config_properties(subcommand: PropertiesCommand) -> bool {
 fn task_config_properties_enum(subcommand: PropertiesEnumCommand) -> bool {
     match subcommand {
         PropertiesEnumCommand::List { name } => task_config_properties_enum_list(name),
-        PropertiesEnumCommand::Add { name, enum_value_name, enum_value_color } => task_config_properties_enum_add(name, enum_value_name, enum_value_color),
+        PropertiesEnumCommand::Add { name, enum_value_name, enum_value_color, enum_value_style } => task_config_properties_enum_add(name, enum_value_name, enum_value_color, enum_value_style),
         PropertiesEnumCommand::Get { name, enum_value_name } => task_config_properties_enum_get(name, enum_value_name),
-        PropertiesEnumCommand::Set { name, enum_value_name, enum_value_color } => task_config_properties_enum_set(name, enum_value_name, enum_value_color),
+        PropertiesEnumCommand::Set { name, enum_value_name, enum_value_color, enum_value_style } => task_config_properties_enum_set(name, enum_value_name, enum_value_color, enum_value_style),
         PropertiesEnumCommand::Delete { name, enum_value_name } => task_config_properties_enum_delete(name, enum_value_name),
     }
 }

@@ -114,7 +114,7 @@ impl StatusManager {
                 let status_color = self.statuses.iter().find_map(|saved_status| {
                     if status == saved_status.name { Some(saved_status.color.clone()) } else { None }
                 }).or_else(|| Some("Default".to_string())).unwrap();
-                let status_color = str_to_color(&status_color);
+                let status_color = str_to_color(&status_color, &None);
                 status_color.paint(status)
             },
             true => status.into()
