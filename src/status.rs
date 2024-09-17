@@ -8,6 +8,7 @@ pub struct Status {
     name: String,
     shortcut: String,
     color: String,
+    style: Option<String>,
     is_done: bool,
 }
 
@@ -22,6 +23,10 @@ impl Status {
 
     pub(crate) fn get_color(&self) -> &str {
         &self.color
+    }
+
+    pub(crate) fn get_style(&self) -> Option<&str> {
+        self.style.as_deref()
     }
 
     pub(crate) fn is_done(&self) -> &bool {
@@ -48,18 +53,21 @@ impl StatusManager {
                 name: String::from("OPEN"),
                 shortcut: String::from("o"),
                 color: String::from("Red"),
+                style: None,
                 is_done: false,
             },
             Status {
                 name: String::from("IN_PROGRESS"),
                 shortcut: String::from("i"),
                 color: String::from("Yellow"),
+                style: None,
                 is_done: false,
             },
             Status {
                 name: String::from("CLOSED"),
                 shortcut: String::from("c"),
                 color: String::from("Green"),
+                style: None,
                 is_done: true,
             }
         ]
@@ -93,6 +101,7 @@ impl StatusManager {
             name,
             shortcut,
             color,
+            style: None,
             is_done,
         };
         self.statuses.push(status);
@@ -112,9 +121,9 @@ impl StatusManager {
         match no_color {
             false => {
                 let status_color = self.statuses.iter().find_map(|saved_status| {
-                    if status == saved_status.name { Some(saved_status.color.clone()) } else { None }
-                }).or_else(|| Some("Default".to_string())).unwrap();
-                let status_color = str_to_color(&status_color, &None);
+                    if status == saved_status.name { Some((saved_status.color.clone(), saved_status.style.clone())) } else { None }
+                }).or_else(|| Some(("Default".to_string(), None))).unwrap();
+                let status_color = str_to_color(&status_color.0, &status_color.1);
                 status_color.paint(status)
             },
             true => status.into()
@@ -158,6 +167,7 @@ impl StatusManager {
                     "name" => return Some(saved_status.name.clone()),
                     "shortcut" => return Some(saved_status.shortcut.clone()),
                     "color" => return Some(saved_status.color.clone()),
+                    "style" => return Some(saved_status.style.clone().unwrap_or_else(|| String::new())),
                     "is_done" => return Some(saved_status.is_done.to_string()),
                     _ => None
                 }
@@ -199,6 +209,9 @@ impl StatusManager {
                     },
                     "color" => {
                         saved_status.color = value.clone(); Ok(None)
+                    },
+                    "style" => {
+                        saved_status.style = Some(value.clone()); Ok(None)
                     },
                     "is_done" => {
                         saved_status.is_done = value.parse::<bool>().unwrap(); Ok(None)
