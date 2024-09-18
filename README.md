@@ -4,15 +4,14 @@ Local-first task manager/bug tracker within your git repository which can import
 
 [![build](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml/badge.svg)](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml)
 
+![](https://github.com/jhspetersson/git-task/blob/master/resources/gt2.gif)
+
 ## Installation
 
-Build a binary, then place it somewhere and add it as a git command:
+Build a binary, then add it as a git command:
 
-    git clone https://github.com/jhspetersson/git-task
-    cd git-task
-    cargo build --release
-    sudo cp target/release/git-task /usr/local/bin/git-task
-    git config --global alias.task '!/usr/local/bin/git-task'
+    cargo install git-task
+    git config --global alias.task '!~/.cargo/bin/git-task'
 
 Now you can switch to some git repo and run it as:
 
