@@ -312,9 +312,9 @@ pub(crate) fn task_config_properties_enum_add(name: String, enum_value_name: Str
     }
 }
 
-pub(crate) fn task_config_properties_enum_get(name: String, enum_value_name: String) -> bool {
+pub(crate) fn task_config_properties_enum_get(property: String, enum_value_name: String, parameter: String) -> bool {
     let prop_manager = PropertyManager::new();
-    match prop_manager.get_enum_property(name, enum_value_name) {
+    match prop_manager.get_enum_parameter(property, enum_value_name, parameter) {
         Ok(s) => success_message(s),
         Err(e) => error_message(format!("ERROR: {e}"))
     }

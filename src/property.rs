@@ -275,16 +275,22 @@ impl PropertyManager {
         }
     }
 
-    pub fn get_enum_property(&self, name: String, enum_value_name: String) -> Result<String, String> {
-        let property = self.properties.iter().find(|saved_prop| saved_prop.name == name);
+    pub fn get_enum_parameter(&self, property: String, enum_value_name: String, parameter: String) -> Result<String, String> {
+        let property = self.properties.iter().find(|saved_prop| saved_prop.name == property);
         match property {
             Some(property) => {
                 match &property.enum_values {
                     Some(enum_values) => {
                         let enum_value = enum_values.iter().find(|saved_enum| saved_enum.name == enum_value_name);
                         match enum_value {
-                            Some(enum_value) => Ok(enum_value.color.clone() + (if enum_value.get_style().is_some() { ", " } else { "" }) + enum_value.get_style().unwrap_or_else(|| "")),
-                            None => Err("Property not found".to_string()),
+                            Some(enum_value) => {
+                                match parameter.as_str() {
+                                    "color" => Ok(enum_value.color.clone()),
+                                    "style" => Ok(enum_value.style.clone().unwrap_or_else(|| String::new())),
+                                    _ => Err("Unknown parameter, use `color` or `style`".to_string()),
+                                }
+                            },
+                            None => Err("Property enum value not found".to_string()),
                         }
                     },
                     None => Err("Property has no enum values".to_string())

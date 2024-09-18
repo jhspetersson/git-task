@@ -286,8 +286,8 @@ Configure known task properties (you can add any other if you wish to any task):
 You can also set up their own colors for specific values of the properties (assuming you've already added `priority` property):
 
     git task config prop enum add priority HIGH Red
-    git task config prop enum get priority HIGH
-    git task config prop enum set priority HIGH Magenta
+    git task config prop enum get priority HIGH color
+    git task config prop enum set priority HIGH Magenta bold
     git task config prop enum list priority    
     git task config prop enum del priority HIGH
 

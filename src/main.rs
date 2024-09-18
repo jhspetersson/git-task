@@ -427,12 +427,14 @@ enum PropertiesEnumCommand {
         /// property enum style (e.g., bold or underline)
         enum_value_style: Option<String>,
     },
-    /// Get a color of enum value
+    /// Get parameter of enum value
     Get {
         /// property name
-        name: String,
+        property: String,
         /// property enum value
         enum_value_name: String,
+        /// parameter (color or style)
+        parameter: String,
     },
     /// Set color for a property enum value
     Set {
@@ -529,7 +531,7 @@ fn task_config_properties_enum(subcommand: PropertiesEnumCommand) -> bool {
     match subcommand {
         PropertiesEnumCommand::List { name } => task_config_properties_enum_list(name),
         PropertiesEnumCommand::Add { name, enum_value_name, enum_value_color, enum_value_style } => task_config_properties_enum_add(name, enum_value_name, enum_value_color, enum_value_style),
-        PropertiesEnumCommand::Get { name, enum_value_name } => task_config_properties_enum_get(name, enum_value_name),
+        PropertiesEnumCommand::Get { property, enum_value_name, parameter } => task_config_properties_enum_get(property, enum_value_name, parameter),
         PropertiesEnumCommand::Set { name, enum_value_name, enum_value_color, enum_value_style } => task_config_properties_enum_set(name, enum_value_name, enum_value_color, enum_value_style),
         PropertiesEnumCommand::Delete { name, enum_value_name } => task_config_properties_enum_delete(name, enum_value_name),
     }
