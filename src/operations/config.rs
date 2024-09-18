@@ -124,9 +124,9 @@ pub(crate) fn task_config_status_set(name: String, param: String, value: String)
 
 pub(crate) fn task_config_status_list() -> bool {
     let status_manager = StatusManager::new();
-    println!("Name\tShortcut\tColor\tIs DONE");
+    println!("Name\tShortcut\tColor\tStyle\tIs DONE");
     status_manager.get_statuses().iter().for_each(|status| {
-        println!("{}\t{}\t{}\t{}", status.get_name(), status.get_shortcut(), status.get_color(), status.is_done());
+        println!("{}\t{}\t{}\t{}\t{}", status.get_name(), status.get_shortcut(), status.get_color(), status.get_style().unwrap_or_else(|| ""), status.is_done());
     });
     true
 }
