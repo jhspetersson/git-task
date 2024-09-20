@@ -71,7 +71,9 @@ pub fn str_to_color(color: &str, style: &Option<String>) -> Style {
             for value in values {
                 match value {
                     "bold" => color = color.bold(),
+                    "dimmed" => color = color.dimmed(),
                     "italic" => color = color.italic(),
+                    "strikethrough" => color = color.strikethrough(),
                     "underline" => color = color.underline(),
                     _ => {}
                 }

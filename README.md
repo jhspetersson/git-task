@@ -264,7 +264,7 @@ Or one-byte value like:
 
 Styles available:
 
-    bold, italic, underline
+    bold, dimmed, italic, normal, strikethrough, underline
 
 Add and delete statuses:
 
