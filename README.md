@@ -251,6 +251,7 @@ Configure task statuses:
     git task config status set CLOSED color Magenta
     git task config status set CLOSED name FINISHED
     git task config status set FINISHED shortcut f
+    git task config status set FINISHED style bold,italic
     git task config set task.status.closed FINISHED
 
 Colors available:
@@ -260,6 +261,10 @@ Colors available:
 Or one-byte value like:
     
     239
+
+Styles available:
+
+    bold, italic, underline
 
 Add and delete statuses:
 
