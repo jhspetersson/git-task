@@ -201,7 +201,11 @@ enum Command {
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
         /// space separated task IDs
-        ids: Vec<String>,
+        #[clap(required = true)]
+        ids: Option<Vec<String>>,
+        /// Delete by status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
+        #[arg(short, long, value_delimiter = ',', conflicts_with = "ids", required_unless_present = "ids")]
+        status: Option<Vec<String>>,
         /// Also delete task from the remote source (e.g., GitHub)
         #[arg(short, long)]
         push: bool,
@@ -474,7 +478,7 @@ fn main() -> ExitCode {
         Some(Command::Pull { ids, limit, status, remote, no_comments }) => task_pull(ids, limit, status, &remote, no_comments),
         Some(Command::Push { ids, remote, no_comments, no_color }) => task_push(ids, &remote, no_comments, no_color),
         Some(Command::Stats { no_color }) => task_stats(no_color),
-        Some(Command::Delete { ids, push, remote }) => task_delete(ids, push, &remote),
+        Some(Command::Delete { ids, status, push, remote }) => task_delete(ids, status, push, &remote),
         Some(Command::Clear) => task_clear(),
         Some(Command::Config { subcommand }) => task_config(subcommand),
         None => false

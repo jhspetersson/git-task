@@ -637,9 +637,31 @@ fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &S
     }
 }
 
-pub(crate) fn task_delete(ids: Vec<String>, push: bool, remote: &Option<String>) -> bool {
-    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+pub(crate) fn task_delete(ids: Option<Vec<String>>, status: Option<Vec<String>>, push: bool, remote: &Option<String>) -> bool {
+    let ids = match status {
+        Some(statuses) => {
+            match gittask::list_tasks() {
+                Ok(tasks) => {
+                    let status_manager = StatusManager::new();
+                    let statuses = statuses.iter().map(|s| status_manager.get_full_status_name(s)).collect::<Vec<_>>();
+                    let ids = tasks.iter().filter(|task| statuses.contains(task.get_property("status").unwrap())).map(|task| task.get_id().unwrap()).collect::<Vec<_>>();
+                    Ok(ids)
+                },
+                Err(e) => Err(e)
+            }
+        },
+        None => {
+            let ids = ids.unwrap().into_iter().expand_range().collect::<Vec<_>>();
+            Ok(ids)
+        }
+    };
+
+    if let Err(e) = ids {
+        return error_message(e);
+    }
+    let ids = ids.unwrap();
     let ids = ids.iter().map(|id| id.as_str()).collect::<Vec<_>>();
+
     match gittask::delete_tasks(&ids) {
         Ok(_) => {
             println!("Task(s) {} deleted", ids.join(", "));

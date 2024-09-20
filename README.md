@@ -202,11 +202,13 @@ Show total task count, count by status and top 10 authors.
 
 ### delete
 
-Deletes one or more tasks by their IDs.
+Deletes one or more tasks by their IDs or status.
 
     git task delete 1
     git task delete 2 3 4 5 10 12
     git task delete 2..5 10 12
+    git task delete -s CLOSED
+    git task delete -s c
 
 Also delete a corresponding GitHub issue:
 
