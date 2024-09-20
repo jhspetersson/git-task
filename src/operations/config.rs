@@ -41,7 +41,7 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
         "task.ref" => {
             let value = match value {
                 value if !value.contains('/') => "refs/heads/".to_string() + value.as_str(),
-                value if !value.starts_with('/') && !value.ends_with('/') => "refs/".to_string() + value.as_str(),
+                value if value.chars().filter(|c| *c == '/').count() == 1 && !value.starts_with('/') && !value.ends_with('/') => "refs/".to_string() + value.as_str(),
                 value => value,
             };
 
