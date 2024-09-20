@@ -192,7 +192,7 @@ macro_rules! map_err {
 }
 
 pub fn list_tasks() -> Result<Vec<Task>, String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let task_ref = map_err!(repo.find_reference(&get_ref_path()));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
@@ -213,7 +213,7 @@ pub fn list_tasks() -> Result<Vec<Task>, String> {
 }
 
 pub fn find_task(id: &str) -> Result<Option<Task>, String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let task_ref = map_err!(repo.find_reference(&get_ref_path()));
     let task_tree = map_err!(task_ref.peel_to_tree());
     let result = match task_tree.get_name(id) {
@@ -232,7 +232,7 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
 }
 
 pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let task_ref = map_err!(repo.find_reference(&get_ref_path()));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
@@ -255,7 +255,7 @@ pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
 }
 
 pub fn clear_tasks() -> Result<u64, String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let task_ref = map_err!(repo.find_reference(&get_ref_path()));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
@@ -274,7 +274,7 @@ pub fn clear_tasks() -> Result<u64, String> {
 }
 
 pub fn create_task(mut task: Task) -> Result<Task, String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let task_ref_result = repo.find_reference(&get_ref_path());
     let source_tree = match task_ref_result {
         Ok(ref reference) => {
@@ -311,7 +311,7 @@ pub fn create_task(mut task: Task) -> Result<Task, String> {
 }
 
 pub fn update_task(task: Task) -> Result<String, String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let task_ref_result = map_err!(repo.find_reference(&get_ref_path()));
     let parent_commit = map_err!(task_ref_result.peel_to_commit());
     let source_tree = map_err!(task_ref_result.peel_to_tree());
@@ -330,7 +330,7 @@ pub fn update_task(task: Task) -> Result<String, String> {
 }
 
 fn get_next_id() -> Result<String, String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let task_ref = map_err!(repo.find_reference(&get_ref_path()));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
@@ -386,7 +386,7 @@ pub fn update_comment_id(task_id: &str, id: &str, new_id: &str) -> Result<(), St
 }
 
 pub fn list_remotes(remote: &Option<String>) -> Result<Vec<String>, String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let remotes = map_err!(repo.remotes());
     Ok(remotes.iter()
         .filter(|s| remote.is_none() || remote.as_ref().unwrap().as_str() == s.unwrap())
@@ -399,7 +399,7 @@ fn get_current_timestamp() -> u64 {
 }
 
 fn get_current_user() -> Result<Option<String>, String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let me = &map_err!(repo.signature());
     match me.name() {
         Some(name) => Ok(Some(String::from(name))),
@@ -415,20 +415,20 @@ pub fn get_ref_path() -> String {
 }
 
 pub fn get_config_value(key: &str) -> Result<String, String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let config = map_err!(repo.config());
     Ok(map_err!(config.get_string(key)))
 }
 
 pub fn set_config_value(key: &str, value: &str) -> Result<(), String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
     let mut config = map_err!(repo.config());
     map_err!(config.set_str(key, value));
     Ok(())
 }
 
 pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
-    let repo = map_err!(Repository::open("."));
+    let repo = map_err!(Repository::discover("."));
 
     let current_reference = repo.find_reference(&get_ref_path());
     if let Ok(current_reference) = &current_reference {
