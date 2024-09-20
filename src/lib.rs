@@ -305,7 +305,7 @@ pub fn create_task(mut task: Task) -> Result<Task, String> {
             parents.push(map_err!(parent_commit));
         }
     }
-    map_err!(repo.commit(Some(&get_ref_path()), me, me, format!("Create task {}", &task.get_id().unwrap()).as_str(), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path()), me, me, format!("Create task {}", &task.get_id().unwrap_or_else(|| String::from("?"))).as_str(), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task)
 }
