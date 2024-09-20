@@ -246,7 +246,10 @@ pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
     let parents = vec![parent_commit];
     let me = &map_err!(repo.signature());
 
-    map_err!(repo.commit(Some(&get_ref_path()), me, me, "delete task", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
+    let mut ids = ids.iter().map(|id| id.parse::<u64>().unwrap()).collect::<Vec<_>>();
+    ids.sort();
+    let ids = ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
+    map_err!(repo.commit(Some(&get_ref_path()), me, me, format!("Delete task {}", ids).as_str(), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(())
 }
@@ -265,7 +268,7 @@ pub fn clear_tasks() -> Result<u64, String> {
     let parents = vec![parent_commit];
     let me = &map_err!(repo.signature());
 
-    map_err!(repo.commit(Some(&get_ref_path()), me, me, "clear tasks", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path()), me, me, "Clear tasks", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task_count)
 }
@@ -302,7 +305,7 @@ pub fn create_task(mut task: Task) -> Result<Task, String> {
             parents.push(map_err!(parent_commit));
         }
     }
-    map_err!(repo.commit(Some(&get_ref_path()), me, me, "create task", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path()), me, me, format!("Create task {}", &task.get_id().unwrap()).as_str(), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task)
 }
@@ -321,7 +324,7 @@ pub fn update_task(task: Task) -> Result<String, String> {
 
     let me = &map_err!(repo.signature());
     let parents = vec![parent_commit];
-    map_err!(repo.commit(Some(&get_ref_path()), me, me, "update task", &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
+    map_err!(repo.commit(Some(&get_ref_path()), me, me, format!("Update task {}", &task.get_id().unwrap()).as_str(), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(task.get_id().unwrap())
 }
@@ -374,7 +377,7 @@ pub fn update_comment_id(task_id: &str, id: &str, new_id: &str) -> Result<(), St
                 }
             }).collect::<Vec<_>>();
             task.set_comments(updated_comments);
-            create_task(task)?;
+            update_task(task)?;
         },
         None => {}
     }
