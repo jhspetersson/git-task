@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status};
+use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status, task_unset};
 use crate::operations::config::*;
 
 #[derive(Parser)]
@@ -109,10 +109,7 @@ enum Command {
         /// property name
         prop_name: String,
         /// property value
-        value: Option<String>,
-        /// Delete the property
-        #[arg(short, long, conflicts_with = "value", visible_aliases = ["del", "remove", "rem"])]
-        delete: bool,
+        value: String,
         /// Also push task to the remote source (e.g., GitHub)
         #[arg(short, long)]
         push: bool,
@@ -122,6 +119,13 @@ enum Command {
         /// Disable colors
         #[arg(long)]
         no_color: bool,
+    },
+    /// Delete a property
+    Unset {
+        /// space separated task IDs
+        ids: Vec<String>,
+        /// property name
+        prop_name: String,
     },
     /// Edit a property
     Edit {
@@ -470,7 +474,8 @@ fn main() -> ExitCode {
         Some(Command::Create { name, description, no_desc, push, remote }) => task_create(name, description, no_desc, push, &remote),
         Some(Command::Status { ids, status, push, remote, no_color }) => task_status(ids, status, push, &remote, no_color),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
-        Some(Command::Set { id, prop_name, value, delete, push, remote, no_color }) => task_set(&id, prop_name, value, delete, push, &remote, no_color),
+        Some(Command::Set { id, prop_name, value, push, remote, no_color }) => task_set(&id, prop_name, value, push, &remote, no_color),
+        Some(Command::Unset { ids, prop_name }) => task_unset(ids, prop_name),
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),

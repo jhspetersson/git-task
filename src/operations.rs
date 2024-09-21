@@ -59,7 +59,7 @@ pub(crate) fn task_status(ids: Vec<String>, status: String, push: bool, remote: 
     let status = status_manager.get_full_status_name(&status);
     let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
     for id in &ids {
-        task_set(id, "status".to_string(), Some(status.clone()), false, push, remote, no_color);
+        task_set(id, "status".to_string(), status.clone(), push, remote, no_color);
     }
 
     if push {
@@ -82,10 +82,9 @@ pub(crate) fn task_get(id: String, prop_name: String) -> bool {
     }
 }
 
-pub(crate) fn task_set(id: &String, prop_name: String, value: Option<String>, delete: bool, push: bool, remote: &Option<String>, no_color: bool) -> bool {
+pub(crate) fn task_set(id: &String, prop_name: String, value: String, push: bool, remote: &Option<String>, no_color: bool) -> bool {
     match prop_name.as_str() {
         "id" => {
-            let value = value.unwrap();
             match gittask::update_task_id(&id, &value) {
                 Ok(_) => {
                     println!("Task ID {id} -> {value} updated");
@@ -103,11 +102,7 @@ pub(crate) fn task_set(id: &String, prop_name: String, value: Option<String>, de
         _ => {
             match gittask::find_task(&id) {
                 Ok(Some(mut task)) => {
-                    if delete {
-                        task.delete_property(&prop_name);
-                    } else {
-                        task.set_property(prop_name, value.unwrap());
-                    }
+                    task.set_property(prop_name, value);
 
                     match gittask::update_task(task) {
                         Ok(_) => {
@@ -127,6 +122,27 @@ pub(crate) fn task_set(id: &String, prop_name: String, value: Option<String>, de
             }
         }
     }
+}
+
+pub(crate) fn task_unset(ids: Vec<String>, prop_name: String) -> bool {
+    for id in ids {
+        match gittask::find_task(&id) {
+            Ok(Some(mut task)) => {
+                if task.delete_property(&prop_name) {
+                    match gittask::update_task(task) {
+                        Ok(_) => println!("Task ID {id} updated"),
+                        Err(e) => eprintln!("ERROR: {e}")
+                    }
+                } else {
+                    eprintln!("Task ID {id}: property not found")
+                }
+            },
+            Ok(None) => eprintln!("Task ID {id} not found"),
+            Err(e) => eprintln!("ERROR: {e}")
+        }
+    };
+
+    true
 }
 
 pub(crate) fn task_edit(id: String, prop_name: String) -> bool {

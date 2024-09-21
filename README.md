@@ -124,10 +124,11 @@ Sets task property:
 
     git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!"
 
-Delete property:
+### unset
 
-    git task set 1 foo bar
-    git task set 1 foo --delete
+Delete a property:
+
+    git task unset 1 foo
 
 ### edit
 

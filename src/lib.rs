@@ -95,8 +95,8 @@ impl Task {
         self.props.contains_key(prop)
     }
 
-    pub fn delete_property(&mut self, prop: &str) {
-        self.props.remove(prop);
+    pub fn delete_property(&mut self, prop: &str) -> bool {
+        self.props.remove(prop).is_some()
     }
 
     pub fn get_comments(&self) -> &Option<Vec<Comment>> {
