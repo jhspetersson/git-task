@@ -79,7 +79,7 @@ enum Command {
     },
     /// Update task status
     Status {
-        /// one or more task IDs
+        /// one or more task IDs (space separated or a range like 1..10)
         #[clap(required = true)]
         ids: Vec<String>,
         /// status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
@@ -104,7 +104,7 @@ enum Command {
     },
     /// Set a property
     Set {
-        /// space separated task IDs
+        /// one or more task IDs (space separated or a range like 1..10)
         ids: Vec<String>,
         /// property name
         prop_name: String,
@@ -122,7 +122,7 @@ enum Command {
     },
     /// Delete a property
     Unset {
-        /// space separated task IDs
+        /// one or more task IDs (space separated or a range like 1..10)
         ids: Vec<String>,
         /// property name
         prop_name: String,
@@ -141,7 +141,7 @@ enum Command {
     },
     /// Import tasks from a source
     Import {
-        /// space separated task IDs
+        /// one or more task IDs (space separated or a range like 1..10)
         ids: Option<Vec<String>>,
         /// Input format (only JSON is currently supported)
         #[arg(short, long)]
@@ -149,7 +149,7 @@ enum Command {
     },
     /// Export tasks
     Export {
-        /// space separated task IDs
+        /// one or more task IDs (space separated or a range like 1..10)
         ids: Option<Vec<String>>,
         /// Filter by status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
         #[arg(short, long, value_delimiter = ',')]
@@ -166,7 +166,7 @@ enum Command {
     },
     /// Pull tasks from a remote source (e.g., GitHub)
     Pull {
-        /// space separated task IDs
+        /// one or more task IDs (space separated or a range like 1..10)
         ids: Option<Vec<String>>,
         /// Limit the count of imported tasks
         #[arg(short, long, conflicts_with = "ids")]
@@ -183,7 +183,7 @@ enum Command {
     },
     /// Push task status to the remote source (e.g., GitHub)
     Push {
-        /// space separated task IDs
+        /// one or more task IDs (space separated or a range like 1..10)
         ids: Vec<String>,
         /// Use this remote if there are several of them
         #[arg(short, long)]
@@ -204,7 +204,7 @@ enum Command {
     /// Delete one or several tasks at once
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
-        /// space separated task IDs
+        /// one or more task IDs (space separated or a range like 1..10)
         #[clap(required = true)]
         ids: Option<Vec<String>>,
         /// Delete by status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
