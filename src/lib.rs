@@ -473,10 +473,10 @@ mod test {
         assert_eq!(task.get_property("status").unwrap(), "OPEN");
         assert!(task.has_property("created"));
 
-        task.set_property("description".to_string(), "Updated description".to_string());
+        task.set_property("description", "Updated description");
         let comment_props = HashMap::from([("author".to_string(), "Some developer".to_string())]);
         task.add_comment(None, comment_props, "This is a comment".to_string());
-        task.set_property("custom_prop".to_string(), "Custom content".to_string());
+        task.set_property("custom_prop", "Custom content");
         let update_result = update_task(task);
         assert!(update_result.is_ok());
         assert_eq!(update_result.unwrap(), id.clone());
