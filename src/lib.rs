@@ -87,8 +87,8 @@ impl Task {
         &self.props
     }
 
-    pub fn set_property(&mut self, prop: String, value: String) {
-        self.props.insert(prop, value);
+    pub fn set_property(&mut self, prop: &str, value: &str) {
+        self.props.insert(prop.to_string(), value.to_string());
     }
 
     pub fn has_property(&self, prop: &str) -> bool {

@@ -105,7 +105,7 @@ pub(crate) fn task_config_status_set(name: String, param: String, value: String)
                     Ok(tasks) => {
                         for mut task in tasks {
                             if task.get_property("status").unwrap() == prev_status.as_str() {
-                                task.set_property("status".to_string(), value.clone());
+                                task.set_property("status", &value);
                                 if let Err(e) = gittask::update_task(task) {
                                     eprintln!("ERROR: {e}");
                                 }
@@ -212,8 +212,8 @@ pub(crate) fn task_config_properties_set(name: String, param: String, value: Str
                     Ok(tasks) => {
                         for mut task in tasks {
                             if task.has_property(&name) {
-                                let task_prop_value = task.get_property(&name).unwrap();
-                                task.set_property(value.clone(), task_prop_value.to_string());
+                                let task_prop_value = task.get_property(&name).unwrap().clone();
+                                task.set_property(&value, &task_prop_value);
                                 task.delete_property(&name);
                                 if let Err(e) = gittask::update_task(task) {
                                     eprintln!("ERROR: {e}");

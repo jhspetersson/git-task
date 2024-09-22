@@ -104,8 +104,8 @@ enum Command {
     },
     /// Set a property
     Set {
-        /// task ID
-        id: String,
+        /// space separated task IDs
+        ids: Vec<String>,
         /// property name
         prop_name: String,
         /// property value
@@ -474,7 +474,7 @@ fn main() -> ExitCode {
         Some(Command::Create { name, description, no_desc, push, remote }) => task_create(name, description, no_desc, push, &remote),
         Some(Command::Status { ids, status, push, remote, no_color }) => task_status(ids, status, push, &remote, no_color),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
-        Some(Command::Set { id, prop_name, value, push, remote, no_color }) => task_set(&id, prop_name, value, push, &remote, no_color),
+        Some(Command::Set { ids, prop_name, value, push, remote, no_color }) => task_set(ids, prop_name, value, push, &remote, no_color),
         Some(Command::Unset { ids, prop_name }) => task_unset(ids, prop_name),
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
