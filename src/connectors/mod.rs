@@ -1,4 +1,5 @@
 mod github;
+mod gitlab;
 
 use gittask::{Comment, Task};
 use crate::connectors::github::GithubRemoteConnector;

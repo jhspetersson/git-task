@@ -5,7 +5,7 @@ use std::iter::Iterator;
 use std::process::Command;
 use std::time::{Duration, UNIX_EPOCH};
 
-use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone};
+use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone, Utc};
 use nu_ansi_term::{Color, Style};
 use nu_ansi_term::Color::{Black, Blue, Cyan, DarkGray, Default, Fixed, Green, LightBlue, LightCyan, LightGray, LightGreen, LightMagenta, LightPurple, LightRed, LightYellow, Magenta, Purple, Red, White, Yellow};
 
@@ -106,6 +106,10 @@ pub fn parse_date(date: Option<String>) -> Option<MappedLocalTime<DateTime<Local
         }
         None => None
     }
+}
+
+pub fn parse_datetime_to_seconds(datetime: String) -> String {
+    DateTime::parse_from_rfc3339(&datetime).unwrap().with_timezone(&Utc).timestamp().to_string()
 }
 
 pub fn read_from_pipe() -> Option<String> {
