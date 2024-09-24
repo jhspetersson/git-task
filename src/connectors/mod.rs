@@ -3,6 +3,7 @@ mod gitlab;
 
 use gittask::{Comment, Task};
 use crate::connectors::github::GithubRemoteConnector;
+use crate::connectors::gitlab::GitlabRemoteConnector;
 
 pub enum RemoteTaskState {
     All,
@@ -22,8 +23,9 @@ pub trait RemoteConnector {
     fn delete_remote_comment(&self, user: &String, repo: &String, comment_id: &String) -> Result<(), String>;
 }
 
-const CONNECTORS: [&dyn RemoteConnector; 1] = [
+const CONNECTORS: [&dyn RemoteConnector; 2] = [
     &GithubRemoteConnector,
+    &GitlabRemoteConnector,
 ];
 
 pub fn get_matching_remote_connectors(remotes: Vec<String>) -> Vec<(Box<&'static dyn RemoteConnector>, String, String)> {

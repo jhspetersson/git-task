@@ -475,11 +475,11 @@ fn get_user_repo(remote: &Option<String>) -> Result<(Box<&'static dyn RemoteConn
         Ok(remotes) => {
             let user_repo = get_matching_remote_connectors(remotes);
             if user_repo.is_empty() {
-                return Err("No GitHub remotes".to_string());
+                return Err("No passing remotes".to_string());
             }
 
             if user_repo.len() > 1 {
-                return Err("More than one GitHub remote found. Please specify with --remote option.".to_owned());
+                return Err("More than one passing remote found. Please specify with --remote option.".to_owned());
             }
 
             Ok(user_repo.first().unwrap().clone())

@@ -214,21 +214,26 @@ pub fn list_tasks() -> Result<Vec<Task>, String> {
 
 pub fn find_task(id: &str) -> Result<Option<Task>, String> {
     let repo = map_err!(Repository::discover("."));
-    let task_ref = map_err!(repo.find_reference(&get_ref_path()));
-    let task_tree = map_err!(task_ref.peel_to_tree());
-    let result = match task_tree.get_name(id) {
-        Some(entry) => {
-            let oid = entry.id();
-            let blob = map_err!(repo.find_blob(oid));
-            let content = blob.content();
-            let task = serde_json::from_slice(content).unwrap();
+    let task_ref = repo.find_reference(&get_ref_path());
+    match task_ref {
+        Ok(task_ref) => {
+            let task_tree = map_err!(task_ref.peel_to_tree());
+            let result = match task_tree.get_name(id) {
+                Some(entry) => {
+                    let oid = entry.id();
+                    let blob = map_err!(repo.find_blob(oid));
+                    let content = blob.content();
+                    let task = serde_json::from_slice(content).unwrap();
 
-            Some(task)
+                    Some(task)
+                },
+                None => None,
+            };
+
+            Ok(result)
         },
-        None => None,
-    };
-
-    Ok(result)
+        Err(_) => Ok(None)
+    }
 }
 
 pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
