@@ -80,26 +80,45 @@ impl RemoteConnector for GitlabRemoteConnector {
         let mut endpoint = endpoint.project(user.to_string() + "/" + repo);
         endpoint = endpoint.iid(task_id.parse().unwrap());
         let endpoint = endpoint.build().unwrap();
-        let issue: Issue = endpoint.query(&client).unwrap();
 
-        let mut props = HashMap::new();
-        props.insert(String::from("name"), issue.title);
-        props.insert(String::from("description"), issue.description);
-        props.insert(String::from("status"), if issue.state == "opened" { task_statuses.get(0).unwrap().clone() } else { task_statuses.get(1).unwrap().clone() });
-        props.insert(String::from("created"), parse_datetime_to_seconds(issue.created_at));
-        props.insert(String::from("author"), issue.author.username);
+        match endpoint.query(&client) {
+            Ok(issue) => {
+                let issue: Issue = issue;
+                let mut props = HashMap::new();
+                props.insert(String::from("name"), issue.title);
+                props.insert(String::from("description"), issue.description);
+                props.insert(String::from("status"), if issue.state == "opened" { task_statuses.get(0).unwrap().clone() } else { task_statuses.get(1).unwrap().clone() });
+                props.insert(String::from("created"), parse_datetime_to_seconds(issue.created_at));
+                props.insert(String::from("author"), issue.author.username);
 
-        let task = Task::from_properties(task_id.to_string(), props).unwrap();
+                let task = Task::from_properties(task_id.to_string(), props).unwrap();
 
-        if with_comments {
-            eprintln!("Comments are not supported for Gitlab");
+                if with_comments {
+                    eprintln!("Comments are not supported for Gitlab");
+                }
+
+                Some(task)
+            },
+            Err(_) => None
         }
-
-        Some(task)
     }
 
     fn create_remote_task(&self, user: &String, repo: &String, task: &Task) -> Result<String, String> {
-        todo!()
+        let client = get_client(get_token_from_env().unwrap().as_str());
+        let mut endpoint = gitlab::api::projects::issues::CreateIssue::builder();
+        let mut endpoint = endpoint.project(user.to_string() + "/" + repo);
+        endpoint.title(task.get_property("name").unwrap());
+        endpoint.description(task.get_property("description").unwrap());
+        let endpoint = endpoint.build().unwrap();
+        let issue: Issue = endpoint.query(&client).unwrap();
+
+        if let Some(comments) = task.get_comments() {
+            if !comments.is_empty() {
+                eprintln!("Comments are not supported for Gitlab");
+            }
+        }
+
+        Ok(issue.iid.to_string())
     }
 
     fn create_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment: &Comment) -> Result<String, String> {
