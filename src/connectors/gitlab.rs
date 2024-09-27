@@ -1,7 +1,9 @@
+use std::cmp::PartialEq;
 use std::collections::HashMap;
 
 use gitlab::api::issues::{IssueScope, IssueState};
-use gitlab::api::Query;
+use gitlab::api::projects::issues::IssueStateEvent;
+use gitlab::api::{ApiError, Query};
 use gitlab::Gitlab;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -81,11 +83,10 @@ impl RemoteConnector for GitlabRemoteConnector {
 
     fn get_remote_task(&self, user: &String, repo: &String, task_id: &String, with_comments: bool, task_statuses: &Vec<String>) -> Option<Task> {
         let client = get_client(get_token_from_env().unwrap().as_str());
-        let mut endpoint = gitlab::api::issues::ProjectIssues::builder();
+        let mut endpoint = gitlab::api::projects::issues::Issue::builder();
         let mut endpoint = endpoint.project(user.to_string() + "/" + repo);
-        endpoint = endpoint.iid(task_id.parse().unwrap());
+        endpoint = endpoint.issue(task_id.parse().unwrap());
         let endpoint = endpoint.build().unwrap();
-
         match endpoint.query(&client) {
             Ok(issue) => {
                 let issue: Issue = issue;
@@ -104,7 +105,9 @@ impl RemoteConnector for GitlabRemoteConnector {
 
                 Some(task)
             },
-            Err(_) => None
+            Err(_) => {
+                None
+            }
         }
     }
 
@@ -131,7 +134,20 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn update_remote_task(&self, user: &String, repo: &String, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
-        todo!()
+        let client = get_client(get_token_from_env().unwrap().as_str());
+        let mut endpoint = gitlab::api::projects::issues::EditIssue::builder();
+        let mut endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        endpoint.title(name);
+        endpoint.description(text);
+        endpoint.state_event(if state == RemoteTaskState::Open { IssueStateEvent::Reopen } else { IssueStateEvent::Close });
+        let endpoint = endpoint.build().unwrap();
+        match endpoint.query(&client) {
+            Ok(issue) => {
+                let _: Issue = issue;
+                Ok(())
+            },
+            Err(e) => Err(e.to_string())
+        }
     }
 
     fn update_remote_comment(&self, user: &String, repo: &String, comment_id: &String, text: &String) -> Result<(), String> {

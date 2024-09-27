@@ -5,6 +5,7 @@ use gittask::{Comment, Task};
 use crate::connectors::github::GithubRemoteConnector;
 use crate::connectors::gitlab::GitlabRemoteConnector;
 
+#[derive(PartialEq)]
 pub enum RemoteTaskState {
     All,
     Open,

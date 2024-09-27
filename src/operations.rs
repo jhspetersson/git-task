@@ -59,7 +59,9 @@ pub(crate) fn task_status(ids: Vec<String>, status: String, push: bool, remote: 
     let status = status_manager.get_full_status_name(&status);
     let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
 
-    task_set(ids, "status".to_string(), status.clone(), push, remote, no_color);
+    for id in ids {
+        task_set(id, "status".to_string(), status.clone(), push, remote, no_color);
+    }
 
     true
 }
@@ -77,48 +79,47 @@ pub(crate) fn task_get(id: String, prop_name: String) -> bool {
     }
 }
 
-pub(crate) fn task_set(ids: Vec<String>, prop_name: String, value: String, push: bool, remote: &Option<String>, no_color: bool) -> bool {
-    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+pub(crate) fn task_set(id: String, prop_name: String, value: String, push: bool, remote: &Option<String>, no_color: bool) -> bool {
     match prop_name.as_str() {
         "id" => {
-            if ids.len() > 1 {
-                return error_message("Can't change IDs of several tasks to the same value".to_string());
-            }
-
-            for id in ids {
-                match gittask::update_task_id(&id, &value) {
-                    Ok(_) => {
-                        println!("Task ID {id} -> {value} updated");
-                        if let Err(e) = gittask::delete_tasks(&[&id]) {
-                            eprintln!("ERROR: {e}");
-                        }
-                        if push {
-                            task_push(vec![id.to_string()], remote, false, no_color);
-                        }
-                    },
-                    Err(e) => eprintln!("ERROR: {e}"),
+            match gittask::update_task_id(&id, &value) {
+                Ok(_) => {
+                    println!("Task ID {id} -> {value} updated");
+                    if let Err(e) = gittask::delete_tasks(&[&id]) {
+                        eprintln!("ERROR: {e}");
+                    }
+                    if push {
+                        task_push(vec![id.to_string()], remote, false, no_color);
+                    }
+                },
+                Err(e) => {
+                    return error_message(format!("ERROR: {e}"));
                 }
             }
         },
         _ => {
-            for id in ids {
-                match gittask::find_task(&id) {
-                    Ok(Some(mut task)) => {
-                        task.set_property(&prop_name, &value);
+            match gittask::find_task(&id) {
+                Ok(Some(mut task)) => {
+                    task.set_property(&prop_name, &value);
 
-                        match gittask::update_task(task) {
-                            Ok(_) => {
-                                println!("Task ID {id} updated");
+                    match gittask::update_task(task) {
+                        Ok(_) => {
+                            println!("Task ID {id} updated");
 
-                                if push {
-                                    task_push(vec![id.to_string()], remote, false, no_color);
-                                }
-                            },
-                            Err(e) => eprintln!("ERROR: {e}"),
-                        }
-                    },
-                    Ok(None) => eprintln!("Task ID {id} not found"),
-                    Err(e) => eprintln!("ERROR: {e}"),
+                            if push {
+                                task_push(vec![id.to_string()], remote, false, no_color);
+                            }
+                        },
+                        Err(e) => {
+                            return error_message(format!("ERROR: {e}"));
+                        },
+                    }
+                },
+                Ok(None) => {
+                    return error_message(format!("Task ID {id} not found"));
+                },
+                Err(e) =>{
+                    return error_message(format!("ERROR: {e}"));
                 }
             }
         }
