@@ -71,6 +71,11 @@ impl RemoteConnector for GitlabRemoteConnector {
 
             result.push(task);
         }
+
+        if result.len() == 100 {
+            eprintln!("Only last 100 issues are supported for Gitlab");
+        }
+
         result
     }
 
