@@ -1,9 +1,8 @@
-use std::cmp::PartialEq;
 use std::collections::HashMap;
 
 use gitlab::api::issues::{IssueScope, IssueState};
 use gitlab::api::projects::issues::IssueStateEvent;
-use gitlab::api::{ApiError, Query};
+use gitlab::api::Query;
 use gitlab::Gitlab;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -27,6 +26,14 @@ struct Issue {
     author: Author,
     created_at: String,
     state: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct GitlabComment {
+    id: u64,
+    body: String,
+    author: Author,
+    created_at: String,
 }
 
 impl RemoteConnector for GitlabRemoteConnector {
@@ -65,10 +72,11 @@ impl RemoteConnector for GitlabRemoteConnector {
             props.insert(String::from("created"), parse_datetime_to_seconds(issue.created_at));
             props.insert(String::from("author"), issue.author.username);
 
-            let task = Task::from_properties(issue.iid.to_string(), props).unwrap();
+            let mut task = Task::from_properties(issue.iid.to_string(), props).unwrap();
 
             if with_comments {
-                eprintln!("Comments are not supported for Gitlab");
+                let comments = list_issue_comments(&client, &user, &repo, &issue.iid.to_string());
+                task.set_comments(comments);
             }
 
             result.push(task);
@@ -97,10 +105,11 @@ impl RemoteConnector for GitlabRemoteConnector {
                 props.insert(String::from("created"), parse_datetime_to_seconds(issue.created_at));
                 props.insert(String::from("author"), issue.author.username);
 
-                let task = Task::from_properties(task_id.to_string(), props).unwrap();
+                let mut task = Task::from_properties(task_id.to_string(), props).unwrap();
 
                 if with_comments {
-                    eprintln!("Comments are not supported for Gitlab");
+                    let comments = list_issue_comments(&client, &user, &repo, task_id);
+                    task.set_comments(comments);
                 }
 
                 Some(task)
@@ -114,7 +123,7 @@ impl RemoteConnector for GitlabRemoteConnector {
     fn create_remote_task(&self, user: &String, repo: &String, task: &Task) -> Result<String, String> {
         let client = get_client(get_token_from_env().unwrap().as_str());
         let mut endpoint = gitlab::api::projects::issues::CreateIssue::builder();
-        let mut endpoint = endpoint.project(user.to_string() + "/" + repo);
+        let endpoint = endpoint.project(user.to_string() + "/" + repo);
         endpoint.title(task.get_property("name").unwrap());
         endpoint.description(task.get_property("description").unwrap());
         let endpoint = endpoint.build().unwrap();
@@ -130,13 +139,20 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn create_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment: &Comment) -> Result<String, String> {
-        todo!()
+        let client = get_client(get_token_from_env().unwrap().as_str());
+        let mut endpoint = gitlab::api::projects::issues::notes::CreateIssueNote::builder();
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        endpoint.body(comment.get_text().clone());
+        let endpoint = endpoint.build().unwrap();
+        let comment: GitlabComment = endpoint.query(&client).unwrap();
+
+        Ok(comment.id.to_string())
     }
 
     fn update_remote_task(&self, user: &String, repo: &String, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
         let client = get_client(get_token_from_env().unwrap().as_str());
         let mut endpoint = gitlab::api::projects::issues::EditIssue::builder();
-        let mut endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
         endpoint.title(name);
         endpoint.description(text);
         endpoint.state_event(if state == RemoteTaskState::Open { IssueStateEvent::Reopen } else { IssueStateEvent::Close });
@@ -150,16 +166,52 @@ impl RemoteConnector for GitlabRemoteConnector {
         }
     }
 
-    fn update_remote_comment(&self, user: &String, repo: &String, comment_id: &String, text: &String) -> Result<(), String> {
-        todo!()
+    fn update_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment_id: &String, text: &String) -> Result<(), String> {
+        let client = get_client(get_token_from_env().unwrap().as_str());
+        let mut endpoint = gitlab::api::projects::issues::notes::EditIssueNote::builder();
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        endpoint.note(comment_id.parse().unwrap());
+        endpoint.body(text.as_str());
+        let endpoint = endpoint.build().unwrap();
+        match endpoint.query(&client) {
+            Ok(comment) => {
+                let _: GitlabComment = comment;
+                Ok(())
+            },
+            Err(e) => Err(e.to_string())
+        }
     }
 
-    fn delete_remote_task(&self, user: &String, repo: &String, task_id: &String) -> Result<(), String> {
-        todo!()
+    fn delete_remote_task(&self, _user: &String, _repo: &String, _task_id: &String) -> Result<(), String> {
+        Err("Deleting remote tasks is not implemented for Gitlab".to_string())
     }
 
-    fn delete_remote_comment(&self, user: &String, repo: &String, comment_id: &String) -> Result<(), String> {
-        todo!()
+    fn delete_remote_comment(&self, _user: &String, _repo: &String, _comment_id: &String) -> Result<(), String> {
+        Err("Deleting remote comments is not implemented for Gitlab".to_string())
+    }
+}
+
+fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, task_id: &String) -> Vec<Comment> {
+    let mut endpoint = gitlab::api::projects::issues::notes::IssueNotes::builder();
+    let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+    let endpoint = endpoint.build().unwrap();
+    match gitlab::api::paged(endpoint, gitlab::api::Pagination::Limit(100)).query(client) {
+        Ok(comments) => {
+            let comments: Vec<GitlabComment> = comments;
+            let mut result: Vec<Comment> = vec![];
+            for comment in comments {
+                let comment = Comment::new(comment.id.to_string(), HashMap::from([
+                    ("author".to_string(), comment.author.username),
+                    ("created".to_string(), parse_datetime_to_seconds(comment.created_at)),
+                ]), comment.body);
+                result.push(comment);
+            }
+            result
+        },
+        Err(e) => {
+            eprintln!("{}", e);
+            vec![]
+        }
     }
 }
 

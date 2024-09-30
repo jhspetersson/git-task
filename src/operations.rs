@@ -264,7 +264,7 @@ pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool,
                             if push {
                                 match get_user_repo(remote) {
                                     Ok((connector, user, repo)) => {
-                                        match connector.update_remote_comment(&user, &repo, &comment_id, &text) {
+                                        match connector.update_remote_comment(&user, &repo, &task_id, &comment_id, &text) {
                                             Ok(_) => {
                                                 println!("Sync: REMOTE comment ID {comment_id} has been updated");
                                                 success = true;
@@ -592,21 +592,26 @@ pub(crate) fn task_push(ids: Vec<String>, remote: &Option<String>, no_comments: 
                             match connector.update_remote_task(&user, &repo, &id, local_name, local_text, state) {
                                 Ok(_) => {
                                     println!("Sync: REMOTE task ID {id} has been updated");
-
-                                    if !no_comments {
-                                        let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().map(|comment| comment.get_id().unwrap()).collect();
-                                        for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
-                                            let local_comment_id = comment.get_id().unwrap();
-                                            if !remote_comment_ids.contains(&local_comment_id) {
-                                                create_remote_comment(&connector, &user, &repo, &id, &comment);
-                                            }
-                                        }
-                                    }
                                 },
                                 Err(e) => eprintln!("ERROR: {e}")
                             }
                         } else {
-                            println!("Nothing to sync");
+                            if !no_comments {
+                                let mut comments_updated = false;
+                                let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().map(|comment| comment.get_id().unwrap()).collect();
+                                for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
+                                    let local_comment_id = comment.get_id().unwrap();
+                                    if !remote_comment_ids.contains(&local_comment_id) {
+                                        create_remote_comment(&connector, &user, &repo, &id, &comment);
+                                        comments_updated = true;
+                                    }
+                                }
+                                if !comments_updated {
+                                    println!("Nothing to sync");
+                                }
+                            } else {
+                                println!("Nothing to sync");
+                            }
                         }
                     } else {
                         eprintln!("Sync: REMOTE task ID {id} NOT found");

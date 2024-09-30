@@ -71,7 +71,7 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    fn update_remote_comment(&self, user: &String, repo: &String, comment_id: &String, text: &String) -> Result<(), String> {
+    fn update_remote_comment(&self, user: &String, repo: &String, _task_id: &String, comment_id: &String, text: &String) -> Result<(), String> {
         match get_token_from_env() {
             Some(_) => RUNTIME.block_on(update_comment(user, repo, comment_id.parse().unwrap(), text)),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
