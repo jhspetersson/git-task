@@ -1,6 +1,6 @@
 # git-task
 
-Local-first task manager/bug tracker within your git repository which can import issues from GitHub.
+Local-first task manager/bug tracker within your git repository which can import issues from GitHub or Gitlab.
 
 [![build](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml/badge.svg)](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml)
 
@@ -17,7 +17,8 @@ Now you can switch to some git repo and run it as:
 
     git task create "My first task"
 
-Or import issues from GitHub (`GITHUB_TOKEN` or `GITHUB_API_TOKEN` env variable might be needed to be set up if you have a private repository):
+Or import issues from GitHub (`GITHUB_TOKEN` or `GITHUB_API_TOKEN` env variable might be needed to be set up if you have a private repository)
+or Gitlab (`GITLAB_TOKEN` or `GITLAB_API_TOKEN` is needed then):
 
     git task pull
 
@@ -122,14 +123,14 @@ Prints task property.
 
 Sets task property:
 
-    git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!"
-    git task set 1..10 author me
+    git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!" 
 
 ### unset
 
 Delete a property:
 
     git task unset 1 foo
+    git task unset 1..10 foo
 
 ### edit
 
@@ -175,7 +176,8 @@ Export all or selected tasks, only JSON output format is currently supported.
 ### pull
 
 Grab issues from remote source (currently, only GitHub is supported).
-For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable.
+For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable for GitHub.
+`GITLAB_TOKEN` or `GITLAB_API_TOKEN` are required for Gitlab-hosted repositories.
 
     git task pull
     git task pull --no-comments
@@ -192,6 +194,7 @@ Pull only open issues:
 
 Push status of the selected tasks to the remote source.
 For GitHub you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable.
+`GITLAB_TOKEN` or `GITLAB_API_TOKEN` are required for Gitlab-hosted repositories.
 
     git task push 2 3 4 5 10 12
     git task push 2..5 10 12
