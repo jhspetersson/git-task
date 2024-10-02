@@ -286,3 +286,16 @@ async fn get_octocrab_instance() -> Arc<Octocrab> {
 fn get_token_from_env() -> Option<String> {
     std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GITHUB_API_TOKEN")).ok()
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_remote_url() {
+        let connector = GithubRemoteConnector {};
+
+        assert!(connector.supports_remote("git@github.com:VIK-777/java-telegram-meetup-bot.git").is_some());
+        assert!(connector.supports_remote("https://github.com/jhspetersson/fselect.git").is_some());
+    }
+}
