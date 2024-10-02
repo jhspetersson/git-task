@@ -21,10 +21,10 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 
 impl RemoteConnector for GithubRemoteConnector {
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
-        match Regex::new("https://github.com/([a-z0-9-]+)/([a-z0-9-]+)\\.?").unwrap().captures(url) {
-            Some(caps) if caps.len() == 3 => {
-                let user = caps.get(1)?.as_str().to_string();
-                let repo = caps.get(2)?.as_str().to_string();
+        match Regex::new("((https://)|(git@))github.com[/:](?P<user>[a-z0-9-]+)/(?P<repo>[a-z0-9-]+)(\\.git)?").unwrap().captures(url) {
+            Some(caps) if caps.len() >= 3 => {
+                let user = caps.name("user")?.as_str().to_string();
+                let repo = caps.name("repo")?.as_str().to_string();
                 Some((user, repo))
             },
             _ => None,
