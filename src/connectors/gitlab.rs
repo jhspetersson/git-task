@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use gitlab::api::issues::{IssueScope, IssueState};
 use gitlab::api::projects::issues::IssueStateEvent;
-use gitlab::api::Query;
+use gitlab::api::{Pagination, Query};
 use gitlab::Gitlab;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -62,7 +62,11 @@ impl RemoteConnector for GitlabRemoteConnector {
             None => endpoint
         };
         let endpoint = endpoint.build().unwrap();
-        let issues: Vec<Issue> = gitlab::api::paged(endpoint, gitlab::api::Pagination::Limit(limit.unwrap_or_else(|| 100))).query(&client).unwrap();
+        let pagination = match limit {
+            Some(limit) => Pagination::Limit(limit),
+            None => Pagination::All
+        };
+        let issues: Vec<Issue> = gitlab::api::paged(endpoint, pagination).query(&client).unwrap();
         let mut result = vec![];
         for issue in issues {
             let mut props = HashMap::new();
@@ -80,10 +84,6 @@ impl RemoteConnector for GitlabRemoteConnector {
             }
 
             result.push(task);
-        }
-
-        if result.len() == 100 {
-            eprintln!("Only last 100 issues are supported for Gitlab");
         }
 
         result
@@ -128,12 +128,6 @@ impl RemoteConnector for GitlabRemoteConnector {
         endpoint.description(task.get_property("description").unwrap());
         let endpoint = endpoint.build().unwrap();
         let issue: Issue = endpoint.query(&client).unwrap();
-
-        if let Some(comments) = task.get_comments() {
-            if !comments.is_empty() {
-                eprintln!("Comments are not supported for Gitlab");
-            }
-        }
 
         Ok(issue.iid.to_string())
     }
@@ -195,7 +189,7 @@ fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, task_id: &
     let mut endpoint = gitlab::api::projects::issues::notes::IssueNotes::builder();
     let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
     let endpoint = endpoint.build().unwrap();
-    match gitlab::api::paged(endpoint, gitlab::api::Pagination::Limit(100)).query(client) {
+    match gitlab::api::paged(endpoint, Pagination::All).query(client) {
         Ok(comments) => {
             let comments: Vec<GitlabComment> = comments;
             let mut result: Vec<Comment> = vec![];
