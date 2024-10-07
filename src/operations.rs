@@ -300,7 +300,7 @@ pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: boo
                             if push {
                                 match get_user_repo(remote) {
                                     Ok((connector, user, repo)) => {
-                                        match connector.delete_remote_comment(&user, &repo, &comment_id) {
+                                        match connector.delete_remote_comment(&user, &repo, &task_id, &comment_id) {
                                             Ok(_) => {
                                                 println!("Sync: REMOTE comment ID {comment_id} has been deleted");
                                                 success = true;

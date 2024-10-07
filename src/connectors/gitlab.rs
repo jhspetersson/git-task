@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-
 use gitlab::api::issues::{IssueScope, IssueState};
 use gitlab::api::projects::issues::IssueStateEvent;
 use gitlab::api::{Pagination, Query};
@@ -35,6 +34,12 @@ struct GitlabComment {
     author: Author,
     created_at: String,
 }
+
+#[derive(Deserialize)]
+struct DeleteIssueResult {}
+
+#[derive(Deserialize)]
+struct DeleteIssueNoteResult {}
 
 impl RemoteConnector for GitlabRemoteConnector {
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
@@ -176,12 +181,33 @@ impl RemoteConnector for GitlabRemoteConnector {
         }
     }
 
-    fn delete_remote_task(&self, _user: &String, _repo: &String, _task_id: &String) -> Result<(), String> {
-        Err("Deleting remote tasks is not implemented for Gitlab".to_string())
+    fn delete_remote_task(&self, user: &String, repo: &String, task_id: &String) -> Result<(), String> {
+        let client = get_client(get_token_from_env().unwrap().as_str());
+        let mut endpoint = gitlab::api::projects::issues::DeleteIssue::builder();
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        let endpoint = endpoint.build().unwrap();
+        match endpoint.query(&client) {
+            Ok(result) => {
+                let _: DeleteIssueResult = result;
+                Ok(())
+            },
+            Err(e) => if e.to_string().contains("204") { Ok(()) } else { Err(e.to_string()) }
+        }
     }
 
-    fn delete_remote_comment(&self, _user: &String, _repo: &String, _comment_id: &String) -> Result<(), String> {
-        Err("Deleting remote comments is not implemented for Gitlab".to_string())
+    fn delete_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment_id: &String) -> Result<(), String> {
+        let client = get_client(get_token_from_env().unwrap().as_str());
+        let mut endpoint = gitlab::api::projects::issues::notes::DeleteIssueNote::builder();
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        endpoint.note(comment_id.parse().unwrap());
+        let endpoint = endpoint.build().unwrap();
+        match endpoint.query(&client) {
+            Ok(result) => {
+                let _: DeleteIssueNoteResult = result;
+                Ok(())
+            },
+            Err(e) => if e.to_string().contains("204") { Ok(()) } else { Err(e.to_string()) }
+        }
     }
 }
 

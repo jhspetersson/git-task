@@ -123,7 +123,7 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    fn delete_remote_comment(&self, user: &String, repo: &String, comment_id: &String) -> Result<(), String> {
+    fn delete_remote_comment(&self, user: &String, repo: &String, _task_id: &String, comment_id: &String) -> Result<(), String> {
         match get_token_from_env() {
             Some(_) => RUNTIME.block_on(delete_comment(user, repo, comment_id.parse().unwrap())),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
