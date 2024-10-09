@@ -592,6 +592,7 @@ dependencies = [
 [[package]]
 name = "gitlab"
 version = "0.1704.0"
+source = "git+https://gitlab.kitware.com/utils/rust-gitlab.git#d9e2f0de3f74163196b126a00884e79b09c36d49"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
