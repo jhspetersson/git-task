@@ -259,7 +259,7 @@ fn get_base_url() -> String {
     };
 
     if !result.starts_with("http") {
-        result += "https://";
+        result = "https://".to_string() + result.as_str();
     }
 
     if !result.ends_with('/') {
@@ -281,12 +281,12 @@ mod test {
         assert!(connector.supports_remote("https://gitlab.com/jhspetersson/fselect").is_some());
 
         let gitlab_url = get_base_url();
-        gittask::set_config_value("task.gitlab.url", "https://gitlab.kitware.com/").unwrap();
+        gittask::set_config_value("task.gitlab.url", "gitlab.kitware.com").unwrap();
 
         let current_url = get_base_url();
         assert_eq!(current_url, "https://gitlab.kitware.com/".to_string());
 
-        assert!(connector.supports_remote("https://gitlab.kitware.com/jhspetersson/rust-gitlab").is_some());
+        assert!(connector.supports_remote("https://gitlab.kitware.com/jhspetersson/rust-gitlab.git").is_some());
 
         gittask::set_config_value("task.gitlab.url", &gitlab_url).unwrap();
     }
