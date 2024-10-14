@@ -238,7 +238,7 @@ fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, task_id: &
 
 fn get_client(token: &str) -> Gitlab {
     let base_url = get_base_url();
-    let gitlab_domain = match Regex::new("(https://)?(?P<domain>[^/.]+)").unwrap().captures(&base_url) {
+    let gitlab_domain = match Regex::new("(https://)?(?P<domain>[^/]+)").unwrap().captures(&base_url) {
         Some(caps) if caps.name("domain").is_some() => caps.name("domain").unwrap().as_str().to_string(),
         _ => "gitlab.com".to_string(),
     };
