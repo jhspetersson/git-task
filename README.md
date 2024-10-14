@@ -310,10 +310,18 @@ You can also export, manually edit and import back task properties configuration
 
 ### help
 
-Show available commands or their arguments.
+Show available commands or their arguments:
 
     git task help
     git task help create
+
+## Gitlab support
+
+For any operation you will need to set up `GITLAB_TOKEN` or `GITLAB_API_TOKEN` environment variable.
+
+For custom domains please set up `GITLAB_URL` variable. Alternatively you can set the custom domain in git config:
+
+    git task config set task.gitlab.url gitlab.kitware.com
 
 ## License
 

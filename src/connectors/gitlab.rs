@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+
 use gitlab::api::issues::{IssueScope, IssueState};
 use gitlab::api::projects::issues::IssueStateEvent;
 use gitlab::api::{Pagination, Query};
@@ -43,7 +44,8 @@ struct DeleteIssueNoteResult {}
 
 impl RemoteConnector for GitlabRemoteConnector {
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
-        match Regex::new("https://gitlab.com/([a-z0-9-]+)/([a-z0-9-]+)\\.?").unwrap().captures(url) {
+        println!("{}", get_base_url());
+        match Regex::new(&(get_base_url() + "([a-z0-9-]+)/([a-z0-9-]+)\\.?")).unwrap().captures(url) {
             Some(caps) if caps.len() == 3 => {
                 let user = caps.get(1)?.as_str().to_string();
                 let repo = caps.get(2)?.as_str().to_string();
@@ -236,9 +238,57 @@ fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, task_id: &
 }
 
 fn get_client(token: &str) -> Gitlab {
-    Gitlab::new("gitlab.com", token).unwrap()
+    let base_url = get_base_url();
+    let gitlab_domain = match Regex::new("(https://)?(?P<domain>[^/.]+)").unwrap().captures(&base_url) {
+        Some(caps) if caps.name("domain").is_some() => caps.name("domain").unwrap().as_str().to_string(),
+        _ => "gitlab.com".to_string(),
+    };
+    Gitlab::new(gitlab_domain, token).unwrap()
 }
 
 fn get_token_from_env() -> Option<String> {
     std::env::var("GITLAB_TOKEN").or_else(|_| std::env::var("GITLAB_API_TOKEN")).ok()
+}
+
+fn get_base_url() -> String {
+    let mut result = match gittask::get_config_value("task.gitlab.url") {
+        Ok(url) => url,
+        _ => match std::env::var("GITLAB_URL") {
+            Ok(url) => url,
+            _ => "https://gitlab.com".to_string(),
+        }
+    };
+
+    if !result.starts_with("http") {
+        result += "https://";
+    }
+
+    if !result.ends_with('/') {
+        result += "/";
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_remote_url() {
+        let connector = GitlabRemoteConnector {};
+
+        gittask::set_config_value("task.gitlab.url", "https://gitlab.com/").unwrap();
+        assert!(connector.supports_remote("https://gitlab.com/jhspetersson/fselect").is_some());
+
+        let gitlab_url = get_base_url();
+        gittask::set_config_value("task.gitlab.url", "https://gitlab.kitware.com/").unwrap();
+
+        let current_url = get_base_url();
+        assert_eq!(current_url, "https://gitlab.kitware.com/".to_string());
+
+        assert!(connector.supports_remote("https://gitlab.kitware.com/jhspetersson/rust-gitlab").is_some());
+
+        gittask::set_config_value("task.gitlab.url", &gitlab_url).unwrap();
+    }
 }
