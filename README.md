@@ -111,7 +111,7 @@ Updates task status.
 
     git task status 1 IN_PROGRESS
     git task status 1 i
-    git task status 2..5 10 12 c
+    git task status 2..5,10,12 c
 
 ### get
 
@@ -123,7 +123,14 @@ Prints task property.
 
 Sets task property:
 
-    git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!" 
+    git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!"
+
+### replace
+
+Search and replace within property values:
+
+    git task replace 1..10 description "Acme" "ACME Corp."
+    git task replace 1..10 description "Acme" "ACME Corp." --push
 
 ### unset
 
@@ -160,16 +167,16 @@ You can sync comments with the remote source:
 Import all or selected tasks from JSON file.
 
     git task import <my_tasks.json
-    git task import 2 3 4 5 10 12 <my_tasks.json
-    git task import 2..5 10 12 <my_tasks.json
+    git task import 2,3,4,5,10,12 <my_tasks.json
+    git task import 2..5,10,12 <my_tasks.json
 
 ### export
 
 Export all or selected tasks, only JSON output format is currently supported.
 
     git task export
-    git task export --pretty 2 3 4 5 10 12 >my_tasks.json
-    git task export --pretty 2..5 10 12 >my_tasks.json
+    git task export --pretty 2,3,4,5,10,12 >my_tasks.json
+    git task export --pretty 2..5,10,12 >my_tasks.json
     git task export --status o,i
     git task export --limit 50
 
@@ -181,8 +188,8 @@ For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN`
 
     git task pull
     git task pull --no-comments
-    git task pull 2 3 4 5 10 12
-    git task pull 2..5 10 12
+    git task pull 2,3,4,5,10,12
+    git task pull 2..5,10,12
     git task pull --limit 50
 
 Pull only open issues:
@@ -196,8 +203,8 @@ Push status of the selected tasks to the remote source.
 For GitHub you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable.
 `GITLAB_TOKEN` or `GITLAB_API_TOKEN` are required for Gitlab-hosted repositories.
 
-    git task push 2 3 4 5 10 12
-    git task push 2..5 10 12
+    git task push 2,3,4,5,10,12
+    git task push 2..5,10,12
 
 ### stats
 
@@ -210,8 +217,8 @@ Show total task count, count by status and top 10 authors.
 Deletes one or more tasks by their IDs or status.
 
     git task delete 1
-    git task delete 2 3 4 5 10 12
-    git task delete 2..5 10 12
+    git task delete 2,3,4,5,10,12
+    git task delete 2..5,10,12
     git task delete -s CLOSED
     git task delete -s c
 

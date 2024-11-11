@@ -30,6 +30,10 @@ where
     }
 }
 
+pub fn parse_ids(ids: String) -> Vec<String> {
+    ids.split(",").map(|s| s.to_string()).expand_range().collect::<Vec<_>>()
+}
+
 pub fn capitalize(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {

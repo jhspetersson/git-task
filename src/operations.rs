@@ -5,12 +5,12 @@ use std::collections::HashMap;
 
 use chrono::{Local, TimeZone};
 use nu_ansi_term::Color::DarkGray;
-
+use regex::Regex;
 use gittask::{Comment, Task};
 use crate::connectors::{get_matching_remote_connectors, RemoteConnector, RemoteTaskState};
 use crate::property::PropertyManager;
 use crate::status::StatusManager;
-use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_date, read_from_pipe, success_message, ExpandRange};
+use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_date, parse_ids, read_from_pipe, success_message};
 
 pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: &Option<String>) -> bool {
     let description = match description {
@@ -54,10 +54,10 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
     }
 }
 
-pub(crate) fn task_status(ids: Vec<String>, status: String, push: bool, remote: &Option<String>, no_color: bool) -> bool {
+pub(crate) fn task_status(ids: String, status: String, push: bool, remote: &Option<String>, no_color: bool) -> bool {
     let status_manager = StatusManager::new();
     let status = status_manager.get_full_status_name(&status);
-    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+    let ids = parse_ids(ids);
 
     for id in ids {
         task_set(id, "status".to_string(), status.clone(), push, remote, no_color);
@@ -89,7 +89,7 @@ pub(crate) fn task_set(id: String, prop_name: String, value: String, push: bool,
                         eprintln!("ERROR: {e}");
                     }
                     if push {
-                        task_push(vec![id.to_string()], remote, false, no_color);
+                        task_push(id.to_string(), remote, false, no_color);
                     }
                 },
                 Err(e) => {
@@ -107,7 +107,7 @@ pub(crate) fn task_set(id: String, prop_name: String, value: String, push: bool,
                             println!("Task ID {id} updated");
 
                             if push {
-                                task_push(vec![id.to_string()], remote, false, no_color);
+                                task_push(id.to_string(), remote, false, no_color);
                             }
                         },
                         Err(e) => {
@@ -128,8 +128,43 @@ pub(crate) fn task_set(id: String, prop_name: String, value: String, push: bool,
     true
 }
 
-pub(crate) fn task_unset(ids: Vec<String>, prop_name: String) -> bool {
-    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+pub(crate) fn task_replace(ids: String, prop_name: String, search: String, replace: String, regex: bool, push: bool, remote: &Option<String>, no_color: bool) -> bool {
+    let ids = parse_ids(ids);
+    let regex = match regex {
+        true => Some(Box::new(Regex::new(search.as_str()).unwrap())),
+        false => None
+    };
+    for id in ids {
+        match gittask::find_task(&id) {
+            Ok(Some(mut task)) => {
+                if let Some(value) = task.get_property(&prop_name) {
+                    let new_value = match regex {
+                        Some(ref regex) => regex.replace_all(value.as_str(), search.as_str()).to_string(),
+                        None => value.replace(&search, &replace)
+                    };
+                    task.set_property(&prop_name, &new_value);
+                    match gittask::update_task(task) {
+                        Ok(_) => {
+                            println!("Task ID {id} updated");
+                            if push {
+                                task_push(id.to_string(), remote, false, no_color);
+                            }
+                        },
+                        Err(e) => eprintln!("ERROR: {e}")
+                    }
+                } else {
+                    eprintln!("Task ID {id}: property not found")
+                }
+            },
+            _ => {}
+        }
+    }
+
+    true
+}
+
+pub(crate) fn task_unset(ids: String, prop_name: String) -> bool {
+    let ids = parse_ids(ids);
     for id in ids {
         match gittask::find_task(&id) {
             Ok(Some(mut task)) => {
@@ -324,7 +359,7 @@ pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: boo
     }
 }
 
-pub(crate) fn task_import(ids: Option<Vec<String>>, format: Option<String>) -> bool {
+pub(crate) fn task_import(ids: Option<String>, format: Option<String>) -> bool {
     if let Some(format) = format {
         if format.to_lowercase() != "json" {
             return error_message("Only JSON format is supported".to_string());
@@ -338,11 +373,11 @@ pub(crate) fn task_import(ids: Option<Vec<String>>, format: Option<String>) -> b
     }
 }
 
-fn import_from_input(ids: Option<Vec<String>>, input: &String) -> bool {
+fn import_from_input(ids: Option<String>, input: &String) -> bool {
     if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(input) {
         let ids = match ids {
             Some(ids) => {
-                let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+                let ids = parse_ids(ids);
                 Some(ids)
             },
             None => None
@@ -368,14 +403,14 @@ fn import_from_input(ids: Option<Vec<String>>, input: &String) -> bool {
     }
 }
 
-pub(crate) fn task_pull(ids: Option<Vec<String>>, limit: Option<usize>, status: Option<String>, remote: &Option<String>, no_comments: bool) -> bool {
+pub(crate) fn task_pull(ids: Option<String>, limit: Option<usize>, status: Option<String>, remote: &Option<String>, no_comments: bool) -> bool {
     match get_user_repo(remote) {
         Ok((connector, user, repo)) => {
             println!("Pulling tasks from {user}/{repo}...");
 
             let ids = match ids {
                 Some(ids) => {
-                    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+                    let ids = parse_ids(ids);
                     Some(ids)
                 },
                 None => None
@@ -489,7 +524,7 @@ fn get_user_repo(remote: &Option<String>) -> Result<(Box<&'static dyn RemoteConn
     }
 }
 
-pub(crate) fn task_export(ids: Option<Vec<String>>, status: Option<Vec<String>>, limit: Option<usize>, format: Option<String>, pretty: bool) -> bool {
+pub(crate) fn task_export(ids: Option<String>, status: Option<Vec<String>>, limit: Option<usize>, format: Option<String>, pretty: bool) -> bool {
     if let Some(format) = format {
         if format.to_lowercase() != "json" {
             return error_message("Only JSON format is supported".to_string());
@@ -509,7 +544,7 @@ pub(crate) fn task_export(ids: Option<Vec<String>>, status: Option<Vec<String>>,
 
             let ids = match ids {
                 Some(ids) => {
-                    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+                    let ids = parse_ids(ids);
                     Some(ids)
                 },
                 None => None
@@ -552,12 +587,8 @@ pub(crate) fn task_export(ids: Option<Vec<String>>, status: Option<Vec<String>>,
     }
 }
 
-pub(crate) fn task_push(ids: Vec<String>, remote: &Option<String>, no_comments: bool, no_color: bool) -> bool {
-    if ids.is_empty() {
-        return error_message("Select one or more task IDs".to_string());
-    }
-
-    let ids = ids.into_iter().expand_range().collect::<Vec<_>>();
+pub(crate) fn task_push(ids: String, remote: &Option<String>, no_comments: bool, no_color: bool) -> bool {
+    let ids = parse_ids(ids);
 
     match get_user_repo(remote) {
         Ok((connector, user, repo)) => {
@@ -663,7 +694,7 @@ fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &S
     }
 }
 
-pub(crate) fn task_delete(ids: Option<Vec<String>>, status: Option<Vec<String>>, push: bool, remote: &Option<String>) -> bool {
+pub(crate) fn task_delete(ids: Option<String>, status: Option<Vec<String>>, push: bool, remote: &Option<String>) -> bool {
     let ids = match status {
         Some(statuses) => {
             match gittask::list_tasks() {
@@ -677,7 +708,7 @@ pub(crate) fn task_delete(ids: Option<Vec<String>>, status: Option<Vec<String>>,
             }
         },
         None => {
-            let ids = ids.unwrap().into_iter().expand_range().collect::<Vec<_>>();
+            let ids = parse_ids(ids.unwrap());
             Ok(ids)
         }
     };

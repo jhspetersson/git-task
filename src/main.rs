@@ -10,7 +10,7 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_set, task_show, task_stats, task_status, task_unset};
+use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_replace, task_set, task_show, task_stats, task_status, task_unset};
 use crate::operations::config::*;
 
 #[derive(Parser)]
@@ -79,9 +79,9 @@ enum Command {
     },
     /// Update task status
     Status {
-        /// one or more task IDs (space separated or a range like 1..10)
+        /// one or more task IDs (comma separated, including ranges like 1..10)
         #[clap(required = true)]
-        ids: Vec<String>,
+        ids: String,
         /// status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
         #[clap(required = true)]
         status: String,
@@ -120,10 +120,37 @@ enum Command {
         #[arg(long)]
         no_color: bool,
     },
+    /// Search and replace within property values 
+    Replace {
+        /// one or more task IDs (comma separated, including ranges like 1..10)
+        #[clap(required = true)]
+        ids: String,
+        /// property name
+        #[clap(required = true)]
+        prop_name: String,
+        /// string to search
+        #[clap(required = true)]
+        search: String,
+        /// replace with
+        #[clap(required = true)]
+        replace: String,
+        /// Treat search and replace strings as regular expressions
+        #[arg(alias = "rx", long)]
+        regex: bool,
+        /// Also push task(s) to the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Disable colors
+        #[arg(long)]
+        no_color: bool,
+    },
     /// Delete a property
     Unset {
-        /// one or more task IDs (space separated or a range like 1..10)
-        ids: Vec<String>,
+        /// one or more task IDs (comma separated, including ranges like 1..10)
+        ids: String,
         /// property name
         prop_name: String,
     },
@@ -141,16 +168,16 @@ enum Command {
     },
     /// Import tasks from a source
     Import {
-        /// one or more task IDs (space separated or a range like 1..10)
-        ids: Option<Vec<String>>,
+        /// one or more task IDs (comma separated, including ranges like 1..10)
+        ids: Option<String>,
         /// Input format (only JSON is currently supported)
         #[arg(short, long)]
         format: Option<String>,
     },
     /// Export tasks
     Export {
-        /// one or more task IDs (space separated or a range like 1..10)
-        ids: Option<Vec<String>>,
+        /// one or more task IDs (comma separated, including ranges like 1..10)
+        ids: Option<String>,
         /// Filter by status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
         #[arg(short, long, value_delimiter = ',')]
         status: Option<Vec<String>>,
@@ -166,8 +193,8 @@ enum Command {
     },
     /// Pull tasks from a remote source (e.g., GitHub)
     Pull {
-        /// one or more task IDs (space separated or a range like 1..10)
-        ids: Option<Vec<String>>,
+        /// one or more task IDs (comma separated, including ranges like 1..10)
+        ids: Option<String>,
         /// Limit the count of imported tasks
         #[arg(short, long, conflicts_with = "ids")]
         limit: Option<usize>,
@@ -183,8 +210,8 @@ enum Command {
     },
     /// Push task status to the remote source (e.g., GitHub)
     Push {
-        /// one or more task IDs (space separated or a range like 1..10)
-        ids: Vec<String>,
+        /// one or more task IDs (comma separated, including ranges like 1..10)
+        ids: String,
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
@@ -204,9 +231,9 @@ enum Command {
     /// Delete one or several tasks at once
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
-        /// one or more task IDs (space separated or a range like 1..10)
+        /// one or more task IDs (comma separated, including ranges like 1..10)
         #[clap(required = true)]
-        ids: Option<Vec<String>>,
+        ids: Option<String>,
         /// Delete by status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
         #[arg(short, long, value_delimiter = ',', conflicts_with = "ids", required_unless_present = "ids")]
         status: Option<Vec<String>>,
@@ -475,6 +502,7 @@ fn main() -> ExitCode {
         Some(Command::Status { ids, status, push, remote, no_color }) => task_status(ids, status, push, &remote, no_color),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
         Some(Command::Set { id, prop_name, value, push, remote, no_color }) => task_set(id, prop_name, value, push, &remote, no_color),
+        Some(Command::Replace { ids, prop_name, search, replace, regex, push, remote, no_color }) => task_replace(ids, prop_name, search, replace, regex, push, &remote, no_color),
         Some(Command::Unset { ids, prop_name }) => task_unset(ids, prop_name),
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
