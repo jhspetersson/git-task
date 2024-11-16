@@ -174,9 +174,9 @@ pub(crate) fn task_config_status_reset() -> bool {
     }
 }
 
-pub(crate) fn task_config_properties_add(name: String, value_type: String, color: String, enum_values: Option<Vec<String>>) -> bool {
+pub(crate) fn task_config_properties_add(name: String, value_type: String, color: String, style: Option<String>, enum_values: Option<Vec<String>>, cond_format: Option<Vec<String>>) -> bool {
     let mut prop_manager = PropertyManager::new();
-    match prop_manager.add_property(name.clone(), value_type, color, None, enum_values) {
+    match prop_manager.add_property(name.clone(), value_type, color, style, enum_values, cond_format) {
         Ok(_) => success_message(format!("Property {name} has been added")),
         Err(e) => error_message(format!("ERROR: {e}"))
     }

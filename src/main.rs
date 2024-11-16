@@ -395,8 +395,15 @@ enum PropertiesCommand {
         value_type: String,
         /// property color
         color: String,
+        /// property style
+        #[arg(long, short)]
+        style: Option<String>,
         /// property enum value and color pairs
+        #[arg(long = "enum_value", num_args = 1..)]
         enum_values: Option<Vec<String>>,
+        /// property conditional formatting
+        #[arg(long = "cond_format", num_args = 1..)]
+        cond_format: Option<Vec<String>>,
     },
     /// Delete a property
     #[clap(visible_aliases(["del", "remove", "rem"]))]
@@ -552,7 +559,7 @@ fn task_config_status(subcommand: StatusCommand) -> bool {
 
 fn task_config_properties(subcommand: PropertiesCommand) -> bool {
     match subcommand {
-        PropertiesCommand::Add { name, value_type, color, enum_values } => task_config_properties_add(name, value_type, color, enum_values),
+        PropertiesCommand::Add { name, value_type, color, style, enum_values, cond_format } => task_config_properties_add(name, value_type, color, style, enum_values, cond_format),
         PropertiesCommand::Delete { name, force } => task_config_properties_delete(name, force),
         PropertiesCommand::Get { name, param } => task_config_properties_get(name, param),
         PropertiesCommand::Set { name, param, value } => task_config_properties_set(name, param, value),

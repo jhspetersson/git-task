@@ -765,6 +765,7 @@ pub(crate) fn task_show(id: String, no_color: bool) -> bool {
 
 fn print_task(task: Task, no_color: bool) {
     let prop_manager = PropertyManager::new();
+    let context = task.get_all_properties();
 
     let id_title = colorize_string("ID", DarkGray, no_color);
     println!("{}: {}", id_title, task.get_id().unwrap_or("---".to_owned()));
@@ -774,17 +775,17 @@ fn print_task(task: Task, no_color: bool) {
     let created = task.get_property("created").unwrap_or(&empty_string);
     if !created.is_empty() {
         let created_title = colorize_string("Created", DarkGray, no_color);
-        println!("{}: {}", created_title, prop_manager.format_value("created", created, true));
+        println!("{}: {}", created_title, prop_manager.format_value("created", created, &context, true));
     }
 
     let author = task.get_property("author").unwrap_or(&empty_string);
     if !author.is_empty() {
         let author_title = colorize_string("Author", DarkGray, no_color);
-        println!("{}: {}", author_title, prop_manager.format_value("author", author, no_color));
+        println!("{}: {}", author_title, prop_manager.format_value("author", author, &context, no_color));
     }
 
     let name_title = colorize_string("Name", DarkGray, no_color);
-    println!("{}: {}", name_title, prop_manager.format_value("name", task.get_property("name").unwrap(), no_color));
+    println!("{}: {}", name_title, prop_manager.format_value("name", task.get_property("name").unwrap(), &context, no_color));
 
     let status_manager = StatusManager::new();
     let status_title = colorize_string("Status", DarkGray, no_color);
@@ -794,13 +795,13 @@ fn print_task(task: Task, no_color: bool) {
         entry.0 != "name" && entry.0 != "status" && entry.0 != "description" && entry.0 != "created" && entry.0 != "author"
     }).for_each(|entry| {
         let title = colorize_string(&capitalize(entry.0), DarkGray, no_color);
-        println!("{}: {}", title, prop_manager.format_value(entry.0, entry.1, no_color));
+        println!("{}: {}", title, prop_manager.format_value(entry.0, entry.1, &context, no_color));
     });
 
     let description = task.get_property("description").unwrap_or(&empty_string);
     if !description.is_empty() {
         let description_title = colorize_string("Description", DarkGray, no_color);
-        println!("{}: {}", description_title, prop_manager.format_value("description", description, no_color));
+        println!("{}: {}", description_title, prop_manager.format_value("description", description, &context, no_color));
     }
 
     if let Some(comments) = task.get_comments() {
@@ -825,13 +826,13 @@ fn print_comment(comment: &Comment, prop_manager: &PropertyManager, no_color: bo
     let created = comment_properties.get("created").unwrap_or(&empty_string);
     if !created.is_empty() {
         let created_title = colorize_string("Created", DarkGray, no_color);
-        println!("{}: {}", created_title, prop_manager.format_value("created", created, true));
+        println!("{}: {}", created_title, prop_manager.format_value("created", created, comment_properties, true));
     }
 
     let author = comment_properties.get("author").unwrap_or(&empty_string);
     if !author.is_empty() {
         let author_title = colorize_string("Author", DarkGray, no_color);
-        println!("{}: {}", author_title, prop_manager.format_value("author", author, no_color));
+        println!("{}: {}", author_title, prop_manager.format_value("author", author, comment_properties, no_color));
     }
 
     println!("{}", comment.get_text());
@@ -1026,15 +1027,15 @@ fn print_task_line(task: Task, columns: &Option<Vec<String>>, no_color: bool, pr
 
     columns.iter().for_each(|column| {
         let value = if column == "id" { &task.get_id().unwrap() } else { task.get_property(column).unwrap_or(&empty_string) };
-        print_column(column, &value, no_color, prop_manager, status_manager);
+        print_column(column, &value, &task.get_all_properties(), no_color, prop_manager, status_manager);
     });
     println!();
 }
 
-fn print_column(column: &String, value: &String, no_color: bool, prop_manager: &PropertyManager, status_manager: &StatusManager) {
+fn print_column(column: &String, value: &String, context: &HashMap<String, String>, no_color: bool, prop_manager: &PropertyManager, status_manager: &StatusManager) {
     match column.as_str() {
         "status" => print!("{} ", status_manager.format_status(value, no_color)),
-        column => print!("{} ", prop_manager.format_value(column, value, no_color)),
+        column => print!("{} ", prop_manager.format_value(column, value, context, no_color)),
     }
 }
 
@@ -1073,12 +1074,13 @@ pub(crate) fn task_stats(no_color: bool) -> bool {
                 println!("Top 10 authors:");
 
                 let prop_manager = PropertyManager::new();
+                let empty_context = HashMap::new();
 
                 let mut author_stats = author_stats.iter().collect::<Vec<_>>();
                 author_stats.sort_by(|a, b| b.1.cmp(a.1));
 
                 for author in author_stats.iter().take(10) {
-                    println!("{}: {}", prop_manager.format_value("author", &author.0, no_color), author.1);
+                    println!("{}: {}", prop_manager.format_value("author", &author.0, &empty_context, no_color), author.1);
                 }
             }
             true

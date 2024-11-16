@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use evalexpr::{ContextWithMutableVariables, HashMapContext};
 use nu_ansi_term::AnsiString;
 use serde::{Deserialize, Serialize};
 
@@ -10,6 +12,7 @@ pub struct Property {
     color: String,
     style: Option<String>,
     enum_values: Option<Vec<PropertyEnumValue>>,
+    cond_format: Option<Vec<PropertyCondFormat>>,
 }
 
 impl Property {
@@ -67,6 +70,27 @@ impl PropertyEnumValue {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct PropertyCondFormat {
+    condition: String,
+    color: String,
+    style: Option<String>,
+}
+
+impl PropertyCondFormat {
+    fn from(source: Vec<String>) -> Vec<PropertyCondFormat> {
+        let mut result = vec![];
+        for i in 0..=source.len()/2 {
+            result.push(PropertyCondFormat{
+                condition: source[i * 2].clone(),
+                color: source[i * 2 + 1].clone(),
+                style: None,
+            })
+        }
+        result
+    }
+}
+
 pub struct PropertyManager {
     properties: Vec<Property>,
 }
@@ -88,6 +112,7 @@ impl PropertyManager {
                 color: "DarkGray".to_string(),
                 style: None,
                 enum_values: None,
+                cond_format: None,
             },
             Property {
                 name: "name".to_string(),
@@ -95,6 +120,7 @@ impl PropertyManager {
                 color: "Default".to_string(),
                 style: None,
                 enum_values: None,
+                cond_format: None,
             },
             Property {
                 name: "created".to_string(),
@@ -102,6 +128,7 @@ impl PropertyManager {
                 color: "239".to_string(),
                 style: None,
                 enum_values: None,
+                cond_format: None,
             },
             Property {
                 name: "author".to_string(),
@@ -109,6 +136,7 @@ impl PropertyManager {
                 color: "Cyan".to_string(),
                 style: None,
                 enum_values: None,
+                cond_format: None,
             },
             Property {
                 name: "description".to_string(),
@@ -116,6 +144,7 @@ impl PropertyManager {
                 color: "Default".to_string(),
                 style: None,
                 enum_values: None,
+                cond_format: None,
             },
         ]
     }
@@ -154,7 +183,7 @@ impl PropertyManager {
         Ok(result)
     }
 
-    pub fn format_value<'a>(&self, property: &'a str, value: &'a str, no_color: bool) -> AnsiString<'a> {
+    pub fn format_value<'a>(&self, property: &'a str, value: &'a str, context: &HashMap<String, String>, no_color: bool) -> AnsiString<'a> {
         match self.properties.iter().find(|p| p.name == property) {
             Some(property) => {
                 let value = match property.value_type.as_str() {
@@ -164,21 +193,44 @@ impl PropertyManager {
                 match no_color {
                     true => value.into(),
                     false => {
-                        let (color, style) = match &property.enum_values {
-                            Some(enum_values) => {
-                                enum_values.iter()
-                                    .find(|pev| pev.name == value)
-                                    .map(|pev| (&pev.color, &pev.style))
-                                    .unwrap_or_else(|| (&property.color, &None))
-                            },
-                            None => (&property.color, &property.style)
-                        };
+                        let (color, style) = Self::find_cond_format(&property.cond_format, context)
+                            .or_else(|| Self::find_enum_value(&property.enum_values, &value))
+                            .or_else(|| Some((&property.color, &None))).unwrap();
                         let color = str_to_color(&color, style);
                         color.paint(value)
                     }
                 }
             },
             None => value.into()
+        }
+    }
+
+    fn find_cond_format<'a>(cond_format: &'a Option<Vec<PropertyCondFormat>>, context: &'a HashMap<String, String>) -> Option<(&'a String, &'a Option<String>)> {
+        let mut eval_context = HashMapContext::new();
+        context.into_iter().for_each(|(k, v)| {
+            eval_context.set_value(k.into(), v.clone().into()).unwrap();
+        });
+        
+        match cond_format {
+            Some(cond_format) => {
+                cond_format.iter()
+                    .find(|cf| evalexpr::eval_boolean_with_context(&cf.condition, &eval_context).unwrap_or(false))
+                    .map(|cf| Some((&cf.color, &cf.style)))
+                    .unwrap_or_else(|| None)
+            },
+            None => None
+        }
+    }
+
+    fn find_enum_value<'a>(enum_values: &'a Option<Vec<PropertyEnumValue>>, value: &'a String) -> Option<(&'a String, &'a Option<String>)> {
+        match enum_values {
+            Some(enum_values) => {
+                enum_values.iter()
+                    .find(|pev| pev.name == *value)
+                    .map(|pev| Some((&pev.color, &pev.style)))
+                    .unwrap_or_else(|| None)
+            },
+            None => None
         }
     }
 
@@ -236,14 +288,14 @@ impl PropertyManager {
         }
     }
 
-    pub fn add_property(&mut self, name: String, value_type: String, color: String, style: Option<String>, enum_values: Option<Vec<String>>) -> Result<(), String> {
+    pub fn add_property(&mut self, name: String, value_type: String, color: String, style: Option<String>, enum_values: Option<Vec<String>>, cond_format: Option<Vec<String>>) -> Result<(), String> {
         let property = Property {
             name,
             value_type,
             style,
             color,
-
             enum_values: enum_values.map_or_else(|| None, |enum_values| Some(PropertyEnumValue::from(enum_values))),
+            cond_format: cond_format.map_or_else(|| None, |cond_format| Some(PropertyCondFormat::from(cond_format))),
         };
         self.properties.push(property);
         Self::save_config(&self.properties)

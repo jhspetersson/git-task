@@ -20,6 +20,7 @@ path = "src/lib.rs"
 chrono = "0.4"
 clap = { version = "4.5", features = ["derive"] }
 enable-ansi-support = "0.2.1"
+evalexpr = "11"
 futures-util = "0.3"
 git2 = "0.19.0"
 gitlab = "0.1704.1"
