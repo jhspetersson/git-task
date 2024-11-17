@@ -193,7 +193,7 @@ impl PropertyManager {
                 match no_color {
                     true => value.into(),
                     false => {
-                        let (color, style) = Self::find_cond_format(&property.cond_format, context)
+                        let (color, style) = Self::find_cond_format(&property.cond_format, context, &property.value_type)
                             .or_else(|| Self::find_enum_value(&property.enum_values, &value))
                             .or_else(|| Some((&property.color, &None))).unwrap();
                         let color = str_to_color(&color, style);
@@ -205,10 +205,18 @@ impl PropertyManager {
         }
     }
 
-    fn find_cond_format<'a>(cond_format: &'a Option<Vec<PropertyCondFormat>>, context: &'a HashMap<String, String>) -> Option<(&'a String, &'a Option<String>)> {
+    fn find_cond_format<'a>(cond_format: &'a Option<Vec<PropertyCondFormat>>, context: &'a HashMap<String, String>, value_type: &String) -> Option<(&'a String, &'a Option<String>)> {
         let mut eval_context = HashMapContext::new();
         context.into_iter().for_each(|(k, v)| {
-            eval_context.set_value(k.into(), v.clone().into()).unwrap();
+            match value_type.as_str() {
+                "integer" => {
+                    eval_context.set_value(k.into(), v.clone().parse::<i64>().unwrap_or(0).into()).unwrap();
+                },
+                _ => {
+                    eval_context.set_value(k.into(), v.clone().into()).unwrap();
+                }
+            }
+            
         });
         
         match cond_format {
