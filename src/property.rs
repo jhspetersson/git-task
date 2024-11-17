@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+
 use evalexpr::{ContextWithMutableVariables, HashMapContext};
 use nu_ansi_term::AnsiString;
 use serde::{Deserialize, Serialize};
@@ -6,9 +7,43 @@ use serde::{Deserialize, Serialize};
 use crate::util::{format_datetime, str_to_color};
 
 #[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum PropertyValueType {
+    String,
+    Text,
+    Integer,
+    DateTime,
+}
+
+impl std::fmt::Display for PropertyValueType {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            PropertyValueType::String => write!(formatter, "string"),
+            PropertyValueType::Text => write!(formatter, "text"),
+            PropertyValueType::Integer => write!(formatter, "integer"),
+            PropertyValueType::DateTime => write!(formatter, "datetime"),
+        }
+    }
+}
+
+impl std::str::FromStr for PropertyValueType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<PropertyValueType, String> {
+        match s.to_lowercase().as_str() {
+            "string" => Ok(PropertyValueType::String),
+            "text" => Ok(PropertyValueType::Text),
+            "integer" => Ok(PropertyValueType::Integer),
+            "datetime" => Ok(PropertyValueType::DateTime),
+            _ => Err("Error parsing property value type. Supported types are: string, text, integer, datetime".to_string()),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Property {
     name: String,
-    value_type: String,
+    value_type: PropertyValueType,
     color: String,
     style: Option<String>,
     enum_values: Option<Vec<PropertyEnumValue>>,
@@ -20,7 +55,7 @@ impl Property {
         &self.name
     }
 
-    pub(crate) fn get_value_type(&self) -> &str {
+    pub(crate) fn get_value_type(&self) -> &PropertyValueType {
         &self.value_type
     }
 
@@ -108,7 +143,7 @@ impl PropertyManager {
         vec![
             Property {
                 name: "id".to_string(),
-                value_type: "integer".to_string(),
+                value_type: PropertyValueType::Integer,
                 color: "DarkGray".to_string(),
                 style: None,
                 enum_values: None,
@@ -116,7 +151,7 @@ impl PropertyManager {
             },
             Property {
                 name: "name".to_string(),
-                value_type: "string".to_string(),
+                value_type: PropertyValueType::String,
                 color: "Default".to_string(),
                 style: None,
                 enum_values: None,
@@ -124,7 +159,7 @@ impl PropertyManager {
             },
             Property {
                 name: "created".to_string(),
-                value_type: "datetime".to_string(),
+                value_type: PropertyValueType::DateTime,
                 color: "239".to_string(),
                 style: None,
                 enum_values: None,
@@ -132,7 +167,7 @@ impl PropertyManager {
             },
             Property {
                 name: "author".to_string(),
-                value_type: "string".to_string(),
+                value_type: PropertyValueType::String,
                 color: "Cyan".to_string(),
                 style: None,
                 enum_values: None,
@@ -140,7 +175,7 @@ impl PropertyManager {
             },
             Property {
                 name: "description".to_string(),
-                value_type: "text".to_string(),
+                value_type: PropertyValueType::Text,
                 color: "Default".to_string(),
                 style: None,
                 enum_values: None,
@@ -186,8 +221,8 @@ impl PropertyManager {
     pub fn format_value<'a>(&self, property: &'a str, value: &'a str, context: &HashMap<String, String>, no_color: bool) -> AnsiString<'a> {
         match self.properties.iter().find(|p| p.name == property) {
             Some(property) => {
-                let value = match property.value_type.as_str() {
-                    "datetime" => format_datetime(value.parse().unwrap_or(0)),
+                let value = match property.value_type {
+                    PropertyValueType::DateTime => format_datetime(value.parse().unwrap_or(0)),
                     _ => value.to_string()
                 };
                 match no_color {
@@ -205,18 +240,17 @@ impl PropertyManager {
         }
     }
 
-    fn find_cond_format<'a>(cond_format: &'a Option<Vec<PropertyCondFormat>>, context: &'a HashMap<String, String>, value_type: &String) -> Option<(&'a String, &'a Option<String>)> {
+    fn find_cond_format<'a>(cond_format: &'a Option<Vec<PropertyCondFormat>>, context: &'a HashMap<String, String>, value_type: &PropertyValueType) -> Option<(&'a String, &'a Option<String>)> {
         let mut eval_context = HashMapContext::new();
         context.into_iter().for_each(|(k, v)| {
-            match value_type.as_str() {
-                "integer" => {
+            match value_type {
+                PropertyValueType::Integer => {
                     eval_context.set_value(k.into(), v.clone().parse::<i64>().unwrap_or(0).into()).unwrap();
                 },
                 _ => {
                     eval_context.set_value(k.into(), v.clone().into()).unwrap();
                 }
             }
-            
         });
         
         match cond_format {
@@ -247,7 +281,7 @@ impl PropertyManager {
             if property == saved_prop.name.as_str() {
                 match parameter {
                     "name" => return Some(saved_prop.name.clone()),
-                    "value_type" => return Some(saved_prop.value_type.clone()),
+                    "value_type" => return Some(saved_prop.value_type.to_string()),
                     "color" => return Some(saved_prop.color.clone()),
                     _ => None
                 }
@@ -272,7 +306,14 @@ impl PropertyManager {
                         }
                     },
                     "value_type" => {
-                        saved_prop.value_type = value.clone(); Ok(())
+                        let value_type = value.parse::<PropertyValueType>();
+                        match value_type {
+                            Ok(value_type) => {
+                                saved_prop.value_type = value_type;
+                                Ok(())
+                            },
+                            Err(e) => Err(e)
+                        }
                     },
                     "color" => {
                         saved_prop.color = value.clone(); Ok(())
@@ -299,7 +340,7 @@ impl PropertyManager {
     pub fn add_property(&mut self, name: String, value_type: String, color: String, style: Option<String>, enum_values: Option<Vec<String>>, cond_format: Option<Vec<String>>) -> Result<(), String> {
         let property = Property {
             name,
-            value_type,
+            value_type: value_type.parse()?,
             style,
             color,
             enum_values: enum_values.map_or_else(|| None, |enum_values| Some(PropertyEnumValue::from(enum_values))),
