@@ -70,6 +70,10 @@ impl Property {
     pub(crate) fn get_enum_values(&self) -> &Option<Vec<PropertyEnumValue>> {
         &self.enum_values
     }
+    
+    pub(crate) fn get_cond_format(&self) -> &Option<Vec<PropertyCondFormat>> {
+        &self.cond_format
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -123,6 +127,18 @@ impl PropertyCondFormat {
             })
         }
         result
+    }
+
+    pub(crate) fn get_condition(&self) -> &str {
+        &self.condition
+    }
+
+    pub(crate) fn get_color(&self) -> &str {
+        &self.color
+    }
+
+    pub(crate) fn get_style(&self) -> Option<&str> {
+        self.style.as_deref()
     }
 }
 
@@ -218,7 +234,7 @@ impl PropertyManager {
         Ok(result)
     }
 
-    pub fn format_value<'a>(&self, property: &'a str, value: &'a str, context: &HashMap<String, String>, no_color: bool) -> AnsiString<'a> {
+    pub fn format_value<'a>(&self, property: &'a str, value: &'a str, context: &HashMap<String, String>, properties: &Vec<Property>, no_color: bool) -> AnsiString<'a> {
         match self.properties.iter().find(|p| p.name == property) {
             Some(property) => {
                 let value = match property.value_type {
@@ -228,7 +244,7 @@ impl PropertyManager {
                 match no_color {
                     true => value.into(),
                     false => {
-                        let (color, style) = Self::find_cond_format(&property.cond_format, context, &property.value_type)
+                        let (color, style) = Self::find_cond_format(&property.cond_format, context, properties)
                             .or_else(|| Self::find_enum_value(&property.enum_values, &value))
                             .or_else(|| Some((&property.color, &None))).unwrap();
                         let color = str_to_color(&color, style);
@@ -240,19 +256,27 @@ impl PropertyManager {
         }
     }
 
-    fn find_cond_format<'a>(cond_format: &'a Option<Vec<PropertyCondFormat>>, context: &'a HashMap<String, String>, value_type: &PropertyValueType) -> Option<(&'a String, &'a Option<String>)> {
+    fn find_cond_format<'a>(cond_format: &'a Option<Vec<PropertyCondFormat>>, context: &'a HashMap<String, String>, properties: &Vec<Property>) -> Option<(&'a String, &'a Option<String>)> {
         let mut eval_context = HashMapContext::new();
         context.into_iter().for_each(|(k, v)| {
-            match value_type {
-                PropertyValueType::Integer => {
-                    eval_context.set_value(k.into(), v.clone().parse::<i64>().unwrap_or(0).into()).unwrap();
+            let property = properties.iter().find(|p| p.name == k.as_str());
+            match property {
+                Some(property) => {
+                    match property.value_type {
+                        PropertyValueType::Integer => {
+                            eval_context.set_value(k.into(), v.clone().parse::<i64>().unwrap_or(0).into()).unwrap();
+                        },
+                        _ => {
+                            eval_context.set_value(k.into(), v.clone().into()).unwrap();
+                        }
+                    }
                 },
-                _ => {
+                None => {
                     eval_context.set_value(k.into(), v.clone().into()).unwrap();
                 }
             }
         });
-        
+
         match cond_format {
             Some(cond_format) => {
                 cond_format.iter()
@@ -280,9 +304,10 @@ impl PropertyManager {
         self.properties.iter().find_map(|saved_prop| {
             if property == saved_prop.name.as_str() {
                 match parameter {
-                    "name" => return Some(saved_prop.name.clone()),
-                    "value_type" => return Some(saved_prop.value_type.to_string()),
-                    "color" => return Some(saved_prop.color.clone()),
+                    "name" => Some(saved_prop.name.clone()),
+                    "value_type" => Some(saved_prop.value_type.to_string()),
+                    "color" => Some(saved_prop.color.clone()),
+                    "style" => saved_prop.style.clone(),
                     _ => None
                 }
             } else { None }
@@ -435,6 +460,34 @@ impl PropertyManager {
                         Self::save_config(&self.properties)
                     },
                 }
+            },
+            None => Err("Property not found".to_string())
+        }
+    }
+
+    pub fn add_cond_format(&mut self, name: String, cond_format_expr: String, cond_format_color: String, cond_format_style: Option<String>) -> Result<(), String> {
+        let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
+        match property {
+            Some(property) => {
+                let mut cond_format = property.cond_format.clone().unwrap_or_else(|| vec![]);
+                cond_format.push(PropertyCondFormat {
+                    condition: cond_format_expr,
+                    color: cond_format_color,
+                    style: cond_format_style,
+                });
+                property.cond_format = Some(cond_format);
+                Self::save_config(&self.properties)
+            },
+            None => Err("Property not found".to_string())
+        }
+    }
+
+    pub fn clear_cond_format(&mut self, name: String) -> Result<(), String> {
+        let property = self.properties.iter_mut().find(|saved_prop| saved_prop.name == name);
+        match property {
+            Some(property) => {
+                property.cond_format = None;
+                Self::save_config(&self.properties)
             },
             None => Err("Property not found".to_string())
         }

@@ -436,6 +436,12 @@ enum PropertiesCommand {
         #[command(subcommand)]
         subcommand: PropertiesEnumCommand,
     },
+    /// Configure enum values of the property
+    #[clap(visible_aliases(["cond"]))]
+    CondFormat {
+        #[command(subcommand)]
+        subcommand: PropertiesCondFormatCommand,
+    },
     /// List task properties
     List,
     /// Import task properties from JSON
@@ -496,6 +502,32 @@ enum PropertiesEnumCommand {
         name: String,
         /// property enum value
         enum_value_name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum PropertiesCondFormatCommand {
+    /// List conditional formatting of a property
+    List {
+        /// property name
+        name: String,
+    },
+    /// Add a property conditional formatting
+    #[clap(visible_aliases(["create", "new"]))]
+    Add {
+        /// property name
+        name: String,
+        /// conditional formatting expression
+        cond_format_expr: String,
+        /// conditional formatting color
+        cond_format_color: String,
+        /// conditional formatting style (e.g., bold or underline)
+        cond_format_style: Option<String>,
+    },
+    /// Clear conditional formatting of a property
+    Clear {
+        /// property name
+        name: String,
     },
 }
 
@@ -564,6 +596,7 @@ fn task_config_properties(subcommand: PropertiesCommand) -> bool {
         PropertiesCommand::Get { name, param } => task_config_properties_get(name, param),
         PropertiesCommand::Set { name, param, value } => task_config_properties_set(name, param, value),
         PropertiesCommand::Enum { subcommand } => task_config_properties_enum(subcommand),
+        PropertiesCommand::CondFormat { subcommand } => task_config_properties_cond_format(subcommand),
         PropertiesCommand::List => task_config_properties_list(),
         PropertiesCommand::Import => task_config_properties_import(),
         PropertiesCommand::Export { pretty } => task_config_properties_export(pretty),
@@ -578,5 +611,13 @@ fn task_config_properties_enum(subcommand: PropertiesEnumCommand) -> bool {
         PropertiesEnumCommand::Get { property, enum_value_name, parameter } => task_config_properties_enum_get(property, enum_value_name, parameter),
         PropertiesEnumCommand::Set { name, enum_value_name, enum_value_color, enum_value_style } => task_config_properties_enum_set(name, enum_value_name, enum_value_color, enum_value_style),
         PropertiesEnumCommand::Delete { name, enum_value_name } => task_config_properties_enum_delete(name, enum_value_name),
+    }
+}
+
+fn task_config_properties_cond_format(subcommand: PropertiesCondFormatCommand) -> bool {
+    match subcommand {
+        PropertiesCondFormatCommand::List { name } => task_config_properties_cond_format_list(name),
+        PropertiesCondFormatCommand::Add { name, cond_format_expr, cond_format_color, cond_format_style } => task_config_properties_cond_format_add(name, cond_format_expr, cond_format_color, cond_format_style),
+        PropertiesCondFormatCommand::Clear { name } => task_config_properties_cond_format_clear(name),
     }
 }

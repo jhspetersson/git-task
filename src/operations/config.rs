@@ -342,3 +342,38 @@ pub(crate) fn task_config_properties_enum_delete(name: String, enum_value_name: 
         Err(e) => error_message(format!("ERROR: {e}"))
     }
 }
+
+pub(crate) fn task_config_properties_cond_format_list(name: String) -> bool {
+    let prop_manager = PropertyManager::new();
+    let property = prop_manager.get_properties().iter().find(|saved_prop| saved_prop.get_name() == name);
+    match property {
+        Some(property) => {
+            match property.get_cond_format() {
+                Some(cond_format) => {
+                    for cond_format_value in cond_format {
+                        println!("{} {} {}", cond_format_value.get_condition(), cond_format_value.get_color(), cond_format_value.get_style().unwrap_or_else(|| ""));
+                    }
+                    true
+                },
+                None => error_message("Property has no conditional formatting".to_string())
+            }
+        },
+        None => error_message("Property not found".to_string())
+    }
+}
+
+pub(crate) fn task_config_properties_cond_format_add(name: String, cond_format_expr: String, cond_format_color: String, cond_format_style: Option<String>) -> bool {
+    let mut prop_manager = PropertyManager::new();
+    match prop_manager.add_cond_format(name, cond_format_expr, cond_format_color, cond_format_style) {
+        Ok(_) => success_message("Property conditional formatting has been added".to_string()),
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}
+
+pub(crate) fn task_config_properties_cond_format_clear(name: String) -> bool {
+    let mut prop_manager = PropertyManager::new();
+    match prop_manager.clear_cond_format(name) {
+        Ok(_) => success_message("Property conditional formatting has been cleared".to_string()),
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}

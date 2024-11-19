@@ -309,6 +309,24 @@ You can also set up their own colors for specific values of the properties (assu
     git task config prop enum list priority    
     git task config prop enum del priority HIGH
 
+You can go even further and set up conditional formatting (color and style) to any property depending on a boolean expression.
+Expression language used: [evalexpr](https://github.com/ISibboI/evalexpr).
+
+Task properties are automatically exported to the evaluation context as string or integer values.
+
+For example, we want task ID and names to be rendered with dark gray color and strikethrough style if the status is `CLOSED` 
+(like they do it in JetBrains products, e.g. YouTrack):
+
+    git task cfg prop cond add id "status == \"CLOSED\"" DarkGray strikethrough
+    git task cfg prop cond add name "status == \"CLOSED\"" DarkGray strikethrough
+
+Conditional formatting has a precedence over enum values, which supersede default color and style of the defined property. 
+
+Clear conditional formatting:
+
+    git task cfg prop cond clear id
+    git task cfg prop cond clear name
+
 You can also export, manually edit and import back task properties configuration.
 
     git task config props export
