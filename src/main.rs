@@ -10,7 +10,8 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
-use crate::operations::{task_clear, task_comment_add, task_comment_delete, task_comment_edit, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_replace, task_set, task_show, task_stats, task_status, task_unset};
+use crate::operations::{task_clear, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_replace, task_set, task_show, task_stats, task_status, task_unset};
+use crate::operations::comment::*;
 use crate::operations::config::*;
 
 #[derive(Parser)]
