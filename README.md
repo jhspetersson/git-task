@@ -31,11 +31,11 @@ It's possible to define conditional color highlighting depending on the value of
 
 Tasks can have comments that are also addressed by their ID.
 
-Status can be anything, but it expected to be one of the several defined statuses. 
+Status can be anything, but it is expected to be one of the several defined statuses. 
 By default, there are three: `OPEN` for new tasks, `IN_PROGRESS` for the tasks that are in development, `CLOSED` for complete ones.
 You can freely edit this list.
 
-However, for the sake of sync with GitHub there are two config options to map remote `OPEN` and `CLOSED` statuses with local ones.
+However, for the sake of sync with GitHub or Gitlab there are two config options to map remote `OPEN` and `CLOSED` statuses with local ones.
 
 ## Commands
 
