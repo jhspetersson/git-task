@@ -766,7 +766,7 @@ pub(crate) fn task_show(id: String, no_color: bool) -> bool {
 fn print_task(task: Task, no_color: bool) {
     let prop_manager = PropertyManager::new();
     let properties = prop_manager.get_properties();
-    let context = task.get_all_properties();
+    let context = extract_task_context(&task);
 
     let id_title = colorize_string("ID", DarkGray, no_color);
     println!("{}: {}", id_title, task.get_id().unwrap_or("---".to_owned()));
@@ -1023,12 +1023,12 @@ fn print_task_line(task: Task, columns: &Option<Vec<String>>, no_color: bool, pr
         Some(columns) => columns,
         _ => &vec![String::from("id"), String::from("created"), String::from("status"), String::from("name")]
     };
-
+    let context = extract_task_context(&task);
     let empty_string = String::new();
 
     columns.iter().for_each(|column| {
         let value = if column == "id" { &task.get_id().unwrap() } else { task.get_property(column).unwrap_or(&empty_string) };
-        print_column(column, &value, &task.get_all_properties(), no_color, prop_manager, status_manager);
+        print_column(column, &value, &context, no_color, prop_manager, status_manager);
     });
     println!();
 }
@@ -1094,4 +1094,10 @@ fn check_no_color(no_color: bool) -> bool {
     no_color
         || gittask::get_config_value("color.ui").unwrap_or_else(|_| "true".to_string()) == "false"
         || std::env::var("NO_COLOR").unwrap_or_else(|_| "0".to_string()) == "1"
+}
+
+fn extract_task_context(task: &Task) -> HashMap<String, String> {
+    let mut context = task.get_all_properties().to_owned();
+    context.insert("id".to_string(), task.get_id().unwrap());
+    context
 }
