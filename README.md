@@ -124,6 +124,7 @@ Prints task property.
 Sets task property:
 
     git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!"
+    git task set 1..10 priority HIGH
 
 ### replace
 
