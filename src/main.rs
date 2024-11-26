@@ -13,6 +13,8 @@ use clap::{Parser, Subcommand};
 use crate::operations::{task_clear, task_create, task_delete, task_edit, task_export, task_get, task_import, task_list, task_pull, task_push, task_replace, task_set, task_show, task_stats, task_status, task_unset};
 use crate::operations::comment::*;
 use crate::operations::config::*;
+use crate::operations::config::properties::*;
+use crate::operations::config::status::*;
 
 #[derive(Parser)]
 #[command(version, about = "Local-first task manager/bug tracker within your git repository which can sync issues from GitHub.", arg_required_else_help(true))]
