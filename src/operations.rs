@@ -248,13 +248,7 @@ pub(crate) fn task_import(ids: Option<String>, format: Option<String>) -> bool {
 
 fn import_from_input(ids: Option<String>, input: &String) -> bool {
     if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(input) {
-        let ids = match ids {
-            Some(ids) => {
-                let ids = parse_ids(ids);
-                Some(ids)
-            },
-            None => None
-        };
+        let ids = ids.map(parse_ids);
 
         for task in tasks {
             let id = task.get_id().unwrap().to_string();
@@ -281,13 +275,7 @@ pub(crate) fn task_pull(ids: Option<String>, limit: Option<usize>, status: Optio
         Ok((connector, user, repo)) => {
             println!("Pulling tasks from {user}/{repo}...");
 
-            let ids = match ids {
-                Some(ids) => {
-                    let ids = parse_ids(ids);
-                    Some(ids)
-                },
-                None => None
-            };
+            let ids = ids.map(parse_ids);
 
             let status_manager = StatusManager::new();
             let task_statuses = vec![
@@ -415,13 +403,7 @@ pub(crate) fn task_export(ids: Option<String>, status: Option<Vec<String>>, limi
                 None => None
             };
 
-            let ids = match ids {
-                Some(ids) => {
-                    let ids = parse_ids(ids);
-                    Some(ids)
-                },
-                None => None
-            };
+            let ids = ids.map(parse_ids);
 
             let mut count = 0;
             for task in tasks {
@@ -589,6 +571,7 @@ pub(crate) fn task_delete(ids: Option<String>, status: Option<Vec<String>>, push
     if let Err(e) = ids {
         return error_message(e);
     }
+
     let ids = ids.unwrap();
     let ids = ids.iter().map(|id| id.as_str()).collect::<Vec<_>>();
 

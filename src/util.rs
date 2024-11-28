@@ -103,13 +103,10 @@ pub fn format_datetime(seconds: u64) -> String {
 }
 
 pub fn parse_date(date: Option<String>) -> Option<MappedLocalTime<DateTime<Local>>> {
-    match date {
-        Some(date) => {
-            let naive_date = NaiveDate::parse_from_str(&date, "%Y-%m-%d").unwrap();
-            Some(Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap()))
-        }
-        None => None
-    }
+    date.map(|date| {
+        let naive_date = NaiveDate::parse_from_str(&date, "%Y-%m-%d").unwrap();
+        Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap())
+    })
 }
 
 pub fn parse_datetime_to_seconds(datetime: String) -> String {
