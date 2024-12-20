@@ -1,5 +1,6 @@
 pub(crate) mod comment;
 pub(crate) mod config;
+pub(crate) mod label;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -8,12 +9,12 @@ use chrono::{Local, TimeZone};
 use nu_ansi_term::Color::DarkGray;
 use regex::Regex;
 
-use gittask::{Comment, Task};
+use gittask::{Comment, Label, Task};
 
 use crate::connectors::{get_matching_remote_connectors, RemoteConnector, RemoteTaskState};
 use crate::property::PropertyManager;
 use crate::status::StatusManager;
-use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_date, parse_ids, read_from_pipe, success_message};
+use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_date, parse_ids, read_from_pipe, str_to_color, success_message};
 
 pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: &Option<String>) -> bool {
     let description = match description {
@@ -644,6 +645,19 @@ fn print_task(task: Task, no_color: bool) {
     let name_title = colorize_string("Name", DarkGray, no_color);
     println!("{}: {}", name_title, prop_manager.format_value("name", task.get_property("name").unwrap(), &context, properties, no_color));
 
+    if let Some(labels) = task.get_labels() {
+        if !labels.is_empty() {
+            let labels_title = colorize_string("Labels", DarkGray, no_color);
+            print!("{labels_title}: ");
+
+            for label in labels {
+                print_label(label, no_color);
+            }
+
+            println!();
+        }
+    }
+
     let status_manager = StatusManager::new();
     let status_title = colorize_string("Status", DarkGray, no_color);
     println!("{}: {}", status_title, status_manager.format_status(task.get_property("status").unwrap(), no_color));
@@ -693,6 +707,16 @@ fn print_comment(comment: &Comment, prop_manager: &PropertyManager, no_color: bo
     }
 
     println!("{}", comment.get_text());
+}
+
+fn print_label(label: &Label, no_color: bool) {
+    match no_color {
+        true => print!("{}", label.get_name()),
+        false => {
+            let color = str_to_color(label.get_color().as_str(), &None);
+            print!("{} ", color.paint(label.get_name()));
+        }
+    }
 }
 
 fn make_comparison(first: &Task, second: &Task, prop: &str, value_type: &str) -> Ordering {

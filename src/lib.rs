@@ -16,6 +16,7 @@ pub struct Task {
     id: Option<String>,
     props: HashMap<String, String>,
     comments: Option<Vec<Comment>>,
+    labels: Option<Vec<Label>>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -23,6 +24,13 @@ pub struct Comment {
     id: Option<String>,
     props: HashMap<String, String>,
     text: String,
+}
+
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
+pub struct Label {
+    name: String,
+    color: Option<String>,
+    description: Option<String>,
 }
 
 impl Task {
@@ -43,7 +51,7 @@ impl Task {
                 props.insert("created".to_string(), get_current_timestamp().to_string());
             }
 
-            Ok(Task{ id: Some(id), props, comments: None })
+            Ok(Task{ id: Some(id), props, comments: None, labels: None })
         } else {
             Err("Name or status is empty")
         }
@@ -65,6 +73,7 @@ impl Task {
             id: None,
             props,
             comments: None,
+            labels: None,
         }
     }
 
@@ -150,6 +159,52 @@ impl Task {
 
         Ok(())
     }
+
+    pub fn get_labels(&self) -> &Option<Vec<Label>> {
+        &self.labels
+    }
+
+    pub fn add_label(&mut self, name: String, description: Option<String>, color: Option<String>) -> Label {
+        if self.labels.is_none() {
+            self.labels = Some(vec![]);
+        }
+
+        let label = Label {
+            name: name.clone(),
+            description,
+            color,
+        };
+
+        self.labels.as_mut().unwrap().push(label.clone());
+
+        label
+    }
+
+    pub fn set_labels(&mut self, labels: Vec<Label>) {
+        self.labels = Some(labels);
+    }
+
+    pub fn delete_label(&mut self, name: &str) -> Result<(), String> {
+        if self.labels.is_none() {
+            return Err("Task has no labels".to_string());
+        }
+
+        let index = self.labels.as_ref().unwrap().iter().position(|label| label.name == name);
+
+        if index.is_none() {
+            return Err(format!("Label with name '{name}' not found"));
+        }
+
+        self.labels.as_mut().unwrap().remove(index.unwrap());
+
+        Ok(())
+    }
+
+    pub fn get_label_by_name(&self, name: &str) -> Option<&Label> {
+        self.labels
+            .as_ref()
+            .and_then(|labels| labels.iter().find(|label| label.name == name))
+    }
 }
 
 impl Comment {
@@ -182,6 +237,24 @@ impl Comment {
 
     pub fn set_text(&mut self, text: String) {
         self.text = text;
+    }
+}
+
+impl Label {
+    pub fn get_name(&self) -> String {
+        self.name.to_string()
+    }
+
+    pub fn get_color(&self) -> String {
+        self.color.clone().unwrap_or_else(|| String::from(""))
+    }
+
+    pub fn set_color(&mut self, color: String) {
+        self.color = Some(color);
+    }
+
+    pub fn set_description(&mut self, description: String) {
+        self.description = Some(description);
     }
 }
 

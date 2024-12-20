@@ -64,7 +64,12 @@ pub fn str_to_color(color: &str, style: &Option<String>) -> Style {
         "LightGray" => LightGray,
         s => match s.parse::<u8>() {
             Ok(n) => Fixed(n),
-            _ => Default
+            _ => {
+                match str_to_rgb(s) {
+                    Some(rgb) => rgb,
+                    _ => Default
+                }
+            }
         }
     };
 
@@ -86,6 +91,20 @@ pub fn str_to_color(color: &str, style: &Option<String>) -> Style {
         },
         None => color.normal()
     }
+}
+
+fn str_to_rgb(color: &str) -> Option<Color> {
+    let color = color.trim_start_matches('#');
+
+    if color.len() != 6 {
+        return None;
+    }
+
+    let r = u8::from_str_radix(&color[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&color[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&color[4..6], 16).ok()?;
+
+    Some(Color::Rgb(r, g, b))
 }
 
 pub fn colorize_string(s: &str, color: Color, no_color: bool) -> String {

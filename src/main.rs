@@ -15,6 +15,7 @@ use crate::operations::comment::*;
 use crate::operations::config::*;
 use crate::operations::config::properties::*;
 use crate::operations::config::status::*;
+use crate::operations::label::*;
 
 #[derive(Parser)]
 #[command(version, about = "Local-first task manager/bug tracker within your git repository which can sync issues from GitHub.", arg_required_else_help(true))]
@@ -170,6 +171,12 @@ enum Command {
         #[command(subcommand)]
         subcommand: CommentCommand,
     },
+    /// Add, update or delete labels
+    #[clap(visible_aliases(["lab", "lbl"]))]
+    Label {
+        #[command(subcommand)]
+        subcommand: LabelCommand,
+    },
     /// Import tasks from a source
     Import {
         /// one or more task IDs (comma separated, including ranges like 1..10)
@@ -295,6 +302,61 @@ enum CommentCommand {
         /// comment ID
         comment_id: String,
         /// Also delete comment from the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum LabelCommand {
+    /// Add a label
+    #[clap(visible_aliases(["create", "new"]))]
+    Add {
+        /// task ID
+        task_id: String,
+        /// label name
+        name: String,
+        /// label color
+        color: Option<String>,
+        /// Label description
+        #[arg(short, long, aliases = ["desc"])]
+        description: Option<String>,
+        /// Also push label to the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+    },
+    /// Edit a label
+    Edit {
+        /// task ID
+        task_id: String,
+        /// label name
+        name: String,
+        /// new label color
+        color: Option<String>,
+        /// new label description
+        #[arg(short, long, aliases = ["desc"])]
+        description: Option<String>,
+        /// Also update label on the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+    },
+    /// Delete a label
+    #[clap(visible_aliases(["del", "remove", "rem"]))]
+    Delete {
+        /// task ID
+        task_id: String,
+        /// label name
+        name: String,
+        /// Also delete label from the remote source (e.g., GitHub)
         #[arg(short, long)]
         push: bool,
         /// Use this remote if there are several of them
@@ -549,6 +611,7 @@ fn main() -> ExitCode {
         Some(Command::Unset { ids, prop_name }) => task_unset(ids, prop_name),
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
+        Some(Command::Label { subcommand }) => task_label(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, status, limit, format, pretty }) => task_export(ids, status, limit, format, pretty),
         Some(Command::Pull { ids, limit, status, remote, no_comments }) => task_pull(ids, limit, status, &remote, no_comments),
@@ -567,6 +630,14 @@ fn task_comment(subcommand: CommentCommand) -> bool {
         CommentCommand::Add { task_id, text, push, remote } => task_comment_add(task_id, text, push, &remote),
         CommentCommand::Edit { task_id, comment_id, push, remote } => task_comment_edit(task_id, comment_id, push, &remote),
         CommentCommand::Delete { task_id, comment_id, push, remote } => task_comment_delete(task_id, comment_id, push, &remote),
+    }
+}
+
+fn task_label(subcommand: LabelCommand) -> bool {
+    match subcommand {
+        LabelCommand::Add { task_id, name, color, description, push, remote } => task_label_add(task_id, name, color, description, push, &remote),
+        LabelCommand::Edit { task_id, name, color, description, push, remote } => task_label_edit(task_id, name, color, description, push, &remote),
+        LabelCommand::Delete { task_id, name, push, remote } => task_label_delete(task_id, name, push, &remote),
     }
 }
 

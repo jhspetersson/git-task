@@ -7,7 +7,7 @@ use gitlab::Gitlab;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
-use gittask::{Comment, Task};
+use gittask::{Comment, Label, Task};
 use crate::connectors::{RemoteConnector, RemoteTaskState};
 use crate::util::parse_datetime_to_seconds;
 
@@ -149,6 +149,11 @@ impl RemoteConnector for GitlabRemoteConnector {
         Ok(comment.id.to_string())
     }
 
+    #[allow(unused_variables)]
+    fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<String, String> {
+        todo!()
+    }
+
     fn update_remote_task(&self, user: &String, repo: &String, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
         let client = get_client(get_token_from_env().unwrap().as_str());
         let mut endpoint = gitlab::api::projects::issues::EditIssue::builder();
@@ -182,6 +187,11 @@ impl RemoteConnector for GitlabRemoteConnector {
         }
     }
 
+    #[allow(unused_variables)]
+    fn update_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String> {
+        todo!()
+    }
+
     fn delete_remote_task(&self, user: &String, repo: &String, task_id: &String) -> Result<(), String> {
         let client = get_client(get_token_from_env().unwrap().as_str());
         let mut endpoint = gitlab::api::projects::issues::DeleteIssue::builder();
@@ -209,6 +219,11 @@ impl RemoteConnector for GitlabRemoteConnector {
             },
             Err(e) => if e.to_string().contains("204") { Ok(()) } else { Err(e.to_string()) }
         }
+    }
+
+    #[allow(unused_variables)]
+    fn delete_remote_label(&self, user: &String, repo: &String, task_id: &String, name: &String) -> Result<(), String> {
+        todo!()
     }
 }
 

@@ -10,7 +10,7 @@ use regex::Regex;
 use tokio::pin;
 use tokio::runtime::Runtime;
 
-use gittask::{Comment, Task};
+use gittask::{Comment, Label, Task};
 use crate::connectors::{RemoteConnector, RemoteTaskState};
 
 pub struct GithubRemoteConnector;
@@ -58,6 +58,11 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
+    #[allow(unused_variables)]
+    fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<String, String> {
+        todo!()
+    }
+
     fn update_remote_task(&self, user: &String, repo: &String, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
         match get_token_from_env() {
             Some(_) => {
@@ -76,6 +81,11 @@ impl RemoteConnector for GithubRemoteConnector {
             Some(_) => RUNTIME.block_on(update_comment(user, repo, comment_id.parse().unwrap(), text)),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
         }
+    }
+
+    #[allow(unused_variables)]
+    fn update_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String> {
+        todo!()
     }
 
     fn delete_remote_task(&self, user: &String, repo: &String, task_id: &String) -> Result<(), String> {
@@ -128,6 +138,11 @@ impl RemoteConnector for GithubRemoteConnector {
             Some(_) => RUNTIME.block_on(delete_comment(user, repo, comment_id.parse().unwrap())),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
         }
+    }
+
+    #[allow(unused_variables)]
+    fn delete_remote_label(&self, user: &String, repo: &String, task_id: &String, name: &String) -> Result<(), String> {
+        todo!()
     }
 }
 
