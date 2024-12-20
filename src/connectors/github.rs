@@ -59,8 +59,11 @@ impl RemoteConnector for GithubRemoteConnector {
     }
 
     #[allow(unused_variables)]
-    fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<String, String> {
-        todo!()
+    fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String> {
+        match get_token_from_env() {
+            Some(_) => RUNTIME.block_on(add_label(user, repo, task_id.parse().unwrap(), &label.get_name(), Some(&label.get_color()), label.get_description().as_ref())),
+            None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
+        }
     }
 
     fn update_remote_task(&self, user: &String, repo: &String, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
@@ -256,6 +259,43 @@ async fn create_comment(user: &String, repo: &String, task_id: &String, comment:
         Ok(comment) => Ok(comment.id.to_string()),
         Err(e) => Err(e.to_string())
     }
+}
+
+async fn add_label(
+    user: &String,
+    repo: &String,
+    n: u64,
+    label_name: &String,
+    label_color: Option<&String>,
+    label_description: Option<&String>,
+) -> Result<(), String> {
+    let crab = get_octocrab_instance().await;
+
+    let existing_labels = crab
+        .issues(user, repo)
+        .list_labels_for_repo()
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    if !existing_labels.items.iter().any(|l| label_name == &l.name) {
+        let _ = crab
+            .issues(user, repo)
+            .create_label(
+                label_name,
+                label_color.unwrap_or(&"000000".to_string()).to_string(),
+                label_description.unwrap_or(&"".to_string()).to_string(),
+            )
+            .await;
+    }
+
+    let add_label_body = vec![label_name.to_string()];
+    crab
+        .issues(user, repo)
+        .add_labels(n, &add_label_body)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 async fn update_issue(user: &String, repo: &String, n: u64, title: &String, body: &String, state: IssueState) -> Result<(), String> {

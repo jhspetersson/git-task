@@ -13,11 +13,11 @@ pub(crate) fn task_label_add(task_id: String, name: String, color: Option<String
                         match get_user_repo(remote) {
                             Ok((connector, user, repo)) => {
                                 match connector.create_remote_label(&user, &repo, &task_id, &label) {
-                                    Ok(remote_label_id) => {
-                                        println!("Created REMOTE label ID {}", remote_label_id);
+                                    Ok(_) => {
+                                        println!("Added REMOTE label {}", label.get_name());
                                         success = true;
                                     },
-                                    Err(e) => eprintln!("ERROR creating REMOTE label: {e}")
+                                    Err(e) => eprintln!("ERROR adding REMOTE label: {e}")
                                 }
                             },
                             Err(e) => eprintln!("ERROR: {e}"),

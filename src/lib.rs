@@ -253,6 +253,10 @@ impl Label {
         self.color = Some(color);
     }
 
+    pub fn get_description(&self) -> Option<String> {
+        self.description.clone()
+    }
+
     pub fn set_description(&mut self, description: String) {
         self.description = Some(description);
     }

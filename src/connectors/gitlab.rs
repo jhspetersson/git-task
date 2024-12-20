@@ -150,7 +150,7 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     #[allow(unused_variables)]
-    fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<String, String> {
+    fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String> {
         todo!()
     }
 
