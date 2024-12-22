@@ -88,7 +88,7 @@ pub(crate) fn task_set(ids: String, prop_name: String, value: String, push: bool
                         println!("Task ID {id} -> {value} updated");
 
                         if push {
-                            task_push(value.clone(), remote, false, no_color);
+                            task_push(value.clone(), remote, false, false, no_color);
                         }
                     },
                     Err(e) => {
@@ -108,7 +108,7 @@ pub(crate) fn task_set(ids: String, prop_name: String, value: String, push: bool
                                 println!("Task ID {id} updated");
 
                                 if push {
-                                    task_push(id.to_string(), remote, false, no_color);
+                                    task_push(id.to_string(), remote, false, false, no_color);
                                 }
                             },
                             Err(e) => {
@@ -149,7 +149,7 @@ pub(crate) fn task_replace(ids: String, prop_name: String, search: String, repla
                         Ok(_) => {
                             println!("Task ID {id} updated");
                             if push {
-                                task_push(id.to_string(), remote, false, no_color);
+                                task_push(id.to_string(), remote, false, false, no_color);
                             }
                         },
                         Err(e) => eprintln!("ERROR: {e}")
@@ -271,7 +271,14 @@ fn import_from_input(ids: Option<String>, input: &String) -> bool {
     }
 }
 
-pub(crate) fn task_pull(ids: Option<String>, limit: Option<usize>, status: Option<String>, remote: &Option<String>, no_comments: bool) -> bool {
+pub(crate) fn task_pull(
+    ids: Option<String>,
+    limit: Option<usize>,
+    status: Option<String>,
+    remote: &Option<String>,
+    no_comments: bool,
+    no_labels: bool,
+) -> bool {
     match get_user_repo(remote) {
         Ok((connector, user, repo)) => {
             println!("Pulling tasks from {user}/{repo}...");
@@ -286,7 +293,7 @@ pub(crate) fn task_pull(ids: Option<String>, limit: Option<usize>, status: Optio
 
             if ids.is_some() {
                 for id in ids.unwrap() {
-                    match connector.get_remote_task(&user, &repo, &id, !no_comments, &task_statuses) {
+                    match connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses) {
                         Some(task) => {
                             match import_remote_task(task, no_comments) {
                                 Ok(Some(id)) => println!("Task ID {id} updated"),
@@ -443,7 +450,7 @@ pub(crate) fn task_export(ids: Option<String>, status: Option<Vec<String>>, limi
     }
 }
 
-pub(crate) fn task_push(ids: String, remote: &Option<String>, no_comments: bool, no_color: bool) -> bool {
+pub(crate) fn task_push(ids: String, remote: &Option<String>, no_comments: bool, no_labels: bool, no_color: bool) -> bool {
     let ids = parse_ids(ids);
 
     match get_user_repo(remote) {
@@ -458,7 +465,7 @@ pub(crate) fn task_push(ids: String, remote: &Option<String>, no_comments: bool,
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
                     println!("Sync: LOCAL task ID {id} found");
-                    let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments, &task_statuses);
+                    let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses);
                     if let Some(remote_task) = remote_task {
                         println!("Sync: REMOTE task ID {id} found");
 

@@ -241,6 +241,12 @@ impl Comment {
 }
 
 impl Label {
+    pub fn new(name: String, color: Option<String>, description: Option<String>) -> Label {
+        Label {
+            name, color, description
+        }
+    }
+
     pub fn get_name(&self) -> String {
         self.name.to_string()
     }

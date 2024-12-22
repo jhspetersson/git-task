@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
-use futures_util::TryStreamExt;
+use futures_util::{StreamExt, TryStreamExt};
 use graphql_client::{reqwest::post_graphql_blocking as post_graphql, GraphQLQuery};
 use octocrab::Octocrab;
 use octocrab::models::{CommentId, IssueState};
@@ -40,8 +40,20 @@ impl RemoteConnector for GithubRemoteConnector {
         RUNTIME.block_on(list_issues(user, repo, with_comments, limit, state, task_statuses))
     }
 
-    fn get_remote_task(&self, user: &String, repo: &String, task_id: &String, with_comments: bool, task_statuses: &Vec<String>) -> Option<Task> {
-        RUNTIME.block_on(get_issue(&user, &repo, task_id.parse().unwrap(), with_comments, task_statuses))
+    fn get_remote_task(
+        &self,
+        user: &String,
+        repo: &String,
+        task_id: &String,
+        with_comments: bool,
+        with_labels: bool,
+        task_statuses: &Vec<String>
+    ) -> Option<Task> {
+        RUNTIME.block_on(
+            get_issue(
+                &user, &repo, task_id.parse().unwrap(), with_comments, with_labels, task_statuses
+            )
+        )
     }
 
     fn create_remote_task(&self, user: &String, repo: &String, task: &Task) -> Result<String, String> {
@@ -212,7 +224,14 @@ async fn list_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Commen
     result
 }
 
-async fn get_issue(user: &String, repo: &String, n: u64, with_comments: bool, task_statuses: &Vec<String>) -> Option<Task> {
+async fn get_issue(
+    user: &String,
+    repo: &String,
+    n: u64,
+    with_comments: bool,
+    with_labels: bool,
+    task_statuses: &Vec<String>
+) -> Option<Task> {
     let crab = get_octocrab_instance().await;
     let issue = crab.issues(user, repo).get(n).await;
     match issue {
@@ -229,6 +248,16 @@ async fn get_issue(user: &String, repo: &String, n: u64, with_comments: bool, ta
             if with_comments {
                 let task_comments = list_issue_comments(user, repo, issue.number).await;
                 task.set_comments(task_comments);
+            }
+
+            if with_labels {
+                let labels = issue.labels.iter()
+                    .map(|l| Label::new(
+                        l.name.to_string(),
+                        Some(l.color.to_string()),
+                        l.description.clone()
+                    )).collect();
+                task.set_labels(labels);
             }
 
             Some(task)
@@ -267,15 +296,27 @@ async fn add_label(
     label_description: Option<&String>,
 ) -> Result<(), String> {
     let crab = get_octocrab_instance().await;
-
-    let existing_labels = crab
+    let existing_labels_stream = crab
         .issues(user, repo)
         .list_labels_for_repo()
+        .per_page(100)
         .send()
-        .await
-        .map_err(|e| e.to_string())?;
+        .await.unwrap()
+        .into_stream(&crab);
+    pin!(existing_labels_stream);
+    let mut existing_label = None;
+    while let Some(label) = existing_labels_stream.next().await {
+        if label.as_ref().unwrap().name == label_name.to_string() {
+            existing_label = Some(Label::new(
+                label.as_ref().unwrap().name.clone(),
+                Some(label.as_ref().unwrap().color.clone()),
+                label.as_ref().unwrap().description.clone(),
+            ));
+            break;
+        }
+    }
 
-    if !existing_labels.items.iter().any(|l| label_name == &l.name) {
+    if existing_label.is_none() {
         let _ = crab
             .issues(user, repo)
             .create_label(

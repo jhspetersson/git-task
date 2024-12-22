@@ -216,8 +216,11 @@ enum Command {
         #[arg(short, long)]
         remote: Option<String>,
         /// Don't import task comments
-        #[arg(short, long)]
+        #[arg(long, aliases = ["nc"])]
         no_comments: bool,
+        /// Don't import task labels
+        #[arg(long, aliases = ["nl"])]
+        no_labels: bool,
     },
     /// Push task status to the remote source (e.g., GitHub)
     Push {
@@ -229,6 +232,9 @@ enum Command {
         /// Don't create task comments
         #[arg(short, long)]
         no_comments: bool,
+        /// Don't create task labels
+        #[arg(long, aliases = ["nl"])]
+        no_labels: bool,
         /// Disable colors
         #[arg(long)]
         no_color: bool,
@@ -596,8 +602,8 @@ fn main() -> ExitCode {
         Some(Command::Label { subcommand }) => task_label(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, status, limit, format, pretty }) => task_export(ids, status, limit, format, pretty),
-        Some(Command::Pull { ids, limit, status, remote, no_comments }) => task_pull(ids, limit, status, &remote, no_comments),
-        Some(Command::Push { ids, remote, no_comments, no_color }) => task_push(ids, &remote, no_comments, no_color),
+        Some(Command::Pull { ids, limit, status, remote, no_comments, no_labels }) => task_pull(ids, limit, status, &remote, no_comments, no_labels),
+        Some(Command::Push { ids, remote, no_comments, no_labels, no_color }) => task_push(ids, &remote, no_comments, no_labels, no_color),
         Some(Command::Stats { no_color }) => task_stats(no_color),
         Some(Command::Delete { ids, status, push, remote }) => task_delete(ids, status, push, &remote),
         Some(Command::Clear) => task_clear(),

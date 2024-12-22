@@ -37,6 +37,13 @@ struct GitlabComment {
     created_at: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct GitlabLabel {
+    name: String,
+    color: String,
+    description: String,
+}
+
 #[derive(Deserialize)]
 struct DeleteIssueResult {}
 
@@ -55,7 +62,15 @@ impl RemoteConnector for GitlabRemoteConnector {
         }
     }
 
-    fn list_remote_tasks(&self, user: &String, repo: &String, with_comments: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Vec<Task> {
+    fn list_remote_tasks(
+        &self,
+        user: &String,
+        repo: &String,
+        with_comments: bool,
+        limit: Option<usize>,
+        state: RemoteTaskState,
+        task_statuses: &Vec<String>
+    ) -> Vec<Task> {
         let state = match state {
             RemoteTaskState::Open => Some(IssueState::Opened),
             RemoteTaskState::Closed => Some(IssueState::Closed),
@@ -96,7 +111,15 @@ impl RemoteConnector for GitlabRemoteConnector {
         result
     }
 
-    fn get_remote_task(&self, user: &String, repo: &String, task_id: &String, with_comments: bool, task_statuses: &Vec<String>) -> Option<Task> {
+    fn get_remote_task(
+        &self,
+        user: &String,
+        repo: &String,
+        task_id: &String,
+        with_comments: bool,
+        with_labels: bool,
+        task_statuses: &Vec<String>
+    ) -> Option<Task> {
         let client = get_client(get_token_from_env().unwrap().as_str());
         let mut endpoint = gitlab::api::projects::issues::Issue::builder();
         let mut endpoint = endpoint.project(user.to_string() + "/" + repo);
@@ -117,6 +140,18 @@ impl RemoteConnector for GitlabRemoteConnector {
                 if with_comments {
                     let comments = list_issue_comments(&client, &user, &repo, task_id);
                     task.set_comments(comments);
+                }
+
+                if with_labels {
+                    let mut endpoint = gitlab::api::projects::labels::Labels::builder();
+                    let endpoint = endpoint.project(user.to_string() + "/" + repo);
+                    let endpoint = endpoint.build().unwrap();
+                    let labels: Vec<GitlabLabel> = gitlab::api::paged(endpoint, Pagination::All).query(&client).unwrap();
+                    let labels = issue.labels.iter()
+                        .map(|l| labels.iter().find(|gl| gl.name == l.to_string()).unwrap())
+                        .map(|gl| Label::new(gl.name.to_string(), Some(gl.color.to_string()), Some(gl.description.to_string())))
+                        .collect();
+                    task.set_labels(labels);
                 }
 
                 Some(task)
