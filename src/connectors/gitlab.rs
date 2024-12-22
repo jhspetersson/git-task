@@ -253,9 +253,25 @@ impl RemoteConnector for GitlabRemoteConnector {
         }
     }
 
-    #[allow(unused_variables)]
-    fn delete_remote_label(&self, user: &String, repo: &String, task_id: &String, name: &String) -> Result<(), String> {
-        todo!()
+    fn delete_remote_label(
+        &self,
+        user: &String,
+        repo: &String,
+        task_id: &String,
+        label_name: &String,
+    ) -> Result<(), String> {
+        let client = get_client(get_token_from_env().unwrap().as_str());
+        let mut endpoint = gitlab::api::projects::issues::EditIssue::builder();
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        endpoint.remove_label(label_name);
+        let endpoint = endpoint.build().unwrap();
+        match endpoint.query(&client) {
+            Ok(issue) => {
+                let _: Issue = issue;
+                Ok(())
+            },
+            Err(e) => Err(e.to_string())
+        }
     }
 }
 
