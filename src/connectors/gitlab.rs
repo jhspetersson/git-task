@@ -26,6 +26,7 @@ struct Issue {
     author: Author,
     created_at: String,
     state: String,
+    labels: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -149,9 +150,40 @@ impl RemoteConnector for GitlabRemoteConnector {
         Ok(comment.id.to_string())
     }
 
-    #[allow(unused_variables)]
-    fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String> {
-        todo!()
+    fn create_remote_label(
+        &self,
+        user: &String,
+        repo: &String,
+        task_id: &String,
+        label: &Label,
+    ) -> Result<(), String> {
+        let client = get_client(get_token_from_env().unwrap().as_str());
+        let mut endpoint = gitlab::api::projects::issues::Issue::builder();
+        let mut endpoint = endpoint.project(user.to_string() + "/" + repo);
+        endpoint = endpoint.issue(task_id.parse().unwrap());
+        let endpoint = endpoint.build().unwrap();
+        match endpoint.query(&client) {
+            Ok(issue) => {
+                let issue: Issue = issue;
+                let label_name = label.get_name();
+                if !issue.labels.contains(&label_name) {
+                    let mut endpoint = gitlab::api::projects::issues::EditIssue::builder();
+                    let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+                    endpoint.add_label(label_name);
+                    let endpoint = endpoint.build().unwrap();
+                    match endpoint.query(&client) {
+                        Ok(issue) => {
+                            let _: Issue = issue;
+                            Ok(())
+                        },
+                        Err(e) => Err(e.to_string())
+                    }
+                } else {
+                    Ok(())
+                }
+            },
+            Err(e) => Err(e.to_string())
+        }
     }
 
     fn update_remote_task(&self, user: &String, repo: &String, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
