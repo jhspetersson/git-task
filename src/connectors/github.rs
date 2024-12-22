@@ -143,9 +143,11 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    #[allow(unused_variables)]
     fn delete_remote_label(&self, user: &String, repo: &String, task_id: &String, name: &String) -> Result<(), String> {
-        todo!()
+        match get_token_from_env() {
+            Some(_) => RUNTIME.block_on(delete_label(user, repo, task_id.parse().unwrap(), name)),
+            None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
+        }
     }
 }
 
@@ -320,6 +322,22 @@ async fn delete_comment(user: &String, repo: &String, n: u64) -> Result<(), Stri
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string())
     }
+}
+
+pub async fn delete_label(
+    user: &String,
+    repo: &String,
+    n: u64,
+    label_name: &str,
+) -> Result<(), String> {
+    let crab = get_octocrab_instance().await;
+
+    crab
+        .issues(user, repo)
+        .remove_label(n, label_name)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 async fn get_issue_id(user: &String, repo: &String, n: u64) -> Result<String, String> {
