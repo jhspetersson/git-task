@@ -331,24 +331,6 @@ enum LabelCommand {
         #[arg(short, long)]
         remote: Option<String>,
     },
-    /// Edit a label
-    Edit {
-        /// task ID
-        task_id: String,
-        /// label name
-        name: String,
-        /// new label color
-        color: Option<String>,
-        /// new label description
-        #[arg(short, long, aliases = ["desc"])]
-        description: Option<String>,
-        /// Also update label on the remote source (e.g., GitHub)
-        #[arg(short, long)]
-        push: bool,
-        /// Use this remote if there are several of them
-        #[arg(short, long)]
-        remote: Option<String>,
-    },
     /// Delete a label
     #[clap(visible_aliases(["del", "remove", "rem"]))]
     Delete {
@@ -636,7 +618,6 @@ fn task_comment(subcommand: CommentCommand) -> bool {
 fn task_label(subcommand: LabelCommand) -> bool {
     match subcommand {
         LabelCommand::Add { task_id, name, color, description, push, remote } => task_label_add(task_id, name, color, description, push, &remote),
-        LabelCommand::Edit { task_id, name, color, description, push, remote } => task_label_edit(task_id, name, color, description, push, &remote),
         LabelCommand::Delete { task_id, name, push, remote } => task_label_delete(task_id, name, push, &remote),
     }
 }

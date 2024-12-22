@@ -21,7 +21,6 @@ pub trait RemoteConnector {
     fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String>;
     fn update_remote_task(&self, user: &String, repo: &String, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String>;
     fn update_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment_id: &String, text: &String) -> Result<(), String>;
-    fn update_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String>;
     fn delete_remote_task(&self, user: &String, repo: &String, task_id: &String) -> Result<(), String>;
     fn delete_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment_id: &String) -> Result<(), String>;
     fn delete_remote_label(&self, user: &String, repo: &String, task_id: &String, name: &String) -> Result<(), String>;

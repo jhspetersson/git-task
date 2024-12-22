@@ -86,11 +86,6 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    #[allow(unused_variables)]
-    fn update_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String> {
-        todo!()
-    }
-
     fn delete_remote_task(&self, user: &String, repo: &String, task_id: &String) -> Result<(), String> {
         match get_token_from_env() {
             Some(token) => {
