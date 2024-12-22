@@ -18,7 +18,7 @@ use crate::operations::config::status::*;
 use crate::operations::label::*;
 
 #[derive(Parser)]
-#[command(version, about = "Local-first task manager/bug tracker within your git repository which can sync issues from GitHub.", arg_required_else_help(true))]
+#[command(version, about = "Local-first task manager/bug tracker within your git repository which can sync issues from/to GitHub or Gitlab.", arg_required_else_help(true))]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
