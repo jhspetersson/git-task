@@ -312,6 +312,10 @@ async fn create_issue(user: &String, repo: &String, task: &Task) -> Result<Strin
     if let Some(description) = task.get_property("description") {
         create_builder = create_builder.body(description);
     }
+    if let Some(labels) = task.get_labels() {
+        let labels = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
+        create_builder = create_builder.labels(labels);
+    }
     match create_builder.send().await {
         Ok(issue) => Ok(issue.number.to_string()),
         Err(e) => Err(e.to_string())

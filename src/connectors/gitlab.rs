@@ -198,6 +198,10 @@ impl RemoteConnector for GitlabRemoteConnector {
         let endpoint = endpoint.project(user.to_string() + "/" + repo);
         endpoint.title(task.get_property("name").unwrap());
         endpoint.description(task.get_property("description").unwrap());
+        if let Some(labels) = task.get_labels() {
+            let labels = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
+            endpoint.labels(labels);
+        }
         let endpoint = endpoint.build().unwrap();
         let issue: Issue = endpoint.query(&client).unwrap();
 

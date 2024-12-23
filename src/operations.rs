@@ -510,6 +510,15 @@ pub(crate) fn task_push(ids: String, remote: &Option<String>, no_comments: bool,
                     } else {
                         eprintln!("Sync: REMOTE task ID {id} NOT found");
 
+                        let local_task = match no_labels {
+                            true => {
+                                let mut local_task = local_task;
+                                local_task.set_labels(vec![]);
+                                local_task
+                            },
+                            false => local_task
+                        };
+
                         match connector.create_remote_task(&user, &repo, &local_task) {
                             Ok(id) => {
                                 println!("Sync: Created REMOTE task ID {id}");
