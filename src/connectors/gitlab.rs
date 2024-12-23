@@ -199,6 +199,7 @@ impl RemoteConnector for GitlabRemoteConnector {
         endpoint.title(task.get_property("name").unwrap());
         endpoint.description(task.get_property("description").unwrap());
         if let Some(labels) = task.get_labels() {
+            prepare_labels(&client, &user, &repo, &labels);
             let labels = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
             endpoint.labels(labels);
         }
@@ -236,6 +237,7 @@ impl RemoteConnector for GitlabRemoteConnector {
                 let issue: Issue = issue;
                 let label_name = label.get_name();
                 if !issue.labels.contains(&label_name) {
+                    prepare_labels(&client, &user, &repo, &vec![label.clone()]);
                     let mut endpoint = gitlab::api::projects::issues::EditIssue::builder();
                     let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
                     endpoint.add_label(label_name);
@@ -360,6 +362,30 @@ fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, task_id: &
             eprintln!("{}", e);
             vec![]
         }
+    }
+}
+
+fn prepare_labels(client: &Gitlab, user: &String, repo: &String, labels: &Vec<Label>) {
+    let mut endpoint = gitlab::api::projects::labels::Labels::builder();
+    let endpoint = endpoint.project(user.to_string() + "/" + repo);
+    let endpoint = endpoint.build().unwrap();
+    let existing_labels: Vec<GitlabLabel> = gitlab::api::paged(endpoint, Pagination::All).query(client).unwrap();
+    let mut labels_to_create = labels.clone();
+    for label in existing_labels {
+        if let Some(pos) = labels_to_create.iter().position(|l| l.get_name() == label.name) {
+            labels_to_create.remove(pos);
+        }
+    }
+    for l in labels_to_create.iter() {
+        let mut endpoint = gitlab::api::projects::labels::CreateLabel::builder();
+        let endpoint = endpoint.project(user.to_string() + "/" + repo);
+        endpoint.name(l.get_name());
+        endpoint.color(l.get_color());
+        if let Some(description) = l.get_description() {
+            endpoint.description(description);
+        }
+        let endpoint = endpoint.build().unwrap();
+        gitlab::api::ignore(endpoint).query(client).unwrap();
     }
 }
 
