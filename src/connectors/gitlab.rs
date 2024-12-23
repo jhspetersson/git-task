@@ -67,6 +67,7 @@ impl RemoteConnector for GitlabRemoteConnector {
         user: &String,
         repo: &String,
         with_comments: bool,
+        with_labels: bool,
         limit: Option<usize>,
         state: RemoteTaskState,
         task_statuses: &Vec<String>
@@ -77,6 +78,25 @@ impl RemoteConnector for GitlabRemoteConnector {
             RemoteTaskState::All => None
         };
         let client = get_client(get_token_from_env().unwrap().as_str());
+
+        let labels = match with_labels {
+            true => {
+                let mut endpoint = gitlab::api::projects::labels::Labels::builder();
+                let endpoint = endpoint.project(user.to_string() + "/" + repo);
+                let endpoint = endpoint.build().unwrap();
+                let labels: Vec<GitlabLabel> = gitlab::api::paged(endpoint, Pagination::All).query(&client).unwrap();
+                let labels = labels.iter()
+                    .map(|gl| Label::new(
+                        gl.name.to_string(),
+                        Some(gl.color.to_string()),
+                        Some(gl.description.to_string())
+                    ))
+                    .collect::<Vec<_>>();
+                labels
+            },
+            false => vec![]
+        };
+
         let mut endpoint = gitlab::api::issues::ProjectIssues::builder();
         let mut endpoint = endpoint.project(user.to_string() + "/" + repo).scope(IssueScope::All);
         endpoint = match state {
@@ -103,6 +123,16 @@ impl RemoteConnector for GitlabRemoteConnector {
             if with_comments {
                 let comments = list_issue_comments(&client, &user, &repo, &issue.iid.to_string());
                 task.set_comments(comments);
+            }
+
+            if with_labels {
+                let labels = issue.labels.iter()
+                    .filter_map(|l| match labels.iter().find(|label| label.get_name() == l.to_string()) {
+                        Some(label) => Some(label.clone()),
+                        None => None
+                    })
+                    .collect::<Vec<_>>();
+                task.set_labels(labels);
             }
 
             result.push(task);

@@ -31,13 +31,31 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    fn list_remote_tasks(&self, user: &String, repo: &String, with_comments: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Vec<Task> {
+    fn list_remote_tasks(
+        &self,
+        user: &String,
+        repo: &String,
+        with_comments: bool,
+        with_labels: bool,
+        limit: Option<usize>,
+        state: RemoteTaskState,
+        task_statuses: &Vec<String>
+    ) -> Vec<Task> {
         let state = match state {
             RemoteTaskState::Open => State::Open,
             RemoteTaskState::Closed => State::Closed,
             RemoteTaskState::All => State::All,
         };
-        RUNTIME.block_on(list_issues(user, repo, with_comments, limit, state, task_statuses))
+        RUNTIME.block_on(
+            list_issues(
+                user,
+                repo,
+                with_comments,
+                with_labels,
+                limit,
+                state,
+                task_statuses
+            ))
     }
 
     fn get_remote_task(
@@ -166,7 +184,15 @@ impl RemoteConnector for GithubRemoteConnector {
 )]
 struct DeleteIssue;
 
-async fn list_issues(user: &String, repo: &String, with_comments: bool, limit: Option<usize>, state: State, task_statuses: &Vec<String>) -> Vec<Task> {
+async fn list_issues(
+    user: &String,
+    repo: &String,
+    with_comments: bool,
+    with_labels: bool,
+    limit: Option<usize>,
+    state: State,
+    task_statuses: &Vec<String>
+) -> Vec<Task> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
     let stream = crab.issues(user, repo)
@@ -195,6 +221,19 @@ async fn list_issues(user: &String, repo: &String, with_comments: bool, limit: O
         if with_comments {
             let task_comments = list_issue_comments(&user, &repo, issue.number).await;
             task.set_comments(task_comments);
+        }
+
+        if with_labels {
+            if !issue.labels.is_empty() {
+                let labels = issue.labels.iter()
+                    .map(|l| Label::new(
+                        l.name.clone(),
+                        Some(l.color.clone()),
+                        l.description.clone()
+                    ))
+                    .collect();
+                task.set_labels(labels);
+            }
         }
 
         result.push(task);

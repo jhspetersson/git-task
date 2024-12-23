@@ -14,7 +14,7 @@ pub enum RemoteTaskState {
 
 pub trait RemoteConnector {
     fn supports_remote(&self, url: &str) -> Option<(String, String)>;
-    fn list_remote_tasks(&self, user: &String, repo: &String, with_comments: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Vec<Task>;
+    fn list_remote_tasks(&self, user: &String, repo: &String, with_comments: bool, with_labels: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Vec<Task>;
     fn get_remote_task(&self, user: &String, repo: &String, task_id: &String, with_comments: bool, with_labels: bool, task_statuses: &Vec<String>) -> Option<Task>;
     fn create_remote_task(&self, user: &String, repo: &String, task: &Task) -> Result<String, String>;
     fn create_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment: &Comment) -> Result<String, String>;

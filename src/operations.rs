@@ -315,7 +315,7 @@ pub(crate) fn task_pull(
                     None => RemoteTaskState::All
                 };
 
-                let tasks = connector.list_remote_tasks(&user, &repo, !no_comments, limit, state, &task_statuses);
+                let tasks = connector.list_remote_tasks(&user, &repo, !no_comments, !no_labels, limit, state, &task_statuses);
 
                 if tasks.is_empty() {
                     success_message("No tasks found".to_string())
