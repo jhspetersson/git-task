@@ -91,7 +91,13 @@ impl RemoteConnector for GithubRemoteConnector {
     #[allow(unused_variables)]
     fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String> {
         match get_token_from_env() {
-            Some(_) => RUNTIME.block_on(add_label(user, repo, task_id.parse().unwrap(), &label.get_name(), Some(&label.get_color()), label.get_description().as_ref())),
+            Some(_) => RUNTIME.block_on(
+                add_label(
+                    user,
+                    repo,
+                    task_id.parse().unwrap(),
+                    label
+                )),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
         }
     }
@@ -313,6 +319,7 @@ async fn create_issue(user: &String, repo: &String, task: &Task) -> Result<Strin
         create_builder = create_builder.body(description);
     }
     if let Some(labels) = task.get_labels() {
+        let _ = prepare_labels(user, repo, labels, &crab).await;
         let labels = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
         create_builder = create_builder.labels(labels);
     }
@@ -334,11 +341,25 @@ async fn add_label(
     user: &String,
     repo: &String,
     n: u64,
-    label_name: &String,
-    label_color: Option<&String>,
-    label_description: Option<&String>,
+    label: &Label,
 ) -> Result<(), String> {
     let crab = get_octocrab_instance().await;
+    let _ = prepare_labels(user, repo, &vec![label.clone()], &crab).await;
+    let add_label_body = vec![label.get_name()];
+    crab
+        .issues(user, repo)
+        .add_labels(n, &add_label_body)
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+async fn prepare_labels(
+    user: &String,
+    repo: &String,
+    labels: &Vec<Label>,
+    crab: &Arc<Octocrab>)
+{
     let existing_labels_stream = crab
         .issues(user, repo)
         .list_labels_for_repo()
@@ -347,36 +368,22 @@ async fn add_label(
         .await.unwrap()
         .into_stream(&crab);
     pin!(existing_labels_stream);
-    let mut existing_label = None;
-    while let Some(label) = existing_labels_stream.next().await {
-        if label.as_ref().unwrap().name == label_name.to_string() {
-            existing_label = Some(Label::new(
-                label.as_ref().unwrap().name.clone(),
-                Some(label.as_ref().unwrap().color.clone()),
-                label.as_ref().unwrap().description.clone(),
-            ));
-            break;
+    let mut labels_to_create = labels.clone();
+    while let Some(Ok(label)) = existing_labels_stream.next().await {
+        if let Some(pos) = labels_to_create.iter().position(|l| l.get_name() == label.name) {
+            labels_to_create.remove(pos);
         }
     }
-
-    if existing_label.is_none() {
+    for l in labels_to_create.iter() {
         let _ = crab
             .issues(user, repo)
             .create_label(
-                label_name,
-                label_color.unwrap_or(&"000000".to_string()).to_string(),
-                label_description.unwrap_or(&"".to_string()).to_string(),
+                l.get_name(),
+                l.get_color(),
+                l.get_description().unwrap_or_else(|| "".to_string()),
             )
             .await;
     }
-
-    let add_label_body = vec![label_name.to_string()];
-    crab
-        .issues(user, repo)
-        .add_labels(n, &add_label_body)
-        .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
 }
 
 async fn update_issue(user: &String, repo: &String, n: u64, title: &String, body: &String, state: IssueState) -> Result<(), String> {
