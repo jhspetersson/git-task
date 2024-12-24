@@ -26,7 +26,7 @@ pub struct Comment {
     text: String,
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Label {
     name: String,
     color: Option<String>,
