@@ -102,14 +102,28 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    fn update_remote_task(&self, user: &String, repo: &String, task_id: &String, name: &String, text: &String, state: RemoteTaskState) -> Result<(), String> {
+    fn update_remote_task(
+        &self,
+        user: &String,
+        repo: &String,
+        task: &Task,
+        state: RemoteTaskState
+    ) -> Result<(), String> {
         match get_token_from_env() {
             Some(_) => {
                 let state = match state {
                     RemoteTaskState::Closed => IssueState::Closed,
                     _ => IssueState::Open,
                 };
-                RUNTIME.block_on(update_issue(user, repo, task_id.parse().unwrap(), name, text, state))
+                RUNTIME.block_on(
+                    update_issue(
+                        user,
+                        repo,
+                        task.get_id().unwrap().parse().unwrap(),
+                        task.get_property("name").unwrap(),
+                        task.get_property("description").unwrap(),
+                        state
+                    ))
             },
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
         }
