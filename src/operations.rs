@@ -923,22 +923,50 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
 fn print_task_line(task: Task, columns: &Option<Vec<String>>, no_color: bool, prop_manager: &PropertyManager, status_manager: &StatusManager) {
     let columns = match columns {
         Some(columns) => columns,
-        _ => &vec![String::from("id"), String::from("created"), String::from("status"), String::from("name")]
+        _ => &vec![
+            String::from("id"),
+            String::from("created"),
+            String::from("status"),
+            String::from("name"),
+            String::from("labels"),
+        ]
     };
     let context = extract_task_context(&task);
-    let empty_string = String::new();
 
     columns.iter().for_each(|column| {
-        let value = if column == "id" { &task.get_id().unwrap() } else { task.get_property(column).unwrap_or(&empty_string) };
-        print_column(column, &value, &context, no_color, prop_manager, status_manager);
+        print_column(&task, column, &context, no_color, prop_manager, status_manager);
     });
     println!();
 }
 
-fn print_column(column: &String, value: &String, context: &HashMap<String, String>, no_color: bool, prop_manager: &PropertyManager, status_manager: &StatusManager) {
+fn print_column(
+    task: &Task,
+    column: &String,
+    context: &HashMap<String, String>,
+    no_color: bool,
+    prop_manager: &PropertyManager,
+    status_manager: &StatusManager
+) {
+    let empty_string = String::new();
     match column.as_str() {
-        "status" => print!("{} ", status_manager.format_status(value, no_color)),
-        column => print!("{} ", prop_manager.format_value(column, value, context, prop_manager.get_properties(), no_color)),
+        "status" => {
+            print!("{} ", status_manager.format_status(task.get_property(column).unwrap(), no_color))
+        },
+        "labels" => if let Some(labels) = task.get_labels() {
+            for label in labels {
+                print_label(label, no_color);
+            }
+        },
+        column => {
+            let value = if column == "id" {
+                &task.get_id().unwrap()
+            } else {
+                task.get_property(column).unwrap_or_else(|| {
+                    &empty_string
+                })
+            };
+            print!("{} ", prop_manager.format_value(column, value, context, prop_manager.get_properties(), no_color))
+        },
     }
 }
 
