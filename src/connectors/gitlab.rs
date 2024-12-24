@@ -262,6 +262,7 @@ impl RemoteConnector for GitlabRemoteConnector {
         user: &String,
         repo: &String,
         task: &Task,
+        labels: Option<&Vec<Label>>,
         state: RemoteTaskState
     ) -> Result<(), String> {
         let client = get_client(get_token_from_env().unwrap().as_str());
@@ -269,6 +270,11 @@ impl RemoteConnector for GitlabRemoteConnector {
         let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task.get_id().unwrap().parse().unwrap());
         endpoint.title(task.get_property("name").unwrap());
         endpoint.description(task.get_property("description").unwrap());
+        if let Some(labels) = labels {
+            prepare_labels(&client, &user, &repo, &labels);
+            let labels = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
+            endpoint.labels(labels);
+        }
         endpoint.state_event(if state == RemoteTaskState::Open { IssueStateEvent::Reopen } else { IssueStateEvent::Close });
         let endpoint = endpoint.build().unwrap();
         match endpoint.query(&client) {

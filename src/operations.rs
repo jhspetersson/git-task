@@ -483,7 +483,13 @@ pub(crate) fn task_push(ids: String, remote: &Option<String>, no_comments: bool,
                             }
                             let state = if status_manager.is_done(local_status) { RemoteTaskState::Closed } else { RemoteTaskState::Open };
 
-                            match connector.update_remote_task(&user, &repo, &local_task, state) {
+                            match connector.update_remote_task(
+                                &user,
+                                &repo,
+                                &local_task,
+                                if !no_labels { local_task.get_labels().into() } else { None },
+                                state
+                            ) {
                                 Ok(_) => {
                                     println!("Sync: REMOTE task ID {id} has been updated");
                                 },

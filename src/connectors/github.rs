@@ -107,6 +107,7 @@ impl RemoteConnector for GithubRemoteConnector {
         user: &String,
         repo: &String,
         task: &Task,
+        labels: Option<&Vec<Label>>,
         state: RemoteTaskState
     ) -> Result<(), String> {
         match get_token_from_env() {
@@ -122,6 +123,7 @@ impl RemoteConnector for GithubRemoteConnector {
                         task.get_id().unwrap().parse().unwrap(),
                         task.get_property("name").unwrap(),
                         task.get_property("description").unwrap(),
+                        labels,
                         state
                     ))
             },
@@ -333,9 +335,11 @@ async fn create_issue(user: &String, repo: &String, task: &Task) -> Result<Strin
         create_builder = create_builder.body(description);
     }
     if let Some(labels) = task.get_labels() {
-        let _ = prepare_labels(user, repo, labels, &crab).await;
-        let labels = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
-        create_builder = create_builder.labels(labels);
+        if !labels.is_empty() {
+            let _ = prepare_labels(user, repo, labels, &crab).await;
+            let labels = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
+            create_builder = create_builder.labels(labels);
+        }
     }
     match create_builder.send().await {
         Ok(issue) => Ok(issue.number.to_string()),
@@ -400,9 +404,19 @@ async fn prepare_labels(
     }
 }
 
-async fn update_issue(user: &String, repo: &String, n: u64, title: &String, body: &String, state: IssueState) -> Result<(), String> {
+async fn update_issue(user: &String, repo: &String, n: u64, title: &String, body: &String, labels: Option<&Vec<Label>>, state: IssueState) -> Result<(), String> {
     let crab = get_octocrab_instance().await;
-    match crab.issues(user, repo).update(n).title(title).body(body).state(state).send().await {
+    let crab_issues = crab.issues(user, repo);
+    let mut update_builder = crab_issues.update(n).title(title).body(body).state(state);
+    let label_list;
+    if let Some(labels) = labels {
+        if !labels.is_empty() {
+            prepare_labels(user, repo, labels, &crab).await;
+        }
+        label_list = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
+        update_builder = update_builder.labels(&label_list);
+    }
+    match update_builder.send().await {
         Ok(_) => Ok(()),
         Err(e) => Err(e.to_string())
     }
