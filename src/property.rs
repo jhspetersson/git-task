@@ -363,6 +363,10 @@ impl PropertyManager {
     }
 
     pub fn add_property(&mut self, name: String, value_type: String, color: String, style: Option<String>, enum_values: Option<Vec<String>>, cond_format: Option<Vec<String>>) -> Result<(), String> {
+        if name.to_lowercase() == "id" || name.to_lowercase() == "labels" {
+            return Err(format!("`{}` is a reserved property name", name));
+        }
+
         let property = Property {
             name,
             value_type: value_type.parse()?,
