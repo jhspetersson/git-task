@@ -151,6 +151,13 @@ You can set it up this way:
 
     git config --global core.editor "C:\\Program Files\\Notepad++\\notepad++.exe"
 
+### label
+
+Add and remove labels from tasks. Labels can be synchronized with GitHub and Gitlab repositories.
+
+    git task label add 10 important ff6633 --desc 'Beware of this task!' --push
+    git task lbl del 10 important
+
 ### comment
 
 Add, edit or remove comments:
