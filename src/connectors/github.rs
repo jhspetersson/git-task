@@ -336,7 +336,7 @@ async fn create_issue(user: &String, repo: &String, task: &Task) -> Result<Strin
     }
     if let Some(labels) = task.get_labels() {
         if !labels.is_empty() {
-            let _ = prepare_labels(user, repo, labels, &crab).await;
+            prepare_labels(user, repo, labels, &crab).await;
             let labels = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
             create_builder = create_builder.labels(labels);
         }
