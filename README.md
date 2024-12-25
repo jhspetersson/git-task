@@ -37,6 +37,8 @@ You can freely edit this list.
 
 However, for the sake of sync with GitHub or Gitlab there are two config options to map remote `OPEN` and `CLOSED` statuses with local ones.
 
+Tasks can also have labels that are optionally synchronized with GitHub or Gitlab.
+
 ## Commands
 
 ### list
