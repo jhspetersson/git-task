@@ -2,6 +2,7 @@
 
 Local-first task manager/bug tracker within your git repository which can import issues from GitHub or Gitlab.
 
+[![Crates.io](https://img.shields.io/crates/v/git-task.svg)](https://crates.io/crates/fselect)
 [![build](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml/badge.svg)](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml)
 
 ![](https://github.com/jhspetersson/git-task/blob/master/resources/gt2.gif)
