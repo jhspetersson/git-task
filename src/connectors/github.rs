@@ -12,6 +12,7 @@ use tokio::runtime::Runtime;
 
 use gittask::{Comment, Label, Task};
 use crate::connectors::{RemoteConnector, RemoteTaskState};
+use crate::util::color_str_to_rgb_str;
 
 pub struct GithubRemoteConnector;
 
@@ -397,7 +398,7 @@ async fn prepare_labels(
             .issues(user, repo)
             .create_label(
                 l.get_name(),
-                l.get_color(),
+                color_str_to_rgb_str(&l.get_color()),
                 l.get_description().unwrap_or_else(|| "".to_string()),
             )
             .await;

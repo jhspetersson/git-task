@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use gittask::{Comment, Label, Task};
 use crate::connectors::{RemoteConnector, RemoteTaskState};
-use crate::util::parse_datetime_to_seconds;
+use crate::util::{color_str_to_rgb_str, parse_datetime_to_seconds};
 
 pub struct GitlabRemoteConnector;
 
@@ -392,7 +392,7 @@ fn prepare_labels(client: &Gitlab, user: &String, repo: &String, labels: &Vec<La
         let mut endpoint = gitlab::api::projects::labels::CreateLabel::builder();
         let endpoint = endpoint.project(user.to_string() + "/" + repo);
         endpoint.name(l.get_name());
-        endpoint.color(l.get_color());
+        endpoint.color("#".to_string() + &color_str_to_rgb_str(&l.get_color()));
         if let Some(description) = l.get_description() {
             endpoint.description(description);
         }
