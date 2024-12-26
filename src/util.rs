@@ -131,7 +131,7 @@ pub fn color_str_to_rgb_str(color: &str) -> String {
         "lightmagenta" => "ff00ff",
         "cyan" => "008080",
         "lightcyan" => "00ffff",
-        "white" => "c0c0c0",
+        "white" | "default" => "c0c0c0",
         "lightgray" | "lightgrey" => "ffffff",
         s => match s.parse::<u8>() {
             Ok(n) => fixed_to_rgb_str(n),
