@@ -488,3 +488,41 @@ pub fn error_message(message: String) -> bool {
     eprintln!("{message}");
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::ExpandRange;
+
+    #[test]
+    fn test_expand_range_single() {
+        let input = vec!["1".to_string()];
+        let expected: Vec<String> = vec!["1".to_string()];
+        let result: Vec<String> = input.into_iter().expand_range().collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_expand_range_range() {
+        let input = vec!["1..3".to_string()];
+        let expected: Vec<String> = vec!["1".to_string(), "2".to_string(), "3".to_string()];
+        let result: Vec<String> = input.into_iter().expand_range().collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_expand_range_mixed() {
+        let input = vec!["1".to_string(), "3..5".to_string(), "7".to_string()];
+        let expected: Vec<String> = vec!["1".to_string(), "3".to_string(), "4".to_string(), "5".to_string(), "7".to_string()];
+        let result: Vec<String> = input.into_iter().expand_range().collect();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_expand_range_invalid_range() {
+        let input = vec!["1..x".to_string()];
+        let result: Result<Vec<String>, _> = std::panic::catch_unwind(|| {
+            input.into_iter().expand_range().collect::<Vec<String>>()
+        });
+        assert!(result.is_err());
+    }
+}
