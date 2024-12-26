@@ -579,4 +579,124 @@ mod tests {
         });
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_capitalize_lowercase() {
+        let input = "hello";
+        let expected = "Hello".to_string();
+        let result = capitalize(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_capitalize_unicode() {
+        let input = "превед";
+        let expected = "Превед".to_string();
+        let result = capitalize(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_str_to_color_basic() {
+        let color_str = "red";
+        let expected = Style::new().fg(Red);
+        let result = str_to_color(color_str, &None);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_str_to_color_with_style() {
+        let color_str = "green";
+        let style = Some("bold,underline".to_string());
+        let expected = Style::new().fg(Green).bold().underline();
+        let result = str_to_color(color_str, &style);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_str_to_color_hex() {
+        let color_str = "#00ff00";
+        let expected = Style::new().fg(Color::Rgb(0, 255, 0));
+        let result = str_to_color(color_str, &None);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_str_to_color_invalid_hex() {
+        let color_str = "#zzzzzz";
+        let expected = Style::new().fg(Default);
+        let result = str_to_color(color_str, &None);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_str_to_color_fixed() {
+        let color_str = "123";
+        let expected = Style::new().fg(Fixed(123));
+        let result = str_to_color(color_str, &None);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_str_to_color_default() {
+        let color_str = "unknowncolor";
+        let expected = Style::new().fg(Default);
+        let result = str_to_color(color_str, &None);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_color_str_to_rgb_str_named_colors() {
+        let input = "red";
+        let expected = "800000".to_string();
+        let result = color_str_to_rgb_str(input);
+        assert_eq!(result, expected);
+
+        let input = "lightred";
+        let expected = "ff0000".to_string();
+        let result = color_str_to_rgb_str(input);
+        assert_eq!(result, expected);
+
+        let input = "green";
+        let expected = "008000".to_string();
+        let result = color_str_to_rgb_str(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_color_str_to_rgb_str_hex() {
+        let input = "#00ff00";
+        let expected = "00ff00".to_string();
+        let result = color_str_to_rgb_str(input);
+        assert_eq!(result, expected);
+
+        let input = "#0000ff";
+        let expected = "0000ff".to_string();
+        let result = color_str_to_rgb_str(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_color_str_to_rgb_str_invalid_hex() {
+        let input = "#zzzzzz";
+        let expected = "000000".to_string();
+        let result = color_str_to_rgb_str(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_color_str_to_rgb_str_fixed_color() {
+        let input = "123";
+        let expected = "87ffff".to_string();
+        let result = color_str_to_rgb_str(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_color_str_to_rgb_str_default() {
+        let input = "unknowncolor";
+        let expected = "000000".to_string();
+        let result = color_str_to_rgb_str(input);
+        assert_eq!(result, expected);
+    }
 }
