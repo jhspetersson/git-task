@@ -31,7 +31,12 @@ where
 }
 
 pub fn parse_ids(ids: String) -> Vec<String> {
-    ids.split(",").map(|s| s.to_string()).expand_range().collect::<Vec<_>>()
+    ids
+        .split(",")
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .expand_range()
+        .collect::<Vec<_>>()
 }
 
 pub fn capitalize(s: &str) -> String {
@@ -491,7 +496,7 @@ pub fn error_message(message: String) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::ExpandRange;
+    use super::*;
 
     #[test]
     fn test_expand_range_single() {
@@ -522,6 +527,55 @@ mod tests {
         let input = vec!["1..x".to_string()];
         let result: Result<Vec<String>, _> = std::panic::catch_unwind(|| {
             input.into_iter().expand_range().collect::<Vec<String>>()
+        });
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_ids_single() {
+        let input = "1".to_string();
+        let expected = vec!["1".to_string()];
+        let result = parse_ids(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_ids_multiple() {
+        let input = "1,2,3".to_string();
+        let expected = vec!["1".to_string(), "2".to_string(), "3".to_string()];
+        let result = parse_ids(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_ids_range() {
+        let input = "1..3".to_string();
+        let expected = vec!["1".to_string(), "2".to_string(), "3".to_string()];
+        let result = parse_ids(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_ids_mixed() {
+        let input = "1,3..5,7".to_string();
+        let expected = vec!["1".to_string(), "3".to_string(), "4".to_string(), "5".to_string(), "7".to_string()];
+        let result = parse_ids(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_ids_empty() {
+        let input = "".to_string();
+        let expected: Vec<String> = vec![];
+        let result = parse_ids(input);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_ids_invalid_range() {
+        let input = "1..x".to_string();
+        let result: Result<Vec<String>, _> = std::panic::catch_unwind(|| {
+            parse_ids(input)
         });
         assert!(result.is_err());
     }
