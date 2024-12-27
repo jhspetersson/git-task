@@ -594,4 +594,47 @@ mod test {
         let task = find_result.unwrap();
         assert!(task.is_none());
     }
+
+    #[test]
+    fn test_clear_tasks() {
+        let id = get_next_id().unwrap_or_else(|_| "1".to_string());
+        let task = Task::construct_task("Test task".to_string(), "Description goes here".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let create_result = create_task(task);
+        assert!(create_result.is_ok());
+        let task = create_result.unwrap();
+        assert_eq!(task.get_id(), Some(id.clone()));
+
+        let id = get_next_id().unwrap_or_else(|_| "2".to_string());
+        let task2 = Task::construct_task("Another task".to_string(), "Another description".to_string(), "IN_PROGRESS".to_string(), Some(get_current_timestamp()));
+        let create_result2 = create_task(task2);
+        assert!(create_result2.is_ok());
+        let task2 = create_result2.unwrap();
+        assert_eq!(task2.get_id(), Some(id.clone()));
+
+        let id = get_next_id().unwrap_or_else(|_| "3".to_string());
+        let task3 = Task::construct_task("Third task".to_string(), "Third description".to_string(), "CLOSED".to_string(), Some(get_current_timestamp()));
+        let create_result3 = create_task(task3);
+        assert!(create_result3.is_ok());
+        let task3 = create_result3.unwrap();
+        assert_eq!(task3.get_id(), Some(id.clone()));
+
+        let clear_result = crate::clear_tasks();
+        assert!(clear_result.is_ok());
+        assert_eq!(clear_result.unwrap(), 3);
+
+        let find_result = find_task(&id);
+        assert!(find_result.is_ok());
+        let task = find_result.unwrap();
+        assert!(task.is_none());
+
+        let find_result = find_task(&task2.get_id().unwrap());
+        assert!(find_result.is_ok());
+        let task = find_result.unwrap();
+        assert!(task.is_none());
+
+        let find_result = find_task(&task3.get_id().unwrap());
+        assert!(find_result.is_ok());
+        let task = find_result.unwrap();
+        assert!(task.is_none());
+    }
 }

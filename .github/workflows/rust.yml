@@ -23,4 +23,4 @@ jobs:
     - name: Set up git
       run: git config user.name Tester && git config user.email tester@example.com
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --verbose -- --test-threads 1
