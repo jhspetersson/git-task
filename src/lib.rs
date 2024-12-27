@@ -537,7 +537,7 @@ pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
-    use crate::{create_task, delete_tasks, find_task, get_current_timestamp, get_next_id, get_ref_path, set_ref_path, update_task, Task};
+    use crate::*;
 
     #[test]
     fn test_ref_path() {
@@ -593,6 +593,42 @@ mod test {
         assert!(find_result.is_ok());
         let task = find_result.unwrap();
         assert!(task.is_none());
+    }
+
+    #[test]
+    fn test_update_comment_id() {
+        // Create a task first
+        let id = get_next_id().unwrap_or_else(|_| "1".to_string());
+        let task = Task::construct_task(
+            "Test task".to_string(),
+            "Description goes here".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp())
+        );
+        let create_result = create_task(task);
+        assert!(create_result.is_ok());
+        let mut task = create_result.unwrap();
+
+        // Add a comment to the task
+        let comment_props = HashMap::from([("author".to_string(), "Some developer".to_string())]);
+        let comment = task.add_comment(Some("1".to_string()), comment_props, "Test comment".to_string());
+        assert_eq!(comment.get_id().unwrap(), "1");
+        let update_result = update_task(task);
+        assert!(update_result.is_ok());
+
+        // Update the comment ID
+        let result = update_comment_id(&id, "1", "2");
+        assert!(result.is_ok());
+
+        // Verify the comment ID was updated
+        let updated_task = find_task(&id).unwrap().unwrap();
+        let updated_comments = updated_task.get_comments().as_ref().unwrap();
+        assert_eq!(updated_comments.len(), 1);
+        assert_eq!(updated_comments[0].get_id().unwrap(), "2");
+
+        // Clean up
+        let delete_result = delete_tasks(&[&id]);
+        assert!(delete_result.is_ok());
     }
 
     #[test]
