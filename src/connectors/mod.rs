@@ -1,9 +1,11 @@
 mod github;
 mod gitlab;
+mod jira;
 
 use gittask::{Comment, Label, Task};
 use crate::connectors::github::GithubRemoteConnector;
 use crate::connectors::gitlab::GitlabRemoteConnector;
+use crate::connectors::jira::JiraRemoteConnector;
 
 #[derive(PartialEq)]
 pub enum RemoteTaskState {
@@ -26,9 +28,10 @@ pub trait RemoteConnector {
     fn delete_remote_label(&self, user: &String, repo: &String, task_id: &String, name: &String) -> Result<(), String>;
 }
 
-const CONNECTORS: [&dyn RemoteConnector; 2] = [
+const CONNECTORS: [&dyn RemoteConnector; 3] = [
     &GithubRemoteConnector,
     &GitlabRemoteConnector,
+    &JiraRemoteConnector,
 ];
 
 pub fn get_matching_remote_connectors(remotes: Vec<String>) -> Vec<(Box<&'static dyn RemoteConnector>, String, String)> {
