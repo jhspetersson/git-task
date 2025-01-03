@@ -7,6 +7,13 @@ Local-first task manager/bug tracker within your git repository which can import
 
 ![](https://github.com/jhspetersson/git-task/blob/master/resources/gt2.gif)
 
+
+[Installation](#installation)  
+[Concepts](#concepts)  
+[Commands](#commands)  
+[Gitlab support](#gitlab-support)  
+
+
 ## Installation
 
 Build a binary, then add it as a git command:
