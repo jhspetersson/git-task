@@ -41,7 +41,7 @@ impl RemoteConnector for GithubRemoteConnector {
         limit: Option<usize>,
         state: RemoteTaskState,
         task_statuses: &Vec<String>
-    ) -> Vec<Task> {
+    ) -> Result<Vec<Task>, String> {
         let state = match state {
             RemoteTaskState::Open => State::Open,
             RemoteTaskState::Closed => State::Closed,
@@ -215,7 +215,7 @@ async fn list_issues(
     limit: Option<usize>,
     state: State,
     task_statuses: &Vec<String>
-) -> Vec<Task> {
+) -> Result<Vec<Task>, String> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
     let stream = crab.issues(user, repo)
@@ -223,11 +223,11 @@ async fn list_issues(
         .state(state)
         .per_page(100)
         .send()
-        .await.unwrap()
+        .await.map_err(|e| e.to_string())?
         .into_stream(&crab);
     pin!(stream);
     let mut count = 0;
-    while let Some(issue) = stream.try_next().await.unwrap() {
+    while let Some(issue) = stream.try_next().await.map_err(|e| e.to_string())? {
         if limit.is_some() && count >= limit.unwrap() {
             break;
         }
@@ -262,7 +262,7 @@ async fn list_issues(
         result.push(task);
     }
 
-    result
+    Ok(result)
 }
 
 async fn list_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Comment> {

@@ -316,19 +316,23 @@ pub(crate) fn task_pull(
                 };
 
                 let tasks = connector.list_remote_tasks(&user, &repo, !no_comments, !no_labels, limit, state, &task_statuses);
-
-                if tasks.is_empty() {
-                    success_message("No tasks found".to_string())
-                } else {
-                    for task in tasks {
-                        let task_id = task.get_id().unwrap();
-                        match import_remote_task(task, no_comments) {
-                            Ok(Some(id)) => println!("Task ID {id} updated"),
-                            Ok(None) => println!("Task ID {task_id} skipped, nothing to update"),
-                            Err(e) => eprintln!("ERROR: {e}"),
+                match tasks {
+                    Ok(tasks) => {
+                        if tasks.is_empty() {
+                            success_message("No tasks found".to_string())
+                        } else {
+                            for task in tasks {
+                                let task_id = task.get_id().unwrap();
+                                match import_remote_task(task, no_comments) {
+                                    Ok(Some(id)) => println!("Task ID {id} updated"),
+                                    Ok(None) => println!("Task ID {task_id} skipped, nothing to update"),
+                                    Err(e) => eprintln!("ERROR: {e}"),
+                                }
+                            }
+                            true
                         }
-                    }
-                    true
+                    },
+                    Err(e) => error_message(format!("ERROR: {e}"))
                 }
             }
         },

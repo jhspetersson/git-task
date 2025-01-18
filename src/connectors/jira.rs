@@ -38,7 +38,7 @@ impl RemoteConnector for JiraRemoteConnector {
         limit: Option<usize>,
         state: RemoteTaskState,
         _task_statuses: &Vec<String>
-    ) -> Vec<Task> {
+    ) -> Result<Vec<Task>, String> {
         let token = get_token_from_env().unwrap();
         let config = get_configuration(domain, token);
 
@@ -56,7 +56,7 @@ impl RemoteConnector for JiraRemoteConnector {
             RemoteTaskState::All => format!("project = {}", project),
         };
 
-        let result = RUNTIME.block_on(async {
+        RUNTIME.block_on(async {
             let issues = issue_search_api::search_for_issues_using_jql(
                 &config,
                 Some(&jql),
@@ -71,7 +71,7 @@ impl RemoteConnector for JiraRemoteConnector {
             ).await;
             match issues {
                 Ok(response) => {
-                    response.issues.unwrap_or_default()
+                    let tasks = response.issues.unwrap_or_default()
                         .into_iter()
                         .map(|issue| {
                             let mut props = HashMap::new();
@@ -85,13 +85,12 @@ impl RemoteConnector for JiraRemoteConnector {
 
                             Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap()
                         })
-                        .collect()
+                        .collect();
+                    Ok(tasks)
                 },
-                Err(_) => vec![],
+                Err(e) => Err(e.to_string()),
             }
-        });
-
-        result
+        })
     }
 
     fn get_remote_task(

@@ -71,7 +71,7 @@ impl RemoteConnector for GitlabRemoteConnector {
         limit: Option<usize>,
         state: RemoteTaskState,
         task_statuses: &Vec<String>
-    ) -> Vec<Task> {
+    ) -> Result<Vec<Task>, String> {
         let state = match state {
             RemoteTaskState::Open => Some(IssueState::Opened),
             RemoteTaskState::Closed => Some(IssueState::Closed),
@@ -108,7 +108,7 @@ impl RemoteConnector for GitlabRemoteConnector {
             Some(limit) => Pagination::Limit(limit),
             None => Pagination::All
         };
-        let issues: Vec<Issue> = gitlab::api::paged(endpoint, pagination).query(&client).unwrap();
+        let issues: Vec<Issue> = gitlab::api::paged(endpoint, pagination).query(&client).map_err(|e| e.to_string())?;
         let mut result = vec![];
         for issue in issues {
             let mut props = HashMap::new();
@@ -138,7 +138,7 @@ impl RemoteConnector for GitlabRemoteConnector {
             result.push(task);
         }
 
-        result
+        Ok(result)
     }
 
     fn get_remote_task(
