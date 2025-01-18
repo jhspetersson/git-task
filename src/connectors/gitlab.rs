@@ -149,7 +149,7 @@ impl RemoteConnector for GitlabRemoteConnector {
         with_comments: bool,
         with_labels: bool,
         task_statuses: &Vec<String>
-    ) -> Option<Task> {
+    ) -> Result<Task, String> {
         let client = get_client(get_token_from_env().unwrap().as_str());
         let mut endpoint = gitlab::api::projects::issues::Issue::builder();
         let mut endpoint = endpoint.project(user.to_string() + "/" + repo);
@@ -184,11 +184,9 @@ impl RemoteConnector for GitlabRemoteConnector {
                     task.set_labels(labels);
                 }
 
-                Some(task)
+                Ok(task)
             },
-            Err(_) => {
-                None
-            }
+            Err(e) => Err(e.to_string())
         }
     }
 

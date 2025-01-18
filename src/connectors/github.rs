@@ -67,7 +67,7 @@ impl RemoteConnector for GithubRemoteConnector {
         with_comments: bool,
         with_labels: bool,
         task_statuses: &Vec<String>
-    ) -> Option<Task> {
+    ) -> Result<Task, String> {
         RUNTIME.block_on(
             get_issue(
                 &user, &repo, task_id.parse().unwrap(), with_comments, with_labels, task_statuses
@@ -293,7 +293,7 @@ async fn get_issue(
     with_comments: bool,
     with_labels: bool,
     task_statuses: &Vec<String>
-) -> Option<Task> {
+) -> Result<Task, String> {
     let crab = get_octocrab_instance().await;
     let issue = crab.issues(user, repo).get(n).await;
     match issue {
@@ -322,9 +322,9 @@ async fn get_issue(
                 task.set_labels(labels);
             }
 
-            Some(task)
+            Ok(task)
         },
-        _ => None
+        Err(e) => Err(e.to_string())
     }
 }
 

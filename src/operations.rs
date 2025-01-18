@@ -294,14 +294,14 @@ pub(crate) fn task_pull(
             if ids.is_some() {
                 for id in ids.unwrap() {
                     match connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses) {
-                        Some(task) => {
+                        Ok(task) => {
                             match import_remote_task(task, no_comments) {
                                 Ok(Some(id)) => println!("Task ID {id} updated"),
                                 Ok(None) => println!("Task ID {id} skipped, nothing to update"),
                                 Err(e) => eprintln!("ERROR: {e}"),
                             }
                         },
-                        None => eprintln!("Task ID {id} not found")
+                        Err(e) => eprintln!("Task ID {id}: {e}")
                     }
                 }
                 true
@@ -470,7 +470,7 @@ pub(crate) fn task_push(ids: String, remote: &Option<String>, no_comments: bool,
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
                     println!("Sync: LOCAL task ID {id} found");
                     let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses);
-                    if let Some(remote_task) = remote_task {
+                    if let Ok(remote_task) = remote_task {
                         println!("Sync: REMOTE task ID {id} found");
 
                         let local_status = local_task.get_property("status").unwrap();

@@ -101,7 +101,7 @@ impl RemoteConnector for JiraRemoteConnector {
         with_comments: bool,
         with_labels: bool,
         _task_statuses: &Vec<String>
-    ) -> Option<Task> {
+    ) -> Result<Task, String> {
         let token = get_token_from_env().unwrap();
         let config = get_configuration(domain, token);
 
@@ -134,9 +134,9 @@ impl RemoteConnector for JiraRemoteConnector {
                         props.insert("author".to_string(), fields.get("creator").unwrap().as_str().unwrap().to_string());
                     }
 
-                    Some(Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap())
+                    Ok(Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap())
                 },
-                Err(_) => None,
+                Err(e) => Err(e.to_string()),
             }
         })
     }
