@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
-use regex::Regex;
-use crate::connectors::{RemoteConnector, RemoteTaskState};
+
 use gittask::{Task, Comment, Label};
 use jira_v3_openapi::{apis::configuration::Configuration, apis::issues_api};
 use jira_v3_openapi::apis::{issue_comments_api, issue_search_api};
+use regex::Regex;
 use tokio::runtime::Runtime;
+
+use crate::connectors::{RemoteConnector, RemoteTaskState};
 
 pub struct JiraRemoteConnector;
 
@@ -41,10 +43,6 @@ impl RemoteConnector for JiraRemoteConnector {
     ) -> Result<Vec<Task>, String> {
         let token = get_token_from_env().unwrap();
         let config = get_configuration(domain, token);
-
-        if with_comments {
-            eprintln!("Fetching comments is not yet supported by Jira connector.");
-        }
 
         if with_labels {
             eprintln!("Fetching labels is not yet supported by Jira connector.");
@@ -83,7 +81,15 @@ impl RemoteConnector for JiraRemoteConnector {
                                 props.insert("author".to_string(), fields.get("creator").unwrap().as_str().unwrap().to_string());
                             }
 
-                            Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap()
+                            let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap();
+
+                            if with_comments {
+                                if let Ok(comments) = RUNTIME.block_on(list_issue_comments(&config, project, &task.get_id().unwrap())) {
+                                    task.set_comments(comments);
+                                }
+                            }
+
+                            task
                         })
                         .collect();
                     Ok(tasks)
@@ -104,10 +110,6 @@ impl RemoteConnector for JiraRemoteConnector {
     ) -> Result<Task, String> {
         let token = get_token_from_env().unwrap();
         let config = get_configuration(domain, token);
-
-        if with_comments {
-            eprintln!("Fetching comments is not yet supported by Jira connector.");
-        }
 
         if with_labels {
             eprintln!("Fetching labels is not yet supported by Jira connector.");
@@ -134,7 +136,15 @@ impl RemoteConnector for JiraRemoteConnector {
                         props.insert("author".to_string(), fields.get("creator").unwrap().as_str().unwrap().to_string());
                     }
 
-                    Ok(Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap())
+                    let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props)?;
+
+                    if with_comments {
+                        if let Ok(comments) = list_issue_comments(&config, project, task_id).await {
+                            task.set_comments(comments);
+                        }
+                    }
+
+                    Ok(task)
                 },
                 Err(e) => Err(e.to_string()),
             }
@@ -489,6 +499,34 @@ impl RemoteConnector for JiraRemoteConnector {
                 Err(e) => Err(format!("Failed to get issue: {}", e))
             }
         })
+    }
+}
+
+async fn list_issue_comments(config: &Configuration, project: &String, task_id: &String) -> Result<Vec<Comment>, ()> {
+    let comments_result = issue_comments_api::get_comments(
+        config,
+        task_id_to_issue_key(project, task_id).as_str(),
+        None,
+        None,
+        None,
+        None,
+    ).await;
+
+    match comments_result {
+        Ok(comments_response) => {
+            let comments = comments_response.comments.unwrap_or_default().into_iter().map(|comment| {
+                Comment::new(
+                    comment.id.unwrap(),
+                    HashMap::from([
+                        ("author".to_string(), comment.author.unwrap().display_name.unwrap()),
+                        ("created".to_string(), comment.created.unwrap().to_string()),
+                    ]),
+                    comment.body.unwrap().map_or_else(|| String::new(), |s| s.to_string())
+                )
+            }).collect();
+            Ok(comments)
+        },
+        Err(_) => Err(()),
     }
 }
 
