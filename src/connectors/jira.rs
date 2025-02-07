@@ -44,10 +44,6 @@ impl RemoteConnector for JiraRemoteConnector {
         let token = get_token_from_env().unwrap();
         let config = get_configuration(domain, token);
 
-        if with_labels {
-            eprintln!("Fetching labels is not yet supported by Jira connector.");
-        }
-
         let jql = match state {
             RemoteTaskState::Open => format!("project = {} AND status != Done", project),
             RemoteTaskState::Closed => format!("project = {} AND status = Done", project),
@@ -73,12 +69,21 @@ impl RemoteConnector for JiraRemoteConnector {
                         .into_iter()
                         .map(|issue| {
                             let mut props = HashMap::new();
+                            let mut task_labels = None;
                             if let Some(fields) = issue.fields {
                                 props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
                                 props.insert("description".to_string(), fields.get("description").unwrap().as_str().unwrap().to_string());
                                 props.insert("status".to_string(), fields.get("status").unwrap().as_str().unwrap().to_string());
                                 props.insert("created".to_string(), fields.get("created").unwrap().as_str().unwrap().to_string());
                                 props.insert("author".to_string(), fields.get("creator").unwrap().as_str().unwrap().to_string());
+
+                                if with_labels {
+                                    if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
+                                        task_labels = Some(labels.iter().map(|v| {
+                                            Label::new(v.as_str().unwrap().to_string(), None, None)
+                                        }).collect());
+                                    }
+                                }
                             }
 
                             let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap();
@@ -87,6 +92,10 @@ impl RemoteConnector for JiraRemoteConnector {
                                 if let Ok(comments) = RUNTIME.block_on(list_issue_comments(&config, project, &task.get_id().unwrap())) {
                                     task.set_comments(comments);
                                 }
+                            }
+
+                            if let Some(labels) = task_labels {
+                                task.set_labels(labels);
                             }
 
                             task
@@ -111,10 +120,6 @@ impl RemoteConnector for JiraRemoteConnector {
         let token = get_token_from_env().unwrap();
         let config = get_configuration(domain, token);
 
-        if with_labels {
-            eprintln!("Fetching labels is not yet supported by Jira connector.");
-        }
-
         RUNTIME.block_on(async {
             match issues_api::get_issue(
                 &config,
@@ -128,12 +133,21 @@ impl RemoteConnector for JiraRemoteConnector {
             ).await {
                 Ok(issue) => {
                     let mut props = HashMap::new();
+                    let mut task_labels = None;
                     if let Some(fields) = issue.fields {
                         props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
                         props.insert("description".to_string(), fields.get("description").unwrap().as_str().unwrap().to_string());
                         props.insert("status".to_string(), fields.get("status").unwrap().as_str().unwrap().to_string());
                         props.insert("created".to_string(), fields.get("created").unwrap().as_str().unwrap().to_string());
                         props.insert("author".to_string(), fields.get("creator").unwrap().as_str().unwrap().to_string());
+
+                        if with_labels {
+                            if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
+                                task_labels = Some(labels.iter().map(|v| {
+                                    Label::new(v.as_str().unwrap().to_string(), None, None)
+                                }).collect());
+                            }
+                        }
                     }
 
                     let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props)?;
@@ -142,6 +156,10 @@ impl RemoteConnector for JiraRemoteConnector {
                         if let Ok(comments) = list_issue_comments(&config, project, task_id).await {
                             task.set_comments(comments);
                         }
+                    }
+
+                    if let Some(labels) = task_labels {
+                        task.set_labels(labels);
                     }
 
                     Ok(task)
