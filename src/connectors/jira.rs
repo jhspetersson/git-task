@@ -16,6 +16,10 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
 });
 
 impl RemoteConnector for JiraRemoteConnector {
+    fn type_name(&self) -> &str {
+        "jira"
+    }
+
     fn supports_remote(&self, _url: &str) -> Option<(String, String)> {
         if let Some(url) = get_base_url() {
             match Regex::new(r"https://([^/]+)\.atlassian\.net/jira/software/projects/([^/]+)").unwrap().captures(&url) {

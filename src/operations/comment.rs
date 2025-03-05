@@ -2,7 +2,13 @@ use std::collections::HashMap;
 use crate::operations::get_user_repo;
 use crate::util::{error_message, get_text_from_editor};
 
-pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool, remote: &Option<String>) -> bool {
+pub(crate) fn task_comment_add(
+    task_id: String,
+    text: Option<String>,
+    push: bool,
+    remote: &Option<String>,
+    connector_type: &Option<String>,
+) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             let text = text.or_else(|| get_text_from_editor(None));
@@ -17,7 +23,7 @@ pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool
                     println!("Task ID {task_id} updated");
                     let mut success = false;
                     if push {
-                        match get_user_repo(remote) {
+                        match get_user_repo(remote, connector_type) {
                             Ok((connector, user, repo)) => {
                                 match connector.create_remote_comment(&user, &repo, &task_id, &comment) {
                                     Ok(remote_comment_id) => {
@@ -46,7 +52,13 @@ pub(crate) fn task_comment_add(task_id: String, text: Option<String>, push: bool
     }
 }
 
-pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool, remote: &Option<String>) -> bool {
+pub(crate) fn task_comment_edit(
+    task_id: String,
+    comment_id: String,
+    push: bool,
+    remote: &Option<String>,
+    connector_type: &Option<String>,
+) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             let mut comments = task.get_comments().clone();
@@ -68,7 +80,7 @@ pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool,
                             println!("Task ID {task_id} updated");
                             let mut success = false;
                             if push {
-                                match get_user_repo(remote) {
+                                match get_user_repo(remote, connector_type) {
                                     Ok((connector, user, repo)) => {
                                         match connector.update_remote_comment(&user, &repo, &task_id, &comment_id, &text) {
                                             Ok(_) => {
@@ -94,7 +106,13 @@ pub(crate) fn task_comment_edit(task_id: String, comment_id: String, push: bool,
     }
 }
 
-pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: bool, remote: &Option<String>) -> bool {
+pub(crate) fn task_comment_delete(
+    task_id: String,
+    comment_id: String,
+    push: bool,
+    remote: &Option<String>,
+    connector_type: &Option<String>,
+) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             match task.delete_comment(&comment_id) {
@@ -104,7 +122,7 @@ pub(crate) fn task_comment_delete(task_id: String, comment_id: String, push: boo
                             println!("Task ID {task_id} updated");
                             let mut success = false;
                             if push {
-                                match get_user_repo(remote) {
+                                match get_user_repo(remote, connector_type) {
                                     Ok((connector, user, repo)) => {
                                         match connector.delete_remote_comment(&user, &repo, &task_id, &comment_id) {
                                             Ok(_) => {

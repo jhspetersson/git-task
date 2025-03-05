@@ -15,6 +15,7 @@ pub enum RemoteTaskState {
 }
 
 pub trait RemoteConnector {
+    fn type_name(&self) -> &str;
     fn supports_remote(&self, url: &str) -> Option<(String, String)>;
     fn list_remote_tasks(&self, user: &String, repo: &String, with_comments: bool, with_labels: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Result<Vec<Task>, String>;
     fn get_remote_task(&self, user: &String, repo: &String, task_id: &String, with_comments: bool, with_labels: bool, task_statuses: &Vec<String>) -> Result<Task, String>;
@@ -34,11 +35,19 @@ const CONNECTORS: [&dyn RemoteConnector; 3] = [
     &JiraRemoteConnector,
 ];
 
-pub fn get_matching_remote_connectors(remotes: Vec<String>) -> Vec<(Box<&'static dyn RemoteConnector>, String, String)> {
+pub fn get_matching_remote_connectors(remotes: Vec<String>,
+                                      connector_type: &Option<String>
+) -> Vec<(Box<&'static dyn RemoteConnector>, String, String)> {
     let mut result = vec![];
 
     for remote in remotes {
         for connector in CONNECTORS {
+            if let Some(connector_type) = connector_type {
+                if connector_type != connector.type_name() {
+                    continue;
+                }
+            }
+
             if let Some((user, repo)) = connector.supports_remote(&remote) {
                 result.push((Box::new(connector), user, repo));
             }

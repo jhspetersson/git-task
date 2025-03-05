@@ -51,6 +51,10 @@ struct DeleteIssueResult {}
 struct DeleteIssueNoteResult {}
 
 impl RemoteConnector for GitlabRemoteConnector {
+    fn type_name(&self) -> &str {
+        "gitlab"
+    }
+
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
         match Regex::new(&(get_base_url() + "([a-z0-9-]+)/([a-z0-9-]+)\\.?")).unwrap().captures(url) {
             Some(caps) if caps.len() == 3 => {

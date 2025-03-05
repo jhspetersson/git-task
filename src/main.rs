@@ -80,6 +80,9 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
     },
     /// Update task status
     Status {
@@ -95,6 +98,9 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
         /// Disable colors
         #[arg(long)]
         no_color: bool,
@@ -121,6 +127,9 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
         /// Disable colors
         #[arg(long)]
         no_color: bool,
@@ -148,6 +157,9 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
         /// Disable colors
         #[arg(long)]
         no_color: bool,
@@ -215,6 +227,9 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
         /// Don't import task comments
         #[arg(long, aliases = ["nc"])]
         no_comments: bool,
@@ -229,6 +244,9 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
         /// Don't create task comments
         #[arg(short, long)]
         no_comments: bool,
@@ -260,6 +278,9 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
     },
     /// Delete all tasks
     Clear,
@@ -286,6 +307,9 @@ enum CommentCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
     },
     /// Edit a comment
     Edit {
@@ -299,6 +323,9 @@ enum CommentCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
     },
     /// Delete a comment
     #[clap(visible_aliases(["del", "remove", "rem"]))]
@@ -313,6 +340,9 @@ enum CommentCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
     },
 }
 
@@ -336,6 +366,9 @@ enum LabelCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
     },
     /// Delete a label
     #[clap(visible_aliases(["del", "remove", "rem"]))]
@@ -350,6 +383,9 @@ enum LabelCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
     },
 }
 
@@ -591,21 +627,21 @@ fn main() -> ExitCode {
     let success = match args.command {
         Some(Command::List { status, keyword, from, until, author, columns, sort, limit, no_color }) => task_list(status, keyword, from, until, author, columns, sort, limit, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
-        Some(Command::Create { name, description, no_desc, push, remote }) => task_create(name, description, no_desc, push, &remote),
-        Some(Command::Status { ids, status, push, remote, no_color }) => task_status(ids, status, push, &remote, no_color),
+        Some(Command::Create { name, description, no_desc, push, remote, connector_type: connector }) => task_create(name, description, no_desc, push, &remote, &connector),
+        Some(Command::Status { ids, status, push, remote, connector_type: connector, no_color }) => task_status(ids, status, push, &remote, &connector, no_color),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
-        Some(Command::Set { ids, prop_name, value, push, remote, no_color }) => task_set(ids, prop_name, value, push, &remote, no_color),
-        Some(Command::Replace { ids, prop_name, search, replace, regex, push, remote, no_color }) => task_replace(ids, prop_name, search, replace, regex, push, &remote, no_color),
+        Some(Command::Set { ids, prop_name, value, push, remote, connector_type: connector, no_color }) => task_set(ids, prop_name, value, push, &remote, &connector, no_color),
+        Some(Command::Replace { ids, prop_name, search, replace, regex, push, remote, connector_type: connector, no_color }) => task_replace(ids, prop_name, search, replace, regex, push, &remote, &connector, no_color),
         Some(Command::Unset { ids, prop_name }) => task_unset(ids, prop_name),
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Label { subcommand }) => task_label(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, status, limit, format, pretty }) => task_export(ids, status, limit, format, pretty),
-        Some(Command::Pull { ids, limit, status, remote, no_comments, no_labels }) => task_pull(ids, limit, status, &remote, no_comments, no_labels),
-        Some(Command::Push { ids, remote, no_comments, no_labels, no_color }) => task_push(ids, &remote, no_comments, no_labels, no_color),
+        Some(Command::Pull { ids, limit, status, remote, connector_type: connector, no_comments, no_labels }) => task_pull(ids, limit, status, &remote, &connector, no_comments, no_labels),
+        Some(Command::Push { ids, remote, connector_type: connector, no_comments, no_labels, no_color }) => task_push(ids, &remote, &connector, no_comments, no_labels, no_color),
         Some(Command::Stats { no_color }) => task_stats(no_color),
-        Some(Command::Delete { ids, status, push, remote }) => task_delete(ids, status, push, &remote),
+        Some(Command::Delete { ids, status, push, remote, connector_type: connector }) => task_delete(ids, status, push, &remote, &connector),
         Some(Command::Clear) => task_clear(),
         Some(Command::Config { subcommand }) => task_config(subcommand),
         None => false
@@ -615,16 +651,16 @@ fn main() -> ExitCode {
 
 fn task_comment(subcommand: CommentCommand) -> bool {
     match subcommand {
-        CommentCommand::Add { task_id, text, push, remote } => task_comment_add(task_id, text, push, &remote),
-        CommentCommand::Edit { task_id, comment_id, push, remote } => task_comment_edit(task_id, comment_id, push, &remote),
-        CommentCommand::Delete { task_id, comment_id, push, remote } => task_comment_delete(task_id, comment_id, push, &remote),
+        CommentCommand::Add { task_id, text, push, remote, connector_type: connector } => task_comment_add(task_id, text, push, &remote, &connector),
+        CommentCommand::Edit { task_id, comment_id, push, remote, connector_type: connector } => task_comment_edit(task_id, comment_id, push, &remote, &connector),
+        CommentCommand::Delete { task_id, comment_id, push, remote, connector_type: connector } => task_comment_delete(task_id, comment_id, push, &remote, &connector),
     }
 }
 
 fn task_label(subcommand: LabelCommand) -> bool {
     match subcommand {
-        LabelCommand::Add { task_id, name, color, description, push, remote } => task_label_add(task_id, name, color, description, push, &remote),
-        LabelCommand::Delete { task_id, name, push, remote } => task_label_delete(task_id, name, push, &remote),
+        LabelCommand::Add { task_id, name, color, description, push, remote, connector_type: connector } => task_label_add(task_id, name, color, description, push, &remote, &connector),
+        LabelCommand::Delete { task_id, name, push, remote, connector_type: connector } => task_label_delete(task_id, name, push, &remote, &connector),
     }
 }
 

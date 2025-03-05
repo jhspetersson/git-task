@@ -16,7 +16,14 @@ use crate::property::PropertyManager;
 use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_date, parse_ids, read_from_pipe, str_to_color, success_message};
 
-pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bool, push: bool, remote: &Option<String>) -> bool {
+pub(crate) fn task_create(
+    name: String,
+    description: Option<String>,
+    no_desc: bool,
+    push: bool,
+    remote: &Option<String>,
+    connector_type: &Option<String>
+) -> bool {
     let description = match description {
         Some(description) => description,
         None => match no_desc {
@@ -33,7 +40,7 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
             println!("Task ID {} created", task.get_id().unwrap());
             let mut success = false;
             if push {
-                match get_user_repo(remote) {
+                match get_user_repo(remote, connector_type) {
                     Ok((connector, user, repo)) => {
                         match connector.create_remote_task(&user, &repo, &task) {
                             Ok(id) => {
@@ -58,11 +65,18 @@ pub(crate) fn task_create(name: String, description: Option<String>, no_desc: bo
     }
 }
 
-pub(crate) fn task_status(ids: String, status: String, push: bool, remote: &Option<String>, no_color: bool) -> bool {
+pub(crate) fn task_status(
+    ids: String,
+    status: String,
+    push: bool,
+    remote: &Option<String>,
+    connector_type: &Option<String>,
+    no_color: bool,
+) -> bool {
     let status_manager = StatusManager::new();
     let status = status_manager.get_full_status_name(&status);
 
-    task_set(ids, "status".to_string(), status.clone(), push, remote, no_color)
+    task_set(ids, "status".to_string(), status.clone(), push, remote, connector_type, no_color)
 }
 
 pub(crate) fn task_get(id: String, prop_name: String) -> bool {
@@ -78,7 +92,15 @@ pub(crate) fn task_get(id: String, prop_name: String) -> bool {
     }
 }
 
-pub(crate) fn task_set(ids: String, prop_name: String, value: String, push: bool, remote: &Option<String>, no_color: bool) -> bool {
+pub(crate) fn task_set(
+    ids: String,
+    prop_name: String,
+    value: String,
+    push: bool,
+    remote: &Option<String>,
+    connector_type: &Option<String>,
+    no_color: bool
+) -> bool {
     let ids = parse_ids(ids);
     match prop_name.as_str() {
         "id" => {
@@ -88,7 +110,7 @@ pub(crate) fn task_set(ids: String, prop_name: String, value: String, push: bool
                         println!("Task ID {id} -> {value} updated");
 
                         if push {
-                            task_push(value.clone(), remote, false, false, no_color);
+                            task_push(value.clone(), remote, connector_type, false, false, no_color);
                         }
                     },
                     Err(e) => {
@@ -108,7 +130,7 @@ pub(crate) fn task_set(ids: String, prop_name: String, value: String, push: bool
                                 println!("Task ID {id} updated");
 
                                 if push {
-                                    task_push(id.to_string(), remote, false, false, no_color);
+                                    task_push(id.to_string(), remote, connector_type, false, false, no_color);
                                 }
                             },
                             Err(e) => {
@@ -130,7 +152,17 @@ pub(crate) fn task_set(ids: String, prop_name: String, value: String, push: bool
     true
 }
 
-pub(crate) fn task_replace(ids: String, prop_name: String, search: String, replace: String, regex: bool, push: bool, remote: &Option<String>, no_color: bool) -> bool {
+pub(crate) fn task_replace(
+    ids: String,
+    prop_name: String,
+    search: String,
+    replace: String,
+    regex: bool,
+    push: bool,
+    remote: &Option<String>,
+    connector_type: &Option<String>,
+    no_color: bool
+) -> bool {
     let ids = parse_ids(ids);
     let regex = match regex {
         true => Some(Box::new(Regex::new(search.as_str()).unwrap())),
@@ -149,7 +181,7 @@ pub(crate) fn task_replace(ids: String, prop_name: String, search: String, repla
                         Ok(_) => {
                             println!("Task ID {id} updated");
                             if push {
-                                task_push(id.to_string(), remote, false, false, no_color);
+                                task_push(id.to_string(), remote, connector_type, false, false, no_color);
                             }
                         },
                         Err(e) => eprintln!("ERROR: {e}")
@@ -276,10 +308,11 @@ pub(crate) fn task_pull(
     limit: Option<usize>,
     status: Option<String>,
     remote: &Option<String>,
+    connector_type: &Option<String>,
     no_comments: bool,
     no_labels: bool,
 ) -> bool {
-    match get_user_repo(remote) {
+    match get_user_repo(remote, connector_type) {
         Ok((connector, user, repo)) => {
             println!("Pulling tasks from {user}/{repo}...");
 
@@ -379,16 +412,18 @@ fn comments_are_equal(local_comments: &Option<Vec<Comment>>, remote_comments: &O
     )
 }
 
-fn get_user_repo(remote: &Option<String>) -> Result<(Box<&'static dyn RemoteConnector>, String, String), String> {
+fn get_user_repo(remote: &Option<String>,
+                 connector_type: &Option<String>
+) -> Result<(Box<&'static dyn RemoteConnector>, String, String), String> {
     match gittask::list_remotes(remote) {
         Ok(remotes) => {
-            let user_repo = get_matching_remote_connectors(remotes);
+            let user_repo = get_matching_remote_connectors(remotes, connector_type);
             if user_repo.is_empty() {
                 return Err("No passing remotes".to_string());
             }
 
             if user_repo.len() > 1 {
-                return Err("More than one passing remote found. Please specify with --remote option.".to_owned());
+                return Err("More than one passing remote found. Please specify with --remote and/or --connector option.".to_owned());
             }
 
             Ok(user_repo.first().unwrap().clone())
@@ -454,10 +489,17 @@ pub(crate) fn task_export(ids: Option<String>, status: Option<Vec<String>>, limi
     }
 }
 
-pub(crate) fn task_push(ids: String, remote: &Option<String>, no_comments: bool, no_labels: bool, no_color: bool) -> bool {
+pub(crate) fn task_push(
+    ids: String,
+    remote: &Option<String>,
+    connector_type: &Option<String>,
+    no_comments: bool,
+    no_labels: bool,
+    no_color: bool
+) -> bool {
     let ids = parse_ids(ids);
 
-    match get_user_repo(remote) {
+    match get_user_repo(remote, connector_type) {
         Ok((connector, user, repo)) => {
             let status_manager = StatusManager::new();
             let task_statuses = vec![
@@ -576,7 +618,13 @@ fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &S
     }
 }
 
-pub(crate) fn task_delete(ids: Option<String>, status: Option<Vec<String>>, push: bool, remote: &Option<String>) -> bool {
+pub(crate) fn task_delete(
+    ids: Option<String>,
+    status: Option<Vec<String>>,
+    push: bool,
+    remote: &Option<String>,
+    connector_type: &Option<String>,
+) -> bool {
     let ids = match status {
         Some(statuses) => {
             match gittask::list_tasks() {
@@ -607,7 +655,7 @@ pub(crate) fn task_delete(ids: Option<String>, status: Option<Vec<String>>, push
             println!("Task(s) {} deleted", ids.join(", "));
             let mut success = false;
             if push {
-                match get_user_repo(remote) {
+                match get_user_repo(remote, connector_type) {
                     Ok((connector, user, repo)) => {
                         for id in ids {
                             match connector.delete_remote_task(&user, &repo, &id.to_string()) {
