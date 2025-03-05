@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use chrono::DateTime;
 use gittask::{Task, Comment, Label};
 use jira_v3_openapi::{apis::configuration::Configuration, apis::issues_api};
 use jira_v3_openapi::apis::{issue_comments_api, issue_search_api};
 use regex::Regex;
+use serde_json::Value;
 use tokio::runtime::Runtime;
 
 use crate::connectors::{RemoteConnector, RemoteTaskState};
@@ -45,8 +47,9 @@ impl RemoteConnector for JiraRemoteConnector {
         state: RemoteTaskState,
         _task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         let jql = match state {
             RemoteTaskState::Open => format!("project = {} AND status != Done", project),
@@ -69,42 +72,41 @@ impl RemoteConnector for JiraRemoteConnector {
             ).await;
             match issues {
                 Ok(response) => {
-                    let tasks = response.issues.unwrap_or_default()
-                        .into_iter()
-                        .map(|issue| {
-                            let mut props = HashMap::new();
-                            let mut task_labels = None;
-                            if let Some(fields) = issue.fields {
-                                props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
-                                props.insert("description".to_string(), fields.get("description").unwrap().as_str().unwrap().to_string());
-                                props.insert("status".to_string(), fields.get("status").unwrap().as_str().unwrap().to_string());
-                                props.insert("created".to_string(), fields.get("created").unwrap().as_str().unwrap().to_string());
-                                props.insert("author".to_string(), fields.get("creator").unwrap().as_str().unwrap().to_string());
+                    let mut tasks = vec![];
+                    for issue in response.issues.unwrap_or_default() {
+                        let mut props = HashMap::new();
+                        let mut task_labels = None;
+                        if let Some(fields) = issue.fields {
+                            props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
+                            props.insert("description".to_string(), parse_description(fields.get("description").unwrap()));
+                            props.insert("status".to_string(), parse_status(fields.get("status").unwrap()));
+                            props.insert("created".to_string(), parse_to_unix_timestamp(fields.get("created").unwrap().as_str().unwrap()).unwrap());
+                            props.insert("author".to_string(), parse_creator(fields.get("creator").unwrap()));
 
-                                if with_labels {
-                                    if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
-                                        task_labels = Some(labels.iter().map(|v| {
-                                            Label::new(v.as_str().unwrap().to_string(), None, None)
-                                        }).collect());
-                                    }
+                            if with_labels {
+                                if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
+                                    task_labels = Some(labels.iter().map(|v| {
+                                        Label::new(v.as_str().unwrap().to_string(), None, None)
+                                    }).collect());
                                 }
                             }
+                        }
 
-                            let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap();
+                        let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap();
 
-                            if with_comments {
-                                if let Ok(comments) = RUNTIME.block_on(list_issue_comments(&config, project, &task.get_id().unwrap())) {
-                                    task.set_comments(comments);
-                                }
+                        if with_comments {
+                            if let Ok(comments) = list_issue_comments(&config, project, &task.get_id().unwrap()).await {
+                                task.set_comments(comments);
                             }
+                        }
 
-                            if let Some(labels) = task_labels {
-                                task.set_labels(labels);
-                            }
+                        if let Some(labels) = task_labels {
+                            task.set_labels(labels);
+                        }
 
-                            task
-                        })
-                        .collect();
+                        tasks.push(task);
+                    }
+
                     Ok(tasks)
                 },
                 Err(e) => Err(e.to_string()),
@@ -121,8 +123,9 @@ impl RemoteConnector for JiraRemoteConnector {
         with_labels: bool,
         _task_statuses: &Vec<String>
     ) -> Result<Task, String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         RUNTIME.block_on(async {
             match issues_api::get_issue(
@@ -179,8 +182,9 @@ impl RemoteConnector for JiraRemoteConnector {
         project: &String,
         task: &Task
     ) -> Result<String, String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         RUNTIME.block_on(async {
             let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
@@ -223,8 +227,9 @@ impl RemoteConnector for JiraRemoteConnector {
         task_id: &String,
         comment: &Comment
     ) -> Result<String, String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         RUNTIME.block_on(async {
             let comment_body = jira_v3_openapi::models::Comment {
@@ -257,8 +262,9 @@ impl RemoteConnector for JiraRemoteConnector {
         task_id: &String,
         label: &Label,
     ) -> Result<(), String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         RUNTIME.block_on(async {
             let issue_result = issues_api::get_issue(
@@ -325,8 +331,9 @@ impl RemoteConnector for JiraRemoteConnector {
         labels: Option<&Vec<Label>>,
         state: RemoteTaskState
     ) -> Result<(), String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         RUNTIME.block_on(async {
             let mut fields = HashMap::new();
@@ -390,8 +397,9 @@ impl RemoteConnector for JiraRemoteConnector {
         comment_id: &String,
         text: &String
     ) -> Result<(), String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         RUNTIME.block_on(async {
             let comment = jira_v3_openapi::models::Comment {
@@ -420,8 +428,9 @@ impl RemoteConnector for JiraRemoteConnector {
         project: &String,
         task_id: &String
     ) -> Result<(), String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         RUNTIME.block_on(async {
             match issues_api::delete_issue(
@@ -442,8 +451,9 @@ impl RemoteConnector for JiraRemoteConnector {
         task_id: &String,
         comment_id: &String
     ) -> Result<(), String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         RUNTIME.block_on(async {
             match issue_comments_api::delete_comment(
@@ -465,8 +475,9 @@ impl RemoteConnector for JiraRemoteConnector {
         task_id: &String,
         name: &String,
     ) -> Result<(), String> {
+        let user = get_jira_user().unwrap();
         let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, token);
+        let config = get_configuration(domain, user, token);
 
         RUNTIME.block_on(async {
             let issue_result = issues_api::get_issue(
@@ -556,6 +567,16 @@ fn get_token_from_env() -> Option<String> {
     std::env::var("JIRA_TOKEN").or_else(|_| std::env::var("JIRA_API_TOKEN")).ok()
 }
 
+fn get_jira_user() -> Option<String> {
+    match gittask::get_config_value("task.jira.user") {
+        Ok(email) => Some(email),
+        _ => match std::env::var("JIRA_USER") {
+            Ok(user) => Some(user),
+            Err(_) => None
+        }
+    }
+}
+
 fn get_base_url() -> Option<String> {
     let mut result = match gittask::get_config_value("task.jira.url") {
         Ok(url) => url,
@@ -572,9 +593,9 @@ fn get_base_url() -> Option<String> {
     Some(result)
 }
 
-fn get_configuration(domain: &String, token: String) -> Configuration {
+fn get_configuration(domain: &String, email: String, token: String) -> Configuration {
     let mut config = Configuration::new();
-    config.bearer_access_token = Some(token);
+    config.basic_auth = Some((email, Some(token)));
     config.base_path = format!("https://{}.atlassian.net", domain);
     config
 }
@@ -585,4 +606,69 @@ fn issue_key_to_task_id(key: &String) -> String {
 
 fn task_id_to_issue_key(project: &String, id: &String) -> String {
     format!("{}-{}", project, id)
+}
+
+fn parse_description(description: &Value) -> String {
+    if let Value::Object(doc) = description {
+        if let Some(Value::String(doc_type)) = doc.get("type") {
+            if doc_type == "doc" {
+                if let Some(Value::Array(content)) = doc.get("content") {
+                    return content.iter().map(|v| {
+                        if let Value::Object(node) = v {
+                            if let Some(Value::String(node_type)) = node.get("type") {
+                                if node_type == "paragraph" {
+                                    if let Some(Value::Array(paragraph_content)) = node.get("content") {
+                                        return paragraph_content.iter().map(|v| {
+                                            if let Value::Object(paragraph_node) = v {
+                                                if let Some(Value::String(paragraph_node_type)) = paragraph_node.get("type") {
+                                                    if paragraph_node_type == "text" {
+                                                        if let Some(Value::String(text)) = paragraph_node.get("text") {
+                                                            return text.to_string();
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            "".to_string()
+                                        }).collect::<Vec<String>>().join(" ");
+                                    }
+                                }
+                            }
+                        }
+                        "".to_string()
+                    }).collect::<Vec<String>>().join("\n");
+                }
+            }
+        }
+    }
+
+    "".to_string()
+}
+
+fn parse_creator(creator: &Value) -> String {
+    if let Value::Object(creator) = creator {
+        if let Some(Value::String(display_name)) = creator.get("emailAddress") {
+            return display_name.to_string();
+        }
+    }
+
+    "".to_string()
+}
+
+fn parse_status(status: &Value) -> String {
+    if let Value::Object(status) = status {
+        if let Some(Value::String(status_name)) = status.get("name") {
+            return status_name.to_string();
+        }
+    }
+
+    "".to_string()
+}
+
+fn parse_to_unix_timestamp(date_str: &str) -> Result<String, String> {
+    let dt = DateTime::parse_from_str(date_str, "%Y-%m-%dT%H:%M:%S%.3f%z")
+        .map_err(|e| e.to_string())?;
+
+    let timestamp = dt.timestamp();
+
+    Ok(timestamp.to_string())
 }
