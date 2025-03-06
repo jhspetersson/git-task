@@ -6,7 +6,6 @@ use gittask::{Task, Comment, Label};
 use jira_v3_openapi::{apis::configuration::Configuration, apis::issues_api};
 use jira_v3_openapi::apis::{issue_comments_api, issue_search_api};
 use regex::Regex;
-use serde_json::Value;
 use tokio::runtime::Runtime;
 
 use crate::connectors::{RemoteConnector, RemoteTaskState};
@@ -47,9 +46,7 @@ impl RemoteConnector for JiraRemoteConnector {
         state: RemoteTaskState,
         _task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         let jql = match state {
             RemoteTaskState::Open => format!("project = {} AND status != Done", project),
@@ -123,9 +120,7 @@ impl RemoteConnector for JiraRemoteConnector {
         with_labels: bool,
         _task_statuses: &Vec<String>
     ) -> Result<Task, String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             match issues_api::get_issue(
@@ -143,10 +138,10 @@ impl RemoteConnector for JiraRemoteConnector {
                     let mut task_labels = None;
                     if let Some(fields) = issue.fields {
                         props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
-                        props.insert("description".to_string(), fields.get("description").unwrap().as_str().unwrap().to_string());
-                        props.insert("status".to_string(), fields.get("status").unwrap().as_str().unwrap().to_string());
-                        props.insert("created".to_string(), fields.get("created").unwrap().as_str().unwrap().to_string());
-                        props.insert("author".to_string(), fields.get("creator").unwrap().as_str().unwrap().to_string());
+                        props.insert("description".to_string(), parse_description(fields.get("description").unwrap()));
+                        props.insert("status".to_string(), parse_status(fields.get("status").unwrap()));
+                        props.insert("created".to_string(), parse_to_unix_timestamp(fields.get("created").unwrap().as_str().unwrap())?);
+                        props.insert("author".to_string(), parse_creator(fields.get("creator").unwrap()));
 
                         if with_labels {
                             if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
@@ -182,9 +177,7 @@ impl RemoteConnector for JiraRemoteConnector {
         project: &String,
         task: &Task
     ) -> Result<String, String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
@@ -227,9 +220,7 @@ impl RemoteConnector for JiraRemoteConnector {
         task_id: &String,
         comment: &Comment
     ) -> Result<String, String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             let comment_body = jira_v3_openapi::models::Comment {
@@ -262,9 +253,7 @@ impl RemoteConnector for JiraRemoteConnector {
         task_id: &String,
         label: &Label,
     ) -> Result<(), String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             let issue_result = issues_api::get_issue(
@@ -331,9 +320,7 @@ impl RemoteConnector for JiraRemoteConnector {
         labels: Option<&Vec<Label>>,
         state: RemoteTaskState
     ) -> Result<(), String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             let mut fields = HashMap::new();
@@ -397,9 +384,7 @@ impl RemoteConnector for JiraRemoteConnector {
         comment_id: &String,
         text: &String
     ) -> Result<(), String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             let comment = jira_v3_openapi::models::Comment {
@@ -428,9 +413,7 @@ impl RemoteConnector for JiraRemoteConnector {
         project: &String,
         task_id: &String
     ) -> Result<(), String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             match issues_api::delete_issue(
@@ -451,9 +434,7 @@ impl RemoteConnector for JiraRemoteConnector {
         task_id: &String,
         comment_id: &String
     ) -> Result<(), String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             match issue_comments_api::delete_comment(
@@ -475,9 +456,7 @@ impl RemoteConnector for JiraRemoteConnector {
         task_id: &String,
         name: &String,
     ) -> Result<(), String> {
-        let user = get_jira_user().unwrap();
-        let token = get_token_from_env().unwrap();
-        let config = get_configuration(domain, user, token);
+        let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             let issue_result = issues_api::get_issue(
@@ -563,16 +542,18 @@ async fn list_issue_comments(config: &Configuration, project: &String, task_id: 
     }
 }
 
-fn get_token_from_env() -> Option<String> {
-    std::env::var("JIRA_TOKEN").or_else(|_| std::env::var("JIRA_API_TOKEN")).ok()
+fn get_token_from_env() -> Result<String, String> {
+    std::env::var("JIRA_TOKEN")
+        .or_else(|_| std::env::var("JIRA_API_TOKEN"))
+        .map_err(|_| "No JIRA_TOKEN nor JIRA_API_TOKEN env variable set".to_string())
 }
 
-fn get_jira_user() -> Option<String> {
+fn get_jira_user() -> Result<String, String> {
     match gittask::get_config_value("task.jira.user") {
-        Ok(email) => Some(email),
+        Ok(email) => Ok(email),
         _ => match std::env::var("JIRA_USER") {
-            Ok(user) => Some(user),
-            Err(_) => None
+            Ok(user) => Ok(user),
+            Err(_) => Err("Unknown JIRA user: set up task.jira.user config option or JIRA_USER env variable".to_string())
         }
     }
 }
@@ -593,11 +574,14 @@ fn get_base_url() -> Option<String> {
     Some(result)
 }
 
-fn get_configuration(domain: &String, email: String, token: String) -> Configuration {
+fn get_configuration(domain: &String) -> Result<Configuration, String> {
+    let email = get_jira_user()?;
+    let token = get_token_from_env()?;
+
     let mut config = Configuration::new();
     config.basic_auth = Some((email, Some(token)));
     config.base_path = format!("https://{}.atlassian.net", domain);
-    config
+    Ok(config)
 }
 
 fn issue_key_to_task_id(key: &String) -> String {
@@ -608,21 +592,21 @@ fn task_id_to_issue_key(project: &String, id: &String) -> String {
     format!("{}-{}", project, id)
 }
 
-fn parse_description(description: &Value) -> String {
-    if let Value::Object(doc) = description {
-        if let Some(Value::String(doc_type)) = doc.get("type") {
+fn parse_description(description: &serde_json::Value) -> String {
+    if let serde_json::Value::Object(doc) = description {
+        if let Some(serde_json::Value::String(doc_type)) = doc.get("type") {
             if doc_type == "doc" {
-                if let Some(Value::Array(content)) = doc.get("content") {
+                if let Some(serde_json::Value::Array(content)) = doc.get("content") {
                     return content.iter().map(|v| {
-                        if let Value::Object(node) = v {
-                            if let Some(Value::String(node_type)) = node.get("type") {
+                        if let serde_json::Value::Object(node) = v {
+                            if let Some(serde_json::Value::String(node_type)) = node.get("type") {
                                 if node_type == "paragraph" {
-                                    if let Some(Value::Array(paragraph_content)) = node.get("content") {
+                                    if let Some(serde_json::Value::Array(paragraph_content)) = node.get("content") {
                                         return paragraph_content.iter().map(|v| {
-                                            if let Value::Object(paragraph_node) = v {
-                                                if let Some(Value::String(paragraph_node_type)) = paragraph_node.get("type") {
+                                            if let serde_json::Value::Object(paragraph_node) = v {
+                                                if let Some(serde_json::Value::String(paragraph_node_type)) = paragraph_node.get("type") {
                                                     if paragraph_node_type == "text" {
-                                                        if let Some(Value::String(text)) = paragraph_node.get("text") {
+                                                        if let Some(serde_json::Value::String(text)) = paragraph_node.get("text") {
                                                             return text.to_string();
                                                         }
                                                     }
@@ -644,9 +628,9 @@ fn parse_description(description: &Value) -> String {
     "".to_string()
 }
 
-fn parse_creator(creator: &Value) -> String {
-    if let Value::Object(creator) = creator {
-        if let Some(Value::String(display_name)) = creator.get("emailAddress") {
+fn parse_creator(creator: &serde_json::Value) -> String {
+    if let serde_json::Value::Object(creator) = creator {
+        if let Some(serde_json::Value::String(display_name)) = creator.get("emailAddress") {
             return display_name.to_string();
         }
     }
@@ -654,9 +638,9 @@ fn parse_creator(creator: &Value) -> String {
     "".to_string()
 }
 
-fn parse_status(status: &Value) -> String {
-    if let Value::Object(status) = status {
-        if let Some(Value::String(status_name)) = status.get("name") {
+fn parse_status(status: &serde_json::Value) -> String {
+    if let serde_json::Value::Object(status) = status {
+        if let Some(serde_json::Value::String(status_name)) = status.get("name") {
             return status_name.to_string();
         }
     }
