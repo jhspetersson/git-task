@@ -238,7 +238,7 @@ async fn list_issues(
         count += 1;
         let mut props = HashMap::new();
         props.insert(String::from("name"), issue.title);
-        props.insert(String::from("status"), if issue.state == IssueState::Open { task_statuses.get(0).unwrap().clone() } else { task_statuses.get(1).unwrap().clone() } );
+        props.insert(String::from("status"), if issue.state == IssueState::Open { task_statuses.first().unwrap().clone() } else { task_statuses.last().unwrap().clone() } );
         props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
         props.insert(String::from("created"), issue.created_at.timestamp().to_string());
         props.insert(String::from("author"), issue.user.login);
@@ -304,7 +304,7 @@ async fn get_issue(
         Ok(issue) => {
             let mut props = HashMap::new();
             props.insert(String::from("name"), issue.title);
-            props.insert(String::from("status"), if issue.state == IssueState::Open { task_statuses.get(0).unwrap().clone() } else { task_statuses.get(1).unwrap().clone() } );
+            props.insert(String::from("status"), if issue.state == IssueState::Open { task_statuses.first().unwrap().clone() } else { task_statuses.last().unwrap().clone() } );
             props.insert(String::from("description"), issue.body.unwrap_or(String::new()));
             props.insert(String::from("created"), issue.created_at.timestamp().to_string());
             props.insert(String::from("author"), issue.user.login);

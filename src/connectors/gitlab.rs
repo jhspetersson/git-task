@@ -118,7 +118,7 @@ impl RemoteConnector for GitlabRemoteConnector {
             let mut props = HashMap::new();
             props.insert(String::from("name"), issue.title);
             props.insert(String::from("description"), issue.description);
-            props.insert(String::from("status"), if issue.state == "opened" { task_statuses.get(0).unwrap().clone() } else { task_statuses.get(1).unwrap().clone() });
+            props.insert(String::from("status"), if issue.state == "opened" { task_statuses.first().unwrap().clone() } else { task_statuses.last().unwrap().clone() });
             props.insert(String::from("created"), parse_datetime_to_seconds(issue.created_at));
             props.insert(String::from("author"), issue.author.username);
 
@@ -165,7 +165,7 @@ impl RemoteConnector for GitlabRemoteConnector {
                 let mut props = HashMap::new();
                 props.insert(String::from("name"), issue.title);
                 props.insert(String::from("description"), issue.description);
-                props.insert(String::from("status"), if issue.state == "opened" { task_statuses.get(0).unwrap().clone() } else { task_statuses.get(1).unwrap().clone() });
+                props.insert(String::from("status"), if issue.state == "opened" { task_statuses.first().unwrap().clone() } else { task_statuses.last().unwrap().clone() });
                 props.insert(String::from("created"), parse_datetime_to_seconds(issue.created_at));
                 props.insert(String::from("author"), issue.author.username);
 
