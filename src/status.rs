@@ -143,6 +143,29 @@ impl StatusManager {
         }
     }
 
+    pub fn get_in_progress_status(&self) -> Option<String> {
+        match gittask::get_config_value("task.status.in_progress") {
+            Ok(s) => Some(s),
+            _ => {
+                if self.statuses.len() == 3 {
+                    let starting_and_final_statuses= vec![
+                        self.get_starting_status(),
+                        self.get_final_status()
+                    ];
+                    self.statuses.iter().find_map(|saved_status| {
+                        if !starting_and_final_statuses.contains(&saved_status.name) {
+                            Some(saved_status.name.clone())
+                        } else {
+                            None
+                        }
+                    })
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
     pub fn get_final_status(&self) -> String {
         match gittask::get_config_value("task.status.closed") {
             Ok(s) => s,

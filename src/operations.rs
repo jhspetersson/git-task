@@ -319,10 +319,13 @@ pub(crate) fn task_pull(
             let ids = ids.map(parse_ids);
 
             let status_manager = StatusManager::new();
-            let task_statuses = vec![
+            let mut task_statuses = vec![
                 status_manager.get_starting_status(),
                 status_manager.get_final_status(),
             ];
+            if let Some(status_in_progress) = status_manager.get_in_progress_status() {
+                task_statuses.insert(1, status_in_progress);
+            }
 
             if ids.is_some() {
                 for id in ids.unwrap() {
@@ -502,10 +505,14 @@ pub(crate) fn task_push(
     match get_user_repo(remote, connector_type) {
         Ok((connector, user, repo)) => {
             let status_manager = StatusManager::new();
-            let task_statuses = vec![
+            let mut task_statuses = vec![
                 status_manager.get_starting_status(),
                 status_manager.get_final_status(),
             ];
+            if let Some(status_in_progress) = status_manager.get_in_progress_status() {
+                task_statuses.insert(1, status_in_progress);
+            }
+
             let no_color = check_no_color(no_color);
             for id in ids {
                 println!("Sync: task ID {id}");

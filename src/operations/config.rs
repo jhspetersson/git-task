@@ -10,6 +10,9 @@ pub(crate) fn task_config_get(param: String) -> bool {
         "task.jira.user" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("")))),
         "task.list.columns" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("id, created, status, name")))),
         "task.list.sort" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("id desc")))),
+        "task.status.open" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("OPEN")))),
+        "task.status.in_progress" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("IN_PROGRESS")))),
+        "task.status.closed" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("CLOSED")))),
         "task.ref" => success_message(format!("{}", gittask::get_ref_path())),
         _ => error_message(format!("Unknown parameter: {param}"))
     }
@@ -48,6 +51,12 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
             }
         },
         "task.status.open" => {
+            match gittask::set_config_value(&param, &value) {
+                Ok(_) => success_message(format!("{param} has been updated")),
+                Err(e) => error_message(format!("ERROR: {e}"))
+            }
+        },
+        "task.status.in_progress" => {
             match gittask::set_config_value(&param, &value) {
                 Ok(_) => success_message(format!("{param} has been updated")),
                 Err(e) => error_message(format!("ERROR: {e}"))
