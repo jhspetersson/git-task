@@ -21,6 +21,13 @@ impl RemoteConnector for JiraRemoteConnector {
         "jira"
     }
 
+    fn get_config_options(&self) -> Option<Vec<String>> {
+        Some(vec![
+            "task.jira.url".to_string(),
+            "task.jira.user".to_string(),
+        ])
+    }
+
     fn supports_remote(&self, _url: &str) -> Option<(String, String)> {
         if let Some(url) = get_base_url() {
             match Regex::new(r"https://([^/]+)\.atlassian\.net/jira/software/projects/([^/]+)").unwrap().captures(&url) {

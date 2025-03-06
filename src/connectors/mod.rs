@@ -16,6 +16,9 @@ pub enum RemoteTaskState {
 
 pub trait RemoteConnector {
     fn type_name(&self) -> &str;
+    fn get_config_options(&self) -> Option<Vec<String>> {
+        None
+    }
     fn supports_remote(&self, url: &str) -> Option<(String, String)>;
     fn list_remote_tasks(&self, user: &String, repo: &String, with_comments: bool, with_labels: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Result<Vec<Task>, String>;
     fn get_remote_task(&self, user: &String, repo: &String, task_id: &String, with_comments: bool, with_labels: bool, task_statuses: &Vec<String>) -> Result<Task, String>;
@@ -55,4 +58,12 @@ pub fn get_matching_remote_connectors(remotes: Vec<String>,
     }
 
     result
+}
+
+pub(crate) fn get_config_options_from_connectors() -> Vec<String> {
+    CONNECTORS
+        .iter()
+        .filter_map(|c| c.get_config_options())
+        .flatten()
+        .collect()
 }

@@ -55,6 +55,10 @@ impl RemoteConnector for GitlabRemoteConnector {
         "gitlab"
     }
 
+    fn get_config_options(&self) -> Option<Vec<String>> {
+        Some(vec!["task.gitlab.url".to_string()])
+    }
+
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
         match Regex::new(&(get_base_url() + "([a-z0-9-]+)/([a-z0-9-]+)\\.?")).unwrap().captures(url) {
             Some(caps) if caps.len() == 3 => {
@@ -418,7 +422,7 @@ fn get_token_from_env() -> Option<String> {
 
 fn get_base_url() -> String {
     let mut result = match gittask::get_config_value("task.gitlab.url") {
-        Ok(url) => url,
+        Ok(url) if !url.is_empty() => url,
         _ => match std::env::var("GITLAB_URL") {
             Ok(url) => url,
             _ => "https://gitlab.com".to_string(),
