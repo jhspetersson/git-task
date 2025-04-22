@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use chrono::DateTime;
-use gittask::{Task, Comment, Label};
 use jira_v3_openapi::{apis::configuration::Configuration, apis::issues_api};
 use jira_v3_openapi::apis::{issue_comments_api, issue_search_api};
 use regex::Regex;
 use tokio::runtime::Runtime;
+
+use gittask::{Task, Comment, Label};
 
 use crate::connectors::{RemoteConnector, RemoteTaskState};
 
@@ -195,9 +196,9 @@ impl RemoteConnector for JiraRemoteConnector {
                     ("summary".to_string(), serde_json::json!(
                         task.get_property("name").unwrap()
                     )),
-                    ("description".to_string(), serde_json::json!(
-                        task.get_property("description").unwrap()
-                    )),
+                    ("description".to_string(), 
+                        format_description(task.get_property("description").unwrap())
+                    ),
                     ("issuetype".to_string(), serde_json::json!({
                         "name": "Task"
                     })),
@@ -633,6 +634,24 @@ fn parse_description(description: &serde_json::Value) -> String {
     }
 
     "".to_string()
+}
+
+fn format_description(description: &String) -> serde_json::Value {
+    serde_json::json!({
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": description
+                    }
+                ]
+            }
+        ]
+    })
 }
 
 fn parse_creator(creator: &serde_json::Value) -> String {
