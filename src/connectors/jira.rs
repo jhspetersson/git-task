@@ -188,7 +188,7 @@ impl RemoteConnector for JiraRemoteConnector {
         let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
-            let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
+            let mut issue_details = jira_v3_openapi::models::IssueUpdateDetails {
                 fields: Some(std::collections::HashMap::from([
                     ("project".to_string(), serde_json::json!({
                         "key": project
@@ -196,7 +196,7 @@ impl RemoteConnector for JiraRemoteConnector {
                     ("summary".to_string(), serde_json::json!(
                         task.get_property("name").unwrap()
                     )),
-                    ("description".to_string(), 
+                    ("description".to_string(),
                         format_description(task.get_property("description").unwrap())
                     ),
                     ("issuetype".to_string(), serde_json::json!({
@@ -205,6 +205,12 @@ impl RemoteConnector for JiraRemoteConnector {
                 ])),
                 ..Default::default()
             };
+            
+            if let Some(labels) = task.get_labels() {
+                issue_details.fields.as_mut().unwrap().insert("labels".to_string(), serde_json::json!(
+                    labels.iter().map(|l| l.get_name()).collect::<Vec<String>>()
+                ));
+            }
 
             match issues_api::create_issue(&config, issue_details, None).await {
                 Ok(response) => {
