@@ -440,7 +440,7 @@ impl RemoteConnector for JiraRemoteConnector {
 
         RUNTIME.block_on(async {
             let comment = jira_v3_openapi::models::Comment {
-                body: Some(Some(serde_json::json!(text.clone()))),
+                body: Some(Some(format_adf(text))),
                 ..Default::default()
             };
 
