@@ -11,7 +11,8 @@ Local-first task manager/bug tracker within your git repository which can import
 [Installation](#installation)  
 [Concepts](#concepts)  
 [Commands](#commands)  
-[Gitlab support](#gitlab-support)  
+[Gitlab support](#gitlab-support)
+[JIRA support](#jira-support)
 
 
 ## Installation
@@ -366,6 +367,20 @@ For any operation you will need to set up `GITLAB_TOKEN` or `GITLAB_API_TOKEN` e
 For custom domains please set up `GITLAB_URL` variable. Alternatively you can set the custom domain in git config:
 
     git task config set task.gitlab.url gitlab.kitware.com
+
+## JIRA support
+
+Set up a Jira Cloud URL:
+
+    git task config set task.jira.url https://someuser.atlassian.net/jira/software/projects/GTPM
+
+Set up a Jira Cloud user:
+
+    git task config set task.jira.user someuser@example.com
+
+For any operation you will need to set up `JIRA_TOKEN` or `JIRA_API_TOKEN` environment variable.
+
+We also recommend setting up statuses as they are organized in Jira.
 
 ## License
 
