@@ -93,7 +93,6 @@ impl RemoteConnector for GithubRemoteConnector {
         }
     }
 
-    #[allow(unused_variables)]
     fn create_remote_label(&self, user: &String, repo: &String, task_id: &String, label: &Label) -> Result<(), String> {
         match get_token_from_env() {
             Some(_) => RUNTIME.block_on(
