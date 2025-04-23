@@ -54,13 +54,15 @@ impl RemoteConnector for JiraRemoteConnector {
         with_labels: bool,
         limit: Option<usize>,
         state: RemoteTaskState,
-        _task_statuses: &Vec<String>
+        task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
         let config = get_configuration(domain)?;
 
+        let done_status = "Done".to_string();
+        let last_status = task_statuses.last().unwrap_or_else(|| &done_status);
         let jql = match state {
-            RemoteTaskState::Open(_, _) => format!("project = {} AND status != Done", project),
-            RemoteTaskState::Closed(_, _) => format!("project = {} AND status = Done", project),
+            RemoteTaskState::Open(_, _) => format!("project = {} AND status != '{}'", project, last_status),
+            RemoteTaskState::Closed(_, _) => format!("project = {} AND status = '{}'", project, last_status),
             RemoteTaskState::All => format!("project = {}", project),
         };
         
