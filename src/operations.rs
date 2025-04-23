@@ -346,7 +346,7 @@ pub(crate) fn task_pull(
                     Some(s) => {
                         let status = status_manager.get_full_status_name(&s);
                         let is_done = status_manager.get_property(&status, "is_done").unwrap().parse::<bool>().unwrap();
-                        if is_done { RemoteTaskState::Closed } else { RemoteTaskState::Open }
+                        if is_done { RemoteTaskState::Closed(status.clone(), status) } else { RemoteTaskState::Open(status.clone(), status) }
                     },
                     None => RemoteTaskState::All
                 };
@@ -534,7 +534,11 @@ pub(crate) fn task_push(
                             if local_status != remote_status {
                                 println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
                             }
-                            let state = if status_manager.is_done(local_status) { RemoteTaskState::Closed } else { RemoteTaskState::Open };
+                            let state = if status_manager.is_done(local_status) { 
+                                RemoteTaskState::Closed(local_status.to_string(), remote_status.to_string()) 
+                            } else { 
+                                RemoteTaskState::Open(local_status.to_string(), remote_status.to_string()) 
+                            };
 
                             match connector.update_remote_task(
                                 &user,

@@ -81,9 +81,9 @@ impl RemoteConnector for GitlabRemoteConnector {
         task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
         let state = match state {
-            RemoteTaskState::Open => Some(IssueState::Opened),
-            RemoteTaskState::Closed => Some(IssueState::Closed),
-            RemoteTaskState::All => None
+            RemoteTaskState::Open(_, _) => Some(IssueState::Opened),
+            RemoteTaskState::Closed(_, _) => Some(IssueState::Closed),
+            RemoteTaskState::All => None,
         };
         let client = get_client(get_token_from_env().unwrap().as_str());
 
@@ -281,7 +281,7 @@ impl RemoteConnector for GitlabRemoteConnector {
             let labels = labels.iter().map(|l| l.get_name()).collect::<Vec<_>>();
             endpoint.labels(labels);
         }
-        endpoint.state_event(if state == RemoteTaskState::Open { IssueStateEvent::Reopen } else { IssueStateEvent::Close });
+        endpoint.state_event(if let RemoteTaskState::Open(_, _) = state { IssueStateEvent::Reopen } else { IssueStateEvent::Close });
         let endpoint = endpoint.build().unwrap();
         match endpoint.query(&client) {
             Ok(issue) => {

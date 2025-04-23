@@ -4,12 +4,14 @@ use std::sync::LazyLock;
 use chrono::DateTime;
 use jira_v3_openapi::{apis::configuration::Configuration, apis::issues_api};
 use jira_v3_openapi::apis::{issue_comments_api, issue_search_api};
+use jira_v3_openapi::models::IssueTransition;
 use regex::Regex;
 use tokio::runtime::Runtime;
 
 use gittask::{Task, Comment, Label};
 
 use crate::connectors::{RemoteConnector, RemoteTaskState};
+use crate::util::error_message;
 
 pub struct JiraRemoteConnector;
 
@@ -57,8 +59,8 @@ impl RemoteConnector for JiraRemoteConnector {
         let config = get_configuration(domain)?;
 
         let jql = match state {
-            RemoteTaskState::Open => format!("project = {} AND status != Done", project),
-            RemoteTaskState::Closed => format!("project = {} AND status = Done", project),
+            RemoteTaskState::Open(_, _) => format!("project = {} AND status != Done", project),
+            RemoteTaskState::Closed(_, _) => format!("project = {} AND status = Done", project),
             RemoteTaskState::All => format!("project = {}", project),
         };
         
@@ -344,7 +346,7 @@ impl RemoteConnector for JiraRemoteConnector {
         project: &String,
         task: &Task,
         labels: Option<&Vec<Label>>,
-        _state: RemoteTaskState
+        state: RemoteTaskState
     ) -> Result<(), String> {
         let config = get_configuration(domain)?;
 
@@ -364,7 +366,7 @@ impl RemoteConnector for JiraRemoteConnector {
                 ..Default::default()
             };
 
-            match issues_api::edit_issue(
+            let result = match issues_api::edit_issue(
                 &config,
                 task_id_to_issue_key(project, &task.get_id().unwrap()).as_str(),
                 issue_details,
@@ -377,7 +379,52 @@ impl RemoteConnector for JiraRemoteConnector {
                 Ok(_) => Ok(()),
                 Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => Ok(()),
                 Err(e) => Err(format!("Failed to update issue: {}", e))
+            };
+            
+            if result.is_ok() {
+                let (local_status, remote_status) = match state {
+                    RemoteTaskState::Open(s1, s2) => (s1, s2),
+                    RemoteTaskState::Closed(s1, s2) => (s1, s2),
+                    _ => ("".to_string(), "".to_string())
+                };
+                if local_status != remote_status {
+                    if let Ok(transitions) = issues_api::get_transitions(
+                        &config,
+                        task_id_to_issue_key(project, &task.get_id().unwrap()).as_str(),
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                    ).await {
+                        for transition in transitions.transitions.unwrap_or_else(|| vec![]) {
+                            if let Some(target_status) = transition.to {
+                                if target_status.name.unwrap() == local_status {
+                                    let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
+                                        transition: Some(IssueTransition {
+                                            id: Some(transition.id.unwrap()),
+                                            ..Default::default()    
+                                        }),
+                                        ..Default::default()
+                                    };
+                                    
+                                    let _ = issues_api::do_transition(
+                                        &config,
+                                        task_id_to_issue_key(project, &task.get_id().unwrap()).as_str(),
+                                        issue_details,
+                                    ).await;                                    
+                                    
+                                    break;
+                                }
+                            }
+                        }
+                    } else {
+                        error_message("Failed to get transitions.".to_string());
+                    }
+                }
             }
+            
+            result
         })
     }
 

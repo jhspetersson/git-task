@@ -47,8 +47,8 @@ impl RemoteConnector for GithubRemoteConnector {
         task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
         let state = match state {
-            RemoteTaskState::Open => State::Open,
-            RemoteTaskState::Closed => State::Closed,
+            RemoteTaskState::Open(_, _) => State::Open,
+            RemoteTaskState::Closed(_, _) => State::Closed,
             RemoteTaskState::All => State::All,
         };
         RUNTIME.block_on(
@@ -117,7 +117,7 @@ impl RemoteConnector for GithubRemoteConnector {
         match get_token_from_env() {
             Some(_) => {
                 let state = match state {
-                    RemoteTaskState::Closed => IssueState::Closed,
+                    RemoteTaskState::Closed(_, _) => IssueState::Closed,
                     _ => IssueState::Open,
                 };
                 RUNTIME.block_on(

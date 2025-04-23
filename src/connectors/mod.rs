@@ -7,11 +7,11 @@ use crate::connectors::github::GithubRemoteConnector;
 use crate::connectors::gitlab::GitlabRemoteConnector;
 use crate::connectors::jira::JiraRemoteConnector;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum RemoteTaskState {
     All,
-    Open,
-    Closed,
+    Open(String, String),
+    Closed(String, String),
 }
 
 pub trait RemoteConnector {
