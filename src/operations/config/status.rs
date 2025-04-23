@@ -31,6 +31,7 @@ pub(crate) fn task_config_status_delete(name: String, force: bool) -> bool {
 
 pub(crate) fn task_config_status_get(name: String, param: String) -> bool {
     let status_manager = StatusManager::new();
+    let name = status_manager.get_full_status_name(&name);
     match status_manager.get_property(&name, &param) {
         Some(value) => success_message(value),
         None => error_message(format!("Unknown status {name} or property: {param}"))
@@ -39,6 +40,7 @@ pub(crate) fn task_config_status_get(name: String, param: String) -> bool {
 
 pub(crate) fn task_config_status_set(name: String, param: String, value: String) -> bool {
     let mut status_manager = StatusManager::new();
+    let name = status_manager.get_full_status_name(&name);
     match status_manager.set_property(&name, &param, &value) {
         Ok(prev_value) => {
             println!("{name} {param} has been updated");
