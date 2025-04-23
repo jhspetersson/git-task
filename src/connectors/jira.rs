@@ -61,6 +61,14 @@ impl RemoteConnector for JiraRemoteConnector {
             RemoteTaskState::Closed => format!("project = {} AND status = Done", project),
             RemoteTaskState::All => format!("project = {}", project),
         };
+        
+        let mut field_list = vec!["summary".to_string(), "description".to_string(), "status".to_string(), "created".to_string(), "creator".to_string()];
+        if with_comments {
+            field_list.push("comment".to_string());
+        }
+        if with_labels {
+            field_list.push("labels".to_string());
+        }
 
         RUNTIME.block_on(async {
             let issues = issue_search_api::search_for_issues_using_jql(
@@ -69,7 +77,7 @@ impl RemoteConnector for JiraRemoteConnector {
                 None,
                 if let Some(limit) = limit { Some(limit as i32) } else { None },
                 None,
-                Some(vec!["summary".to_string(), "description".to_string(), "status".to_string(), "created".to_string(), "creator".to_string()]),
+                Some(field_list),
                 None,
                 None,
                 None,
@@ -80,7 +88,6 @@ impl RemoteConnector for JiraRemoteConnector {
                     let mut tasks = vec![];
                     for issue in response.issues.unwrap_or_default() {
                         let mut props = HashMap::new();
-                        let mut task_labels = None;
                         if let Some(fields) = issue.fields {
                             props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
                             props.insert("description".to_string(), parse_description(fields.get("description").unwrap()));
@@ -88,28 +95,43 @@ impl RemoteConnector for JiraRemoteConnector {
                             props.insert("created".to_string(), parse_to_unix_timestamp(fields.get("created").unwrap().as_str().unwrap()).unwrap());
                             props.insert("author".to_string(), parse_creator(fields.get("creator").unwrap()));
 
-                            if with_labels {
-                                if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
-                                    task_labels = Some(labels.iter().map(|v| {
-                                        Label::new(v.as_str().unwrap().to_string(), None, None)
-                                    }).collect());
+                            let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap();
+
+                            if with_comments {
+                                if let Some(comment) = fields.get("comment") {
+                                    if let Some(comment_obj) = comment.as_object() {
+                                        if let Some(serde_json::Value::Array(comments)) = comment_obj.get("comments") {
+                                            let task_comments = comments.iter().map(|v| {
+                                                if let serde_json::Value::Object(comment) = v {
+                                                    Comment::new(
+                                                        comment.get("id").unwrap().as_str().unwrap().to_string(),
+                                                        HashMap::from([
+                                                            ("author".to_string(), parse_author(comment.get("author").unwrap())),
+                                                            ("created".to_string(), parse_to_unix_timestamp(comment.get("created").unwrap().as_str().unwrap()).unwrap()),
+                                                        ]),
+                                                        parse_description(comment.get("body").unwrap())
+                                                    )
+                                                } else {
+                                                    Comment::new(String::new(), HashMap::new(), String::new())
+                                                }
+                                            }).collect();
+                                            task.set_comments(task_comments);
+                                        }
+                                    }
                                 }
                             }
-                        }
 
-                        let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap();
-
-                        if with_comments {
-                            if let Ok(comments) = list_issue_comments(&config, project, &task.get_id().unwrap()).await {
-                                task.set_comments(comments);
+                            if with_labels {
+                                if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
+                                    let task_labels = labels.iter().map(|v| {
+                                        Label::new(v.as_str().unwrap().to_string(), None, None)
+                                    }).collect();
+                                    task.set_labels(task_labels);
+                                }
                             }
-                        }
 
-                        if let Some(labels) = task_labels {
-                            task.set_labels(labels);
+                            tasks.push(task);
                         }
-
-                        tasks.push(task);
                     }
 
                     Ok(tasks)
@@ -674,6 +696,16 @@ fn parse_status(status: &serde_json::Value) -> String {
     if let serde_json::Value::Object(status) = status {
         if let Some(serde_json::Value::String(status_name)) = status.get("name") {
             return status_name.to_string();
+        }
+    }
+
+    "".to_string()
+}
+
+fn parse_author(author: &serde_json::Value) -> String {
+    if let serde_json::Value::Object(author) = author {
+        if let Some(serde_json::Value::String(display_name)) = author.get("displayName") {
+            return display_name.to_string();
         }
     }
 
