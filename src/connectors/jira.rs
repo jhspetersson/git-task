@@ -306,7 +306,6 @@ impl RemoteConnector for JiraRemoteConnector {
                             current_labels.push(label_name);
 
                             let update_request = jira_v3_openapi::models::IssueUpdateDetails {
-                                update: None,
                                 fields: Some(std::collections::HashMap::from([
                                     ("labels".to_string(), serde_json::json!(current_labels))
                                 ])),
@@ -315,7 +314,7 @@ impl RemoteConnector for JiraRemoteConnector {
 
                             match issues_api::edit_issue(
                                 &config,
-                                task_id,
+                                task_id_to_issue_key(project, task_id).as_str(),
                                 update_request,
                                 None,
                                 None,
@@ -324,6 +323,7 @@ impl RemoteConnector for JiraRemoteConnector {
                                 None,
                             ).await {
                                 Ok(_) => Ok(()),
+                                Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => Ok(()),
                                 Err(e) => Err(format!("Failed to update labels: {}", e))
                             }
                         } else {
@@ -344,41 +344,19 @@ impl RemoteConnector for JiraRemoteConnector {
         project: &String,
         task: &Task,
         labels: Option<&Vec<Label>>,
-        state: RemoteTaskState
+        _state: RemoteTaskState
     ) -> Result<(), String> {
         let config = get_configuration(domain)?;
 
         RUNTIME.block_on(async {
             let mut fields = HashMap::new();
-
-            fields.insert("summary".to_string(),
-                          serde_json::json!(task.get_property("name").unwrap()));
-            fields.insert("description".to_string(),
-                          serde_json::json!(task.get_property("description").unwrap()));
-
+            fields.insert("summary".to_string(), serde_json::json!(task.get_property("name").unwrap()));
+            fields.insert("description".to_string(), format_adf(task.get_property("description").unwrap()));
+            
             if let Some(labels) = labels {
-                fields.insert(
-                    "labels".to_string(),
-                    serde_json::json!(
-                        labels.iter()
-                            .map(|l| l.get_name())
-                            .collect::<Vec<String>>()
-                    )
-                );
-            }
-
-            let transition = match state {
-                RemoteTaskState::Closed => Some(serde_json::json!({
-                    "id": "31" // Typically "31" is Close in Jira, but might need configuration
-                })),
-                RemoteTaskState::Open => Some(serde_json::json!({
-                    "id": "11" // Typically "11" is Reopen in Jira, but might need configuration
-                })),
-                _ => None
-            };
-
-            if let Some(transition_value) = transition {
-                fields.insert("transition".to_string(), transition_value);
+                fields.insert("labels".to_string(), serde_json::json!(
+                    labels.iter().map(|l| l.get_name()).collect::<Vec<String>>()
+                ));
             }
 
             let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
@@ -397,6 +375,7 @@ impl RemoteConnector for JiraRemoteConnector {
                 None,
             ).await {
                 Ok(_) => Ok(()),
+                Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => Ok(()),
                 Err(e) => Err(format!("Failed to update issue: {}", e))
             }
         })
@@ -528,6 +507,7 @@ impl RemoteConnector for JiraRemoteConnector {
                             None,
                         ).await {
                             Ok(_) => Ok(()),
+                            Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => Ok(()),
                             Err(e) => Err(format!("Failed to update labels: {}", e))
                         }
                     } else {
