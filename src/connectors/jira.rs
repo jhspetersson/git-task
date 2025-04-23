@@ -536,7 +536,6 @@ impl RemoteConnector for JiraRemoteConnector {
                             .collect();
 
                         let update_request = jira_v3_openapi::models::IssueUpdateDetails {
-                            update: None,
                             fields: Some(std::collections::HashMap::from([
                                 ("labels".to_string(), serde_json::json!(updated_labels))
                             ])),
@@ -545,7 +544,7 @@ impl RemoteConnector for JiraRemoteConnector {
 
                         match issues_api::edit_issue(
                             &config,
-                            task_id,
+                            task_id_to_issue_key(project, task_id).as_str(),
                             update_request,
                             None,
                             None,
