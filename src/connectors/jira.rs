@@ -90,7 +90,7 @@ impl RemoteConnector for JiraRemoteConnector {
                         let mut props = HashMap::new();
                         if let Some(fields) = issue.fields {
                             props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
-                            props.insert("description".to_string(), parse_description(fields.get("description").unwrap()));
+                            props.insert("description".to_string(), parse_adf(fields.get("description").unwrap()));
                             props.insert("status".to_string(), parse_status(fields.get("status").unwrap()));
                             props.insert("created".to_string(), parse_to_unix_timestamp(fields.get("created").unwrap().as_str().unwrap()).unwrap());
                             props.insert("author".to_string(), parse_creator(fields.get("creator").unwrap()));
@@ -98,26 +98,9 @@ impl RemoteConnector for JiraRemoteConnector {
                             let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap();
 
                             if with_comments {
-                                if let Some(comment) = fields.get("comment") {
-                                    if let Some(comment_obj) = comment.as_object() {
-                                        if let Some(serde_json::Value::Array(comments)) = comment_obj.get("comments") {
-                                            let task_comments = comments.iter().map(|v| {
-                                                if let serde_json::Value::Object(comment) = v {
-                                                    Comment::new(
-                                                        comment.get("id").unwrap().as_str().unwrap().to_string(),
-                                                        HashMap::from([
-                                                            ("author".to_string(), parse_author(comment.get("author").unwrap())),
-                                                            ("created".to_string(), parse_to_unix_timestamp(comment.get("created").unwrap().as_str().unwrap()).unwrap()),
-                                                        ]),
-                                                        parse_description(comment.get("body").unwrap())
-                                                    )
-                                                } else {
-                                                    Comment::new(String::new(), HashMap::new(), String::new())
-                                                }
-                                            }).collect();
-                                            task.set_comments(task_comments);
-                                        }
-                                    }
+                                if let Some(comments) = fields.get("comment") {
+                                    let task_comments = parse_comments(comments);
+                                    task.set_comments(task_comments);
                                 }
                             }
 
@@ -152,11 +135,19 @@ impl RemoteConnector for JiraRemoteConnector {
     ) -> Result<Task, String> {
         let config = get_configuration(domain)?;
 
+        let mut field_list = vec!["summary".to_string(), "description".to_string(), "status".to_string(), "created".to_string(), "creator".to_string()];
+        if with_comments {
+            field_list.push("comment".to_string());
+        }
+        if with_labels {
+            field_list.push("labels".to_string());
+        }
+
         RUNTIME.block_on(async {
             match issues_api::get_issue(
                 &config,
                 task_id_to_issue_key(project, task_id).as_str(),
-                Some(vec!["summary".to_string(), "description".to_string(), "status".to_string(), "created".to_string(), "creator".to_string()]),
+                Some(field_list),
                 None,
                 None,
                 None,
@@ -165,36 +156,35 @@ impl RemoteConnector for JiraRemoteConnector {
             ).await {
                 Ok(issue) => {
                     let mut props = HashMap::new();
-                    let mut task_labels = None;
                     if let Some(fields) = issue.fields {
                         props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
-                        props.insert("description".to_string(), parse_description(fields.get("description").unwrap()));
+                        props.insert("description".to_string(), parse_adf(fields.get("description").unwrap()));
                         props.insert("status".to_string(), parse_status(fields.get("status").unwrap()));
                         props.insert("created".to_string(), parse_to_unix_timestamp(fields.get("created").unwrap().as_str().unwrap())?);
                         props.insert("author".to_string(), parse_creator(fields.get("creator").unwrap()));
 
-                        if with_labels {
-                            if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
-                                task_labels = Some(labels.iter().map(|v| {
-                                    Label::new(v.as_str().unwrap().to_string(), None, None)
-                                }).collect());
+                        let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props)?;
+
+                        if with_comments {
+                            if let Some(comments) = fields.get("comment") {
+                                let task_comments = parse_comments(comments);
+                                task.set_comments(task_comments);
                             }
                         }
-                    }
 
-                    let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props)?;
-
-                    if with_comments {
-                        if let Ok(comments) = list_issue_comments(&config, project, task_id).await {
-                            task.set_comments(comments);
+                        if with_labels {
+                            if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
+                                let task_labels = labels.iter().map(|v| {
+                                    Label::new(v.as_str().unwrap().to_string(), None, None)
+                                }).collect();
+                                task.set_labels(task_labels);
+                            }
                         }
-                    }
 
-                    if let Some(labels) = task_labels {
-                        task.set_labels(labels);
-                    }
-
-                    Ok(task)
+                        Ok(task)
+                    } else {
+                        Err("Failed to get issue: no fields returned.".to_string())
+                    }                    
                 },
                 Err(e) => Err(e.to_string()),
             }
@@ -219,7 +209,7 @@ impl RemoteConnector for JiraRemoteConnector {
                         task.get_property("name").unwrap()
                     )),
                     ("description".to_string(),
-                        format_description(task.get_property("description").unwrap())
+                        format_adf(task.get_property("description").unwrap())
                     ),
                     ("issuetype".to_string(), serde_json::json!({
                         "name": "Task"
@@ -260,7 +250,7 @@ impl RemoteConnector for JiraRemoteConnector {
 
         RUNTIME.block_on(async {
             let comment_body = jira_v3_openapi::models::Comment {
-                body: Some(Some(serde_json::json!(comment.get_text().clone()))),
+                body: Some(Some(format_adf(&comment.get_text()))),
                 ..Default::default()
             };
 
@@ -550,34 +540,6 @@ impl RemoteConnector for JiraRemoteConnector {
     }
 }
 
-async fn list_issue_comments(config: &Configuration, project: &String, task_id: &String) -> Result<Vec<Comment>, ()> {
-    let comments_result = issue_comments_api::get_comments(
-        config,
-        task_id_to_issue_key(project, task_id).as_str(),
-        None,
-        None,
-        None,
-        None,
-    ).await;
-
-    match comments_result {
-        Ok(comments_response) => {
-            let comments = comments_response.comments.unwrap_or_default().into_iter().map(|comment| {
-                Comment::new(
-                    comment.id.unwrap(),
-                    HashMap::from([
-                        ("author".to_string(), comment.author.unwrap().display_name.unwrap()),
-                        ("created".to_string(), comment.created.unwrap().to_string()),
-                    ]),
-                    comment.body.unwrap().map_or_else(|| String::new(), |s| s.to_string())
-                )
-            }).collect();
-            Ok(comments)
-        },
-        Err(_) => Err(()),
-    }
-}
-
 fn get_token_from_env() -> Result<String, String> {
     std::env::var("JIRA_TOKEN")
         .or_else(|_| std::env::var("JIRA_API_TOKEN"))
@@ -628,7 +590,7 @@ fn task_id_to_issue_key(project: &String, id: &String) -> String {
     format!("{}-{}", project, id)
 }
 
-fn parse_description(description: &serde_json::Value) -> String {
+fn parse_adf(description: &serde_json::Value) -> String {
     if let serde_json::Value::Object(doc) = description {
         if let Some(serde_json::Value::String(doc_type)) = doc.get("type") {
             if doc_type == "doc" {
@@ -664,7 +626,7 @@ fn parse_description(description: &serde_json::Value) -> String {
     "".to_string()
 }
 
-fn format_description(description: &String) -> serde_json::Value {
+fn format_adf(text: &String) -> serde_json::Value {
     serde_json::json!({
         "type": "doc",
         "version": 1,
@@ -674,7 +636,7 @@ fn format_description(description: &String) -> serde_json::Value {
                 "content": [
                     {
                         "type": "text",
-                        "text": description
+                        "text": text
                     }
                 ]
             }
@@ -719,4 +681,28 @@ fn parse_to_unix_timestamp(date_str: &str) -> Result<String, String> {
     let timestamp = dt.timestamp();
 
     Ok(timestamp.to_string())
+}
+
+fn parse_comments(comments: &serde_json::Value) -> Vec<Comment> {
+    if let serde_json::Value::Object(comments) = comments {
+        if let Some(serde_json::Value::Array(comments_array)) = comments.get("comments") {
+            return comments_array.iter().filter_map(|v| {
+                match v {
+                    serde_json::Value::Object(comment) => {
+                        Some(Comment::new(
+                            comment.get("id").unwrap().as_str().unwrap().to_string(),
+                            HashMap::from([
+                                ("author".to_string(), parse_author(comment.get("author").unwrap())),
+                                ("created".to_string(), parse_to_unix_timestamp(comment.get("created").unwrap().as_str().unwrap()).unwrap()),
+                            ]),
+                            parse_adf(comment.get("body").unwrap())
+                        ))
+                    }
+                    _ => { None }
+                }
+            }).collect();
+        }
+    }
+
+    vec![]
 }
