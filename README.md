@@ -11,7 +11,7 @@ Local-first task manager/bug tracker within your git repository which can import
 [Installation](#installation)  
 [Concepts](#concepts)  
 [Commands](#commands)  
-[Gitlab support](#gitlab-support)
+[Gitlab support](#gitlab-support)  
 [JIRA support](#jira-support)
 
 
