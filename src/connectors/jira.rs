@@ -495,7 +495,6 @@ impl RemoteConnector for JiraRemoteConnector {
                 &config,
                 task_id_to_issue_key(project, task_id).as_str(),
                 comment_id,
-                None
             ).await {
                 Ok(_) => Ok(()),
                 Err(e) => Err(format!("Failed to delete comment: {}", e))
