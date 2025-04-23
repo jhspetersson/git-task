@@ -170,9 +170,10 @@ Add and remove labels from tasks. Labels can be synchronized with GitHub and Git
 
 ### comment
 
-Add, edit or remove comments:
+Add, set, edit or remove comments:
 
     git task comment add 1 "This is a comment to my first task"
+    git task comment set 1 1 "Old comment has been replaced with this one!"    
     git task comment edit 1 1
     git task comment del 1 1
 

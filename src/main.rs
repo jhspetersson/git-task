@@ -311,6 +311,24 @@ enum CommentCommand {
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
     },
+    /// Set text for a comment
+    Set {
+        /// task ID
+        task_id: String,
+        /// comment ID
+        comment_id: String,
+        /// comment text
+        text: String,
+        /// Also update comment on the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
+    },
     /// Edit a comment
     Edit {
         /// task ID
@@ -652,6 +670,7 @@ fn main() -> ExitCode {
 fn task_comment(subcommand: CommentCommand) -> bool {
     match subcommand {
         CommentCommand::Add { task_id, text, push, remote, connector_type: connector } => task_comment_add(task_id, text, push, &remote, &connector),
+        CommentCommand::Set { task_id, comment_id, text, push, remote, connector_type: connector } => task_comment_set(task_id, comment_id, text, push, &remote, &connector),
         CommentCommand::Edit { task_id, comment_id, push, remote, connector_type: connector } => task_comment_edit(task_id, comment_id, push, &remote, &connector),
         CommentCommand::Delete { task_id, comment_id, push, remote, connector_type: connector } => task_comment_delete(task_id, comment_id, push, &remote, &connector),
     }
