@@ -23,7 +23,7 @@ enable-ansi-support = "0.2.1"
 evalexpr = "11"
 futures-util = "0.3"
 git2 = { version = "0.20.0", default-features = false }
-gitlab = "0.1710.0"
+gitlab = "0.1711.0"
 graphql_client = { version = "0.14", features = ["reqwest-blocking"] }
 jira_v3_openapi = {  version = "1", features = ["all"] }
 nu-ansi-term = "0.50"
