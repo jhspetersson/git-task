@@ -157,14 +157,14 @@ Edit task property in the default git editor.
 
     git task edit 1 description
 
-For Windows, we recommend anything, but `notepad`. `Notepad++` is just fine.
+For Windows, we recommend anything, but `notepad`. `Notepad++` (a separate installation) is just fine.
 You can set it up this way:
 
     git config --global core.editor "C:\\Program Files\\Notepad++\\notepad++.exe"
 
 ### label
 
-Add and remove labels from tasks. Labels can be synchronized with GitHub and Gitlab repositories.
+Add and remove labels from tasks. Labels can be synchronized with the remote sources.
 
     git task label add 10 important ff6633 --desc 'Beware of this task!' --push
     git task lbl del 10 important
@@ -184,7 +184,7 @@ You can sync comments with the remote source:
 
 ### import
 
-Import all or selected tasks from JSON file.
+Import all or selected tasks from a JSON file.
 
     git task import <my_tasks.json
     git task import 2,3,4,5,10,12 <my_tasks.json
@@ -202,9 +202,7 @@ Export all or selected tasks, only JSON output format is currently supported.
 
 ### pull
 
-Grab issues from remote source (currently, only GitHub is supported).
-For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable for GitHub.
-`GITLAB_TOKEN` or `GITLAB_API_TOKEN` are required for Gitlab-hosted repositories.
+Grab issues from a remote source.
 
     git task pull
     git task pull --no-comments
@@ -219,16 +217,14 @@ Pull only open issues:
 
 ### push
 
-Push status of the selected tasks to the remote source.
-For GitHub you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable.
-`GITLAB_TOKEN` or `GITLAB_API_TOKEN` are required for Gitlab-hosted repositories.
+Push the status of the selected tasks to the remote source.
 
     git task push 2,3,4,5,10,12
     git task push 2..5,10,12
 
 ### stats
 
-Show total task count, count by status and top 10 authors.
+Show the total task count, count by status and top 10 authors.
 
     git task stats
 
@@ -242,7 +238,7 @@ Deletes one or more tasks by their IDs or status.
     git task delete -s CLOSED
     git task delete -s c
 
-Also delete a corresponding GitHub issue:
+Also, delete a corresponding remote issue:
 
     git task delete 120 --push
 
@@ -275,7 +271,7 @@ By default `git-task` saves everything under a custom ref. You can change that t
 
     git task config set task.ref refs/heads/tasks
 
-Remove old ref after setting a new one:
+Remove the old ref after setting a new one:
 
     git task config set task.ref refs/heads/tasks --move
 
@@ -293,7 +289,7 @@ Colors available:
 
     Black, DarkGray, Red, LightRed, Green, LightGreen, Yellow, LightYellow, Blue, LightBlue, Purple, LightPurple, Magenta, LightMagenta, Cyan, LightCyan, White, LightGray
 
-Or one-byte value like:
+Or a one-byte value like:
     
     239
 
@@ -341,7 +337,7 @@ For example, we want task ID and names to be rendered with dark gray color and s
     git task cfg prop cond add id "status == \"CLOSED\"" DarkGray strikethrough
     git task cfg prop cond add name "status == \"CLOSED\"" DarkGray strikethrough
 
-Conditional formatting has a precedence over enum values, which supersede default color and style of the defined property. 
+Conditional formatting has a precedence over enum values, which supersede the default color and style of the defined property. 
 
 Clear conditional formatting:
 
@@ -361,11 +357,15 @@ Show available commands or their arguments:
     git task help
     git task help create
 
+## GitHub support
+
+For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable for GitHub.
+
 ## Gitlab support
 
 For any operation you will need to set up `GITLAB_TOKEN` or `GITLAB_API_TOKEN` environment variable.
 
-For custom domains please set up `GITLAB_URL` variable. Alternatively you can set the custom domain in git config:
+For custom domains please set up `GITLAB_URL` variable. Alternatively, you can set the custom domain in git config:
 
     git task config set task.gitlab.url gitlab.kitware.com
 
