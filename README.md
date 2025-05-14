@@ -11,6 +11,7 @@ Local-first task manager/bug tracker within your git repository which can import
 [Installation](#installation)  
 [Concepts](#concepts)  
 [Commands](#commands)  
+[GitHub support](#github-support)
 [Gitlab support](#gitlab-support)  
 [JIRA support](#jira-support)
 
@@ -332,7 +333,7 @@ Expression language used: [evalexpr](https://github.com/ISibboI/evalexpr).
 Task properties are automatically exported to the evaluation context as string or integer values.
 
 For example, we want task ID and names to be rendered with dark gray color and strikethrough style if the status is `CLOSED` 
-(like they do it in JetBrains products, e.g. YouTrack):
+(like they do it in JetBrains products, e.g., YouTrack):
 
     git task cfg prop cond add id "status == \"CLOSED\"" DarkGray strikethrough
     git task cfg prop cond add name "status == \"CLOSED\"" DarkGray strikethrough
