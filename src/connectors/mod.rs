@@ -1,11 +1,13 @@
 mod github;
 mod gitlab;
 mod jira;
+mod redmine;
 
 use gittask::{Comment, Label, Task};
 use crate::connectors::github::GithubRemoteConnector;
 use crate::connectors::gitlab::GitlabRemoteConnector;
 use crate::connectors::jira::JiraRemoteConnector;
+use crate::connectors::redmine::RedmineRemoteConnector;
 
 #[derive(Debug, PartialEq)]
 pub enum RemoteTaskState {
@@ -32,10 +34,11 @@ pub trait RemoteConnector {
     fn delete_remote_label(&self, user: &String, repo: &String, task_id: &String, name: &String) -> Result<(), String>;
 }
 
-const CONNECTORS: [&dyn RemoteConnector; 3] = [
+const CONNECTORS: [&dyn RemoteConnector; 4] = [
     &GithubRemoteConnector,
     &GitlabRemoteConnector,
     &JiraRemoteConnector,
+    &RedmineRemoteConnector,
 ];
 
 pub fn get_matching_remote_connectors(remotes: Vec<String>,

@@ -445,7 +445,7 @@ pub fn read_from_pipe() -> Option<String> {
 }
 
 pub fn get_text_from_editor(text: Option<&String>) -> Option<String> {
-    let tmp_file = tempfile::Builder::new().prefix("git-task").suffix(".txt").keep(true).tempfile().ok()?;
+    let tmp_file = tempfile::Builder::new().prefix("git-task").suffix(".txt").disable_cleanup(true).tempfile().ok()?;
     let mut file = File::create(tmp_file.path()).unwrap();
 
     if let Some(text) = text {

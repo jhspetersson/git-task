@@ -291,7 +291,7 @@ Colors available:
     Black, DarkGray, Red, LightRed, Green, LightGreen, Yellow, LightYellow, Blue, LightBlue, Purple, LightPurple, Magenta, LightMagenta, Cyan, LightCyan, White, LightGray
 
 Or a one-byte value like:
-    
+
     239
 
 Styles available:
@@ -383,6 +383,20 @@ Set up a Jira Cloud user:
 For any operation you will need to set up `JIRA_TOKEN` or `JIRA_API_TOKEN` environment variable.
 
 We also recommend setting up statuses as they are organized in Jira.
+
+## Redmine support
+
+Set up a Redmine URL:
+
+    git task config set task.redmine.url https://redmine.example.com
+
+Alternatively, you can set the `REDMINE_URL` environment variable.
+
+Set up a Redmine API key:
+
+    git task config set task.redmine.api_key your_api_key_here
+
+Alternatively, you can set the `REDMINE_API_KEY` or `REDMINE_TOKEN` environment variable.
 
 ## License
 
