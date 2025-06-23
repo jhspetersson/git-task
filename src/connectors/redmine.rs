@@ -127,9 +127,11 @@ impl RemoteConnector for RedmineRemoteConnector {
 }
 
 fn get_redmine_instance(domain: &String) -> Result<Redmine, String> {
+    let client = redmine_api::reqwest::blocking::Client::builder().use_rustls_tls().build()
+        .map_err(|e| e.to_string())?;
     let url = get_base_url(domain)?;
     let api_key = get_api_key()?;
-    Redmine::new(url.parse().unwrap(), &*api_key).map_err(|e| e.to_string())
+    Redmine::new(client, url.parse().unwrap(), &*api_key).map_err(|e| e.to_string())
 }
 
 fn get_base_url(domain: &String) -> Result<String, String> {
