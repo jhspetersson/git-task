@@ -17,7 +17,7 @@ impl RemoteConnector for RedmineRemoteConnector {
     fn get_config_options(&self) -> Option<Vec<String>> {
         Some(vec![
             "task.redmine.url".to_string(),
-            "task.redmine.api_key".to_string(),
+            "task.redmine.api.key".to_string(),
         ])
     }
 
@@ -145,11 +145,11 @@ fn get_base_url(domain: &String) -> Result<String, String> {
 }
 
 fn get_api_key() -> Result<String, String> {
-    match gittask::get_config_value("task.redmine.api_key") {
+    match gittask::get_config_value("task.redmine.api.key") {
         Ok(key) => Ok(key),
         _ => std::env::var("REDMINE_API_KEY")
             .or_else(|_| std::env::var("REDMINE_TOKEN"))
-            .map_err(|_| "No Redmine API key found. Set task.redmine.api_key config or REDMINE_API_KEY environment variable.".to_string())
+            .map_err(|_| "No Redmine API key found. Set task.redmine.api.key config or REDMINE_API_KEY environment variable.".to_string())
     }
 }
 
