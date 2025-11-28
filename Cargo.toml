@@ -30,7 +30,7 @@ nu-ansi-term = "0.50"
 octocrab = { version = "0.44", features = ["stream"] }
 regex = "1.1"
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
-redmine-api = "0.7"
+redmine-api = "0.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3"
