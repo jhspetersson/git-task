@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue, DeleteIssue};
+use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue, DeleteIssue, IssueInclude};
 use redmine_api::api::issue_statuses::{ListIssueStatuses, IssueStatusesWrapper, IssueStatus};
 use redmine_api::api::projects::{Project, ListProjects};
 use redmine_api::api::Redmine;
@@ -33,7 +33,7 @@ impl RemoteConnector for RedmineRemoteConnector {
         &self,
         domain: &String,
         _project: &String,
-        _with_comments: bool,
+        with_comments: bool,
         _with_labels: bool,
         _limit: Option<usize>,
         _state: RemoteTaskState,
@@ -41,35 +41,57 @@ impl RemoteConnector for RedmineRemoteConnector {
     ) -> Result<Vec<Task>, String> {
         let redmine = get_redmine_instance(domain)?;
         let endpoint = ListIssues::builder().build().map_err(|e| e.to_string())?;
-        let issues = redmine.json_response_body_all_pages::<_, Issue>(&endpoint).map_err(|e| e.to_string())?;
+        let issues = redmine
+            .json_response_body_all_pages::<_, Issue>(&endpoint)
+            .map_err(|e| e.to_string())?;
+
         let mut tasks = Vec::new();
         for issue in issues {
-            let task = issue_to_task(&issue, task_statuses)?;
+            let mut task = issue_to_task(&issue, task_statuses)?;
+
+            if with_comments {
+                let mut builder = GetIssue::builder();
+                builder.id(issue.id);
+                builder.include(vec![IssueInclude::Journals]);
+                let endpoint = builder.build().map_err(|e| e.to_string())?;
+                let IssueWrapper { issue: detailed } =
+                    redmine
+                        .json_response_body::<_, IssueWrapper<Issue>>(&endpoint)
+                        .map_err(|e| e.to_string())?;
+
+                append_journals_as_comments(&detailed, &mut task);
+            }
+
             tasks.push(task);
         }
         Ok(tasks)
     }
 
-    #[allow(unused)]
     fn get_remote_task(
         &self,
         domain: &String,
-        project: &String,
+        _project: &String,
         task_id: &String,
         with_comments: bool,
-        with_labels: bool,
+        _with_labels: bool,
         task_statuses: &Vec<String>
     ) -> Result<Task, String> {
         let redmine = get_redmine_instance(domain)?;
-        let endpoint = GetIssue::builder()
-            .id(task_id.parse().unwrap())
-            .build()
-            .map_err(|e| e.to_string())?;
+        let mut endpoint_builder = GetIssue::builder();
+        endpoint_builder.id(task_id.parse().unwrap());
+        if with_comments {
+            endpoint_builder.include(vec![IssueInclude::Journals]);
+        }
+        let endpoint = endpoint_builder.build().map_err(|e| e.to_string())?;
         let IssueWrapper { issue } =
             redmine.json_response_body::<_, IssueWrapper<Issue>>(&endpoint)
                 .map_err(|e| e.to_string())?;
 
         let mut task = issue_to_task(&issue, task_statuses)?;
+
+        if with_comments {
+            append_journals_as_comments(&issue, &mut task);
+        }
 
         Ok(task)
     }
@@ -284,4 +306,20 @@ fn issue_to_task(issue: &Issue, task_statuses: &Vec<String>) -> Result<Task, Str
     props.insert("project_id".to_string(), project_id.to_string());
     
     Task::from_properties(issue.id.to_string(), props).map_err(|e| e.to_string())
+}
+
+fn append_journals_as_comments(issue: &Issue, task: &mut Task) {
+    if let Some(journals) = &issue.journals {
+        for j in journals {
+            if let Some(text) = &j.notes {
+                let mut props = HashMap::new();
+                props.insert("author".to_string(), j.user.name.clone());
+                props.insert("created".to_string(), j.created_on.unix_timestamp().to_string());
+                if j.private_notes {
+                    props.insert("private".to_string(), "true".to_string());
+                }
+                task.add_comment(Some(j.id.to_string()), props, text.clone());
+            }
+        }
+    }
 }
