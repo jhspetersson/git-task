@@ -24,8 +24,7 @@ impl RemoteConnector for RedmineRemoteConnector {
         ])
     }
 
-    #[allow(unused)]
-    fn supports_remote(&self, url: &str) -> Option<(String, String)> {
+    fn supports_remote(&self, _url: &str) -> Option<(String, String)> {
         Some((String::new(), String::new()))
     }
 
@@ -96,7 +95,6 @@ impl RemoteConnector for RedmineRemoteConnector {
         Ok(task)
     }
 
-    #[allow(unused)]
     fn create_remote_task(&self, domain: &String, _project: &String, task: &Task) -> Result<String, String> {
         let redmine = get_redmine_instance(domain)?;
 
