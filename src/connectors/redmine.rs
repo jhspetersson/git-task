@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues};
+use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue};
+use redmine_api::api::issue_statuses::{ListIssueStatuses, IssueStatusesWrapper, IssueStatus};
 use redmine_api::api::projects::{Project, ListProjects};
 use redmine_api::api::Redmine;
 
@@ -113,18 +114,67 @@ impl RemoteConnector for RedmineRemoteConnector {
         todo!()
     }
 
-    #[allow(unused)]
     fn update_remote_task(
         &self,
         domain: &String,
-        project: &String,
+        _project: &String,
         task: &Task,
-        labels: Option<&Vec<Label>>,
+        _labels: Option<&Vec<Label>>,
         state: RemoteTaskState
     ) -> Result<(), String> {
         let redmine = get_redmine_instance(domain)?;
 
-        Err("Updating tasks for Redmine is not yet implemented ".to_string())
+        let id = task.get_id()
+            .ok_or_else(|| "Task id is required for update".to_string())?
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid task id '{}': {}", task.get_id().unwrap(), e))?;
+
+        let mut builder = UpdateIssue::builder();
+        builder.id(id);
+
+        if let Some(name) = task.get_property("name") { builder.subject(name.clone()); }
+        if let Some(desc) = task.get_property("description") { builder.description(desc.clone()); }
+
+        if let Some(project_id_prop) = task.get_property("project_id") {
+            let proj_id = resolve_project_id(&redmine, project_id_prop)?;
+            builder.project_id(proj_id);
+        }
+
+        let (local_status, remote_status) = match state {
+            RemoteTaskState::Open(s1, s2) => (s1, s2),
+            RemoteTaskState::Closed(s1, s2) => (s1, s2),
+            RemoteTaskState::All => (String::new(), String::new()),
+        };
+
+        if !local_status.is_empty() && !remote_status.is_empty() && local_status != remote_status {
+            let endpoint = ListIssueStatuses::builder().build().map_err(|e| e.to_string())?;
+            let IssueStatusesWrapper { issue_statuses } =
+                redmine
+                    .json_response_body::<_, IssueStatusesWrapper<IssueStatus>>(&endpoint)
+                    .map_err(|e| e.to_string())?;
+
+            let local_lower = local_status.to_lowercase();
+
+            let mut target = issue_statuses
+                .iter()
+                .find(|s| s.name.to_lowercase() == local_lower)
+                .cloned();
+
+            if target.is_none() {
+                let want_closed = local_lower == "closed" || local_lower == "resolved";
+                target = issue_statuses
+                    .iter()
+                    .find(|s| s.is_closed == want_closed)
+                    .cloned();
+            }
+
+            if let Some(status) = target {
+                builder.status_id(status.id);
+            }
+        }
+
+        let update_endpoint = builder.build().map_err(|e| e.to_string())?;
+        redmine.ignore_response_body(&update_endpoint).map_err(|e| e.to_string())
     }
 
     #[allow(unused)]
