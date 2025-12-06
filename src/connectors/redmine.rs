@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue};
+use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue, DeleteIssue};
 use redmine_api::api::issue_statuses::{ListIssueStatuses, IssueStatusesWrapper, IssueStatus};
 use redmine_api::api::projects::{Project, ListProjects};
 use redmine_api::api::Redmine;
@@ -184,11 +184,19 @@ impl RemoteConnector for RedmineRemoteConnector {
         todo!()
     }
 
-    #[allow(unused)]
-    fn delete_remote_task(&self, domain: &String, project: &String, task_id: &String) -> Result<(), String> {
+    fn delete_remote_task(&self, domain: &String, _project: &String, task_id: &String) -> Result<(), String> {
         let redmine = get_redmine_instance(domain)?;
 
-        todo!()
+        let id = task_id
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid task id '{}': {}", task_id, e))?;
+
+        let endpoint = DeleteIssue::builder()
+            .id(id)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        redmine.ignore_response_body(&endpoint).map_err(|e| e.to_string())
     }
 
     #[allow(unused)]
