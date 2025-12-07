@@ -258,9 +258,7 @@ impl RemoteConnector for RedmineRemoteConnector {
 
     #[allow(unused)]
     fn delete_remote_label(&self, domain: &String, project: &String, task_id: &String, name: &String) -> Result<(), String> {
-        let redmine = get_redmine_instance(domain)?;
-
-        todo!()
+        Err("Labels are not supported for Redmine".to_string())
     }
 }
 
