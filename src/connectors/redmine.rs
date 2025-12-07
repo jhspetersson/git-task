@@ -8,6 +8,7 @@ use redmine_api::api::Redmine;
 use gittask::{Task, Comment, Label};
 
 use crate::connectors::{RemoteConnector, RemoteTaskState};
+use crate::util::error_message;
 
 pub struct RedmineRemoteConnector;
 
@@ -160,9 +161,7 @@ impl RemoteConnector for RedmineRemoteConnector {
 
     #[allow(unused)]
     fn create_remote_label(&self, domain: &String, project: &String, task_id: &String, label: &Label) -> Result<(), String> {
-        let redmine = get_redmine_instance(domain)?;
-
-        todo!()
+        Err("Labels are not supported for Redmine".to_string())
     }
 
     fn update_remote_task(
