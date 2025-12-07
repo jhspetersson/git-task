@@ -120,11 +120,42 @@ impl RemoteConnector for RedmineRemoteConnector {
         Ok(issue.id.to_string())
     }
 
-    #[allow(unused)]
-    fn create_remote_comment(&self, domain: &String, project: &String, task_id: &String, comment: &Comment) -> Result<String, String> {
+    fn create_remote_comment(&self, domain: &String, _project: &String, task_id: &String, comment: &Comment) -> Result<String, String> {
         let redmine = get_redmine_instance(domain)?;
 
-        todo!()
+        let id = task_id
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid task id '{}': {}", task_id, e))?;
+
+        let endpoint = UpdateIssue::builder()
+            .id(id)
+            .notes(comment.get_text().into())
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        redmine.ignore_response_body(&endpoint).map_err(|e| e.to_string())?;
+
+        let mut get_builder = GetIssue::builder();
+        get_builder.id(id);
+        get_builder.include(vec![IssueInclude::Journals]);
+        let get_endpoint = get_builder.build().map_err(|e| e.to_string())?;
+        let IssueWrapper { issue } = redmine
+            .json_response_body::<_, IssueWrapper<Issue>>(&get_endpoint)
+            .map_err(|e| e.to_string())?;
+
+        if let Some(journals) = &issue.journals {
+            let comment_text = comment.get_text();
+            let matching_journal = journals
+                .iter()
+                .rev()
+                .find(|j| j.notes.as_ref().map(|n| n == &comment_text).unwrap_or(false));
+
+            if let Some(journal) = matching_journal {
+                return Ok(journal.id.to_string());
+            }
+        }
+
+        Ok(String::new())
     }
 
     #[allow(unused)]
