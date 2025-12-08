@@ -860,8 +860,68 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
              limit: Option<usize>,
              no_color: bool) -> bool {
     match gittask::list_tasks() {
-        Ok(mut tasks) => {
+        Ok(tasks) => {
+            if tasks.is_empty() {
+                return true;
+            }
+
             let prop_manager = PropertyManager::new();
+
+            let from = parse_date(from);
+            let until = parse_date(until);
+
+            let status_manager = StatusManager::new();
+            let statuses = match status {
+                Some(statuses) => Some(statuses.iter().map(|s| status_manager.get_full_status_name(s)).collect::<Vec<_>>()),
+                None => None
+            };
+
+            let mut filtered_tasks: Vec<Task> = tasks.into_iter().filter(|task| {
+                if let Some(ref statuses) = statuses {
+                    let task_status = task.get_property("status").unwrap();
+                    if !statuses.contains(&task_status) {
+                        return false;
+                    }
+                }
+
+                if keyword.as_ref().is_some() {
+                    let keyword = keyword.as_ref().unwrap().as_str();
+                    let props = task.get_all_properties();
+                    if !props.iter().any(|entry| entry.1.contains(keyword)) {
+                        return false;
+                    }
+                }
+
+                if from.is_some() || until.is_some() {
+                    let created = task.get_property("created");
+                    if let Some(created) = created {
+                        let created = Local.timestamp_opt(created.parse().unwrap(), 0).unwrap();
+
+                        if from.is_some() {
+                            if created < from.unwrap().earliest().unwrap() {
+                                return false;
+                            }
+                        }
+
+                        if until.is_some() {
+                            if created > until.unwrap().latest().unwrap() {
+                                return false;
+                            }
+                        }
+                    }
+                }
+
+                if author.as_ref().is_some() {
+                    if let Some(task_author) = task.get_property("author") {
+                        if author.as_ref().unwrap().to_lowercase() != task_author.to_lowercase() {
+                            return false;
+                        }
+                    }
+                }
+
+                true
+            }).collect();
+
             let sort = match sort {
                 Some(sort) => Some(sort),
                 None => match gittask::get_config_value("task.list.sort") {
@@ -871,7 +931,8 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                     _ => None
                 }
             };
-            tasks.sort_by(|a, b| {
+
+            filtered_tasks.sort_by(|a, b| {
                 match &sort {
                     Some(sort) if !sort.is_empty() => {
                         let mut ordering = None;
@@ -901,92 +962,40 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                 }
             });
 
-            let from = parse_date(from);
-            let until = parse_date(until);
-
-            let status_manager = StatusManager::new();
-            let statuses = match status {
-                Some(statuses) => Some(statuses.iter().map(|s| status_manager.get_full_status_name(s)).collect::<Vec<_>>()),
-                None => None
-            };
-            let no_color = check_no_color(no_color);
-
-            let columns = columns.unwrap_or_else(|| match gittask::get_config_value("task.list.columns") {
-                Ok(list_columns) => {
-                    list_columns.split(",").map(|s| s.trim().to_string()).collect()
-                },
-                _ => vec![
-                    String::from("id"),
-                    String::from("created"),
-                    String::from("status"),
-                    String::from("name"),
-                    String::from("labels"),
-                ]
-            });
-
-            let show_headers = headers || match gittask::get_config_value("task.list.show.headers") {
-                Ok(show_headers) => show_headers.parse::<bool>().unwrap_or(false),
-                _ => false
+            let filtered_tasks: Vec<Task> = match limit {
+                Some(limit) => filtered_tasks.into_iter().take(limit).collect(),
+                None => filtered_tasks
             };
 
-            if show_headers {
-                let header = columns.join(" | ");
-                println!("{}", header);
-            }
+            if !filtered_tasks.is_empty() {
+                let no_color = check_no_color(no_color);
 
-            let mut count = 0;
-            for task in tasks {
-                if let Some(ref statuses) = statuses {
-                    let task_status = task.get_property("status").unwrap();
-                    if !statuses.contains(&task_status) {
-                        continue;
-                    }
+                let columns = columns.unwrap_or_else(|| match gittask::get_config_value("task.list.columns") {
+                    Ok(list_columns) => {
+                        list_columns.split(",").map(|s| s.trim().to_string()).collect()
+                    },
+                    _ => vec![
+                        String::from("id"),
+                        String::from("created"),
+                        String::from("status"),
+                        String::from("name"),
+                        String::from("labels"),
+                    ]
+                });
+
+                let show_headers = headers || match gittask::get_config_value("task.list.show.headers") {
+                    Ok(show_headers) => show_headers.parse::<bool>().unwrap_or(false),
+                    _ => false
+                };
+
+                if show_headers {
+                    let header = columns.join(" | ");
+                    println!("{}", header);
                 }
 
-                if keyword.as_ref().is_some() {
-                    let keyword = keyword.as_ref().unwrap().as_str();
-                    let props = task.get_all_properties();
-                    if !props.iter().any(|entry| entry.1.contains(keyword)) {
-                        continue;
-                    }
+                for task in filtered_tasks {
+                    print_task_line(task, &columns, no_color, &prop_manager, &status_manager);
                 }
-
-                if from.is_some() || until.is_some() {
-                    let created = task.get_property("created");
-                    if let Some(created) = created {
-                        let created = Local.timestamp_opt(created.parse().unwrap(), 0).unwrap();
-
-                        if from.is_some() {
-                            if created < from.unwrap().earliest().unwrap() {
-                                continue;
-                            }
-                        }
-
-                        if until.is_some() {
-                            if created > until.unwrap().latest().unwrap() {
-                                continue;
-                            }
-                        }
-                    }
-                }
-
-                if author.as_ref().is_some() {
-                    if let Some(task_author) = task.get_property("author") {
-                        if author.as_ref().unwrap().to_lowercase() != task_author.to_lowercase() {
-                            continue;
-                        }
-                    }
-                }
-
-                if let Some(limit) = limit {
-                    if count >= limit {
-                        break;
-                    }
-                }
-
-                print_task_line(task, &columns, no_color, &prop_manager, &status_manager);
-
-                count += 1;
             }
 
             true
