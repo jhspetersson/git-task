@@ -92,6 +92,10 @@ Show specific columns:
 
     git task list --columns id,status,name
 
+Show column names:
+
+    git task list --headers
+
 Sorting by one or more task properties:
 
     git task list --sort author

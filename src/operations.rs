@@ -855,6 +855,7 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
              until: Option<String>,
              author: Option<String>,
              columns: Option<Vec<String>>,
+             headers: bool,
              sort: Option<Vec<String>>,
              limit: Option<usize>,
              no_color: bool) -> bool {
@@ -910,15 +911,23 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
             };
             let no_color = check_no_color(no_color);
 
-            let columns = match columns {
-                Some(columns) => Some(columns),
-                None => match gittask::get_config_value("task.list.columns") {
-                    Ok(list_columns) => {
-                        Some(list_columns.split(",").map(|s| s.trim().to_string()).collect())
-                    },
-                    _ => None
-                }
-            };
+            let columns = columns.unwrap_or_else(|| match gittask::get_config_value("task.list.columns") {
+                Ok(list_columns) => {
+                    list_columns.split(",").map(|s| s.trim().to_string()).collect()
+                },
+                _ => vec![
+                    String::from("id"),
+                    String::from("created"),
+                    String::from("status"),
+                    String::from("name"),
+                    String::from("labels"),
+                ]
+            });
+
+            if headers {
+                let header = columns.join(" | ");
+                println!("{}", header);
+            }
 
             let mut count = 0;
             for task in tasks {
@@ -983,17 +992,7 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
     }
 }
 
-fn print_task_line(task: Task, columns: &Option<Vec<String>>, no_color: bool, prop_manager: &PropertyManager, status_manager: &StatusManager) {
-    let columns = match columns {
-        Some(columns) => columns,
-        _ => &vec![
-            String::from("id"),
-            String::from("created"),
-            String::from("status"),
-            String::from("name"),
-            String::from("labels"),
-        ]
-    };
+fn print_task_line(task: Task, columns: &Vec<String>, no_color: bool, prop_manager: &PropertyManager, status_manager: &StatusManager) {
     let context = extract_task_context(&task);
 
     columns.iter().for_each(|column| {
