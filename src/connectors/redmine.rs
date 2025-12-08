@@ -1,14 +1,50 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue, DeleteIssue, IssueInclude};
 use redmine_api::api::issue_statuses::{ListIssueStatuses, IssueStatusesWrapper, IssueStatus};
 use redmine_api::api::projects::{Project, ListProjects};
-use redmine_api::api::Redmine;
+use redmine_api::api::{Endpoint, Redmine};
+use redmine_api::reqwest::Method;
+use serde::Serialize;
 
 use gittask::{Task, Comment, Label};
 
 use crate::connectors::{RemoteConnector, RemoteTaskState};
-use crate::util::error_message;
+
+#[derive(Debug, Clone, Serialize)]
+struct UpdateJournalInner {
+    notes: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct UpdateJournalWrapper {
+    journal: UpdateJournalInner,
+}
+
+struct UpdateJournal {
+    journal_id: u64,
+    notes: String,
+}
+
+impl Endpoint for UpdateJournal {
+    fn method(&self) -> Method {
+        Method::PUT
+    }
+
+    fn endpoint(&self) -> Cow<'static, str> {
+        format!("journals/{}.json", self.journal_id).into()
+    }
+
+    fn body(&self) -> Result<Option<(&'static str, Vec<u8>)>, redmine_api::Error> {
+        let wrapper = UpdateJournalWrapper {
+            journal: UpdateJournalInner {
+                notes: self.notes.clone(),
+            },
+        };
+        Ok(Some(("application/json", serde_json::to_vec(&wrapper)?)))
+    }
+}
 
 pub struct RedmineRemoteConnector;
 
@@ -227,11 +263,19 @@ impl RemoteConnector for RedmineRemoteConnector {
         redmine.ignore_response_body(&update_endpoint).map_err(|e| e.to_string())
     }
 
-    #[allow(unused)]
-    fn update_remote_comment(&self, domain: &String, project: &String, task_id: &String, comment_id: &String, text: &String) -> Result<(), String> {
+    fn update_remote_comment(&self, domain: &String, _project: &String, _task_id: &String, comment_id: &String, text: &String) -> Result<(), String> {
         let redmine = get_redmine_instance(domain)?;
 
-        todo!()
+        let journal_id = comment_id
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid comment id '{}': {}", comment_id, e))?;
+
+        let endpoint = UpdateJournal {
+            journal_id,
+            notes: text.clone(),
+        };
+
+        redmine.ignore_response_body(&endpoint).map_err(|e| e.to_string())
     }
 
     fn delete_remote_task(&self, domain: &String, _project: &String, task_id: &String) -> Result<(), String> {
