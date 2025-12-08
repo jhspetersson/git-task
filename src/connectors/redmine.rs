@@ -294,10 +294,8 @@ impl RemoteConnector for RedmineRemoteConnector {
     }
 
     #[allow(unused)]
-    fn delete_remote_comment(&self, domain: &String, project: &String, _task_id: &String, comment_id: &String) -> Result<(), String> {
-        let redmine = get_redmine_instance(domain)?;
-
-        todo!()
+    fn delete_remote_comment(&self, domain: &String, _project: &String, task_id: &String, comment_id: &String) -> Result<(), String> {
+        Err("Comment deletion is not supported for Redmine".to_string())
     }
 
     #[allow(unused)]
