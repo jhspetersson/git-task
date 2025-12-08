@@ -272,6 +272,10 @@ Customize columns:
 
     git task config set task.list.columns id,author,status,name
 
+Show column headers every time:
+
+    git task config set task.list.show.headers true
+
 By default `git-task` saves everything under a custom ref. You can change that to a regular branch like this:
 
     git task config set task.ref refs/heads/tasks

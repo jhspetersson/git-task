@@ -924,7 +924,12 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                 ]
             });
 
-            if headers {
+            let show_headers = headers || match gittask::get_config_value("task.list.show.headers") {
+                Ok(show_headers) => show_headers.parse::<bool>().unwrap_or(false),
+                _ => false
+            };
+            
+            if show_headers {
                 let header = columns.join(" | ");
                 println!("{}", header);
             }
