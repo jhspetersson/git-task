@@ -71,15 +71,23 @@ impl RemoteConnector for RedmineRemoteConnector {
         _project: &String,
         with_comments: bool,
         _with_labels: bool,
-        _limit: Option<usize>,
+        limit: Option<usize>,
         _state: RemoteTaskState,
         task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
         let redmine = get_redmine_instance(domain)?;
         let endpoint = ListIssues::builder().build().map_err(|e| e.to_string())?;
-        let issues = redmine
-            .json_response_body_all_pages::<_, Issue>(&endpoint)
-            .map_err(|e| e.to_string())?;
+        let issues = match limit {
+            Some(limit) => {
+                let response = redmine
+                    .json_response_body_page::<_, Issue>(&endpoint, 0, limit as u64)
+                    .map_err(|e| e.to_string())?;
+                response.values
+            },
+            None => redmine
+                .json_response_body_all_pages::<_, Issue>(&endpoint)
+                .map_err(|e| e.to_string())?
+        };
 
         let mut tasks = Vec::new();
         for issue in issues {
