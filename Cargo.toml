@@ -23,11 +23,11 @@ enable-ansi-support = "0.2.1"
 evalexpr = "11"
 futures-util = "0.3"
 git2 = { version = "0.20.0", default-features = false }
-gitlab = "0.1803.0"
+gitlab = "0.1806.0"
 graphql_client = { version = "0.14", features = ["reqwest-blocking"] }
 jira_v3_openapi = {  version = "1", features = ["all"] }
 nu-ansi-term = "0.50"
-octocrab = { version = "0.44", features = ["stream"] }
+octocrab = { version = "0.48", features = ["stream"] }
 regex = "1.1"
 reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 redmine-api = "0.11"
