@@ -259,9 +259,11 @@ Maintain configuration parameters.
 
     git task config list
     git task config get task.list.columns
+    git task config get task.list.show.headers
     git task config get task.list.sort
     git task config get task.status.open
     git task config get task.status.closed
+    git task config get task.default.connector
     git task config get task.ref
 
 Customize sorting:
@@ -275,6 +277,10 @@ Customize columns:
 Show column headers every time:
 
     git task config set task.list.show.headers true
+
+Set default connector type when it can't be detected automatically:
+
+    git task config set task.default.connector redmine
 
 By default `git-task` saves everything under a custom ref. You can change that to a regular branch like this:
 
@@ -405,6 +411,10 @@ Set up a Redmine API key:
     git task config set task.redmine.api_key your_api_key_here
 
 Alternatively, you can set the `REDMINE_API_KEY` or `REDMINE_TOKEN` environment variable.
+
+Set default connector to use:
+
+    git task config set task.default.connector redmine
 
 ## License
 

@@ -420,7 +420,7 @@ fn get_user_repo(remote: &Option<String>,
 ) -> Result<(Box<&'static dyn RemoteConnector>, String, String), String> {
     match gittask::list_remotes(remote) {
         Ok(remotes) => {
-            let user_repo = get_matching_remote_connectors(remotes, connector_type);
+            let user_repo = get_matching_remote_connectors(remotes, &get_connector(connector_type));
             if user_repo.is_empty() {
                 return Err("No passing remotes".to_string());
             }
@@ -928,7 +928,7 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                 Ok(show_headers) => show_headers.parse::<bool>().unwrap_or(false),
                 _ => false
             };
-            
+
             if show_headers {
                 let header = columns.join(" | ");
                 println!("{}", header);
@@ -1097,4 +1097,18 @@ fn extract_task_context(task: &Task) -> HashMap<String, String> {
     let mut context = task.get_all_properties().to_owned();
     context.insert("id".to_string(), task.get_id().unwrap());
     context
+}
+
+fn get_connector<'a>(connector_type: &Option<String>) -> Option<String> {
+    match connector_type {
+        Some(connector_type) => {
+            Some(connector_type.to_string())
+        },
+        None => match gittask::get_config_value("task.default.connector") {
+            Ok(default_connector) => {
+                Some(default_connector)
+            },
+            _ => None
+        }
+    }
 }

@@ -12,6 +12,7 @@ pub(crate) fn task_config_get(param: String) -> bool {
         "task.status.open" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("OPEN")))),
         "task.status.in_progress" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("IN_PROGRESS")))),
         "task.status.closed" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("CLOSED")))),
+        "task.default.connector" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::new()))),
         "task.ref" => success_message(format!("{}", gittask::get_ref_path())),
         _ => {
             if get_config_options_from_connectors().contains(&param) {
@@ -64,6 +65,12 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
                 Err(e) => error_message(format!("ERROR: {e}"))
             }
         },
+        "task.default.connector" => {
+            match gittask::set_config_value(&param, &value) {
+                Ok(_) => success_message(format!("{param} has been updated")),
+                Err(e) => error_message(format!("ERROR: {e}"))
+            }
+        },
         "task.ref" => {
             let value = match value {
                 value if !value.contains('/') => "refs/heads/".to_string() + value.as_str(),
@@ -91,5 +98,5 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
 
 pub(crate) fn task_config_list() -> bool {
     let from_connectors = get_config_options_from_connectors().join("\n");
-    success_message("task.list.columns\ntask.list.show.headers\ntask.list.sort\ntask.status.open\ntask.status.closed\ntask.ref\n".to_string() + &from_connectors)
+    success_message("task.list.columns\ntask.list.show.headers\ntask.list.sort\ntask.status.open\ntask.status.closed\ntask.default.connector\ntask.ref\n".to_string() + &from_connectors)
 }
