@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
-use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue, DeleteIssue, IssueInclude};
+use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue, DeleteIssue, IssueInclude, IssueStatusFilter};
 use redmine_api::api::issue_statuses::{ListIssueStatuses, IssueStatusesWrapper, IssueStatus};
 use redmine_api::api::projects::{Project, ListProjects};
 use redmine_api::api::{Endpoint, Redmine};
@@ -72,11 +72,29 @@ impl RemoteConnector for RedmineRemoteConnector {
         with_comments: bool,
         _with_labels: bool,
         limit: Option<usize>,
-        _state: RemoteTaskState,
-        task_statuses: &Vec<String>
+        state: RemoteTaskState,
+        _task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
         let redmine = get_redmine_instance(domain)?;
-        let endpoint = ListIssues::builder().build().map_err(|e| e.to_string())?;
+        let status_filter = match &state {
+            RemoteTaskState::Open(status, _) | RemoteTaskState::Closed(status, _) => {
+                if let Ok(Some(status_id)) = get_status_id_by_name(&redmine, status) {
+                    Some(IssueStatusFilter::TheseStatuses(vec![status_id]))
+                } else {
+                    match &state {
+                        RemoteTaskState::Open(_, _) => Some(IssueStatusFilter::Open),
+                        RemoteTaskState::Closed(_, _) => Some(IssueStatusFilter::Closed),
+                        _ => None,
+                    }
+                }
+            },
+            RemoteTaskState::All => None,
+        };
+        let mut builder = ListIssues::builder();
+        if let Some(filter) = status_filter {
+            builder.status_id(filter);
+        }
+        let endpoint = builder.build().map_err(|e| e.to_string())?;
         let issues = match limit {
             Some(limit) => {
                 let response = redmine
@@ -91,7 +109,7 @@ impl RemoteConnector for RedmineRemoteConnector {
 
         let mut tasks = Vec::new();
         for issue in issues {
-            let mut task = issue_to_task(&issue, task_statuses)?;
+            let mut task = issue_to_task(&issue)?;
 
             if with_comments {
                 let mut builder = GetIssue::builder();
@@ -118,7 +136,7 @@ impl RemoteConnector for RedmineRemoteConnector {
         task_id: &String,
         with_comments: bool,
         _with_labels: bool,
-        task_statuses: &Vec<String>
+        _task_statuses: &Vec<String>
     ) -> Result<Task, String> {
         let redmine = get_redmine_instance(domain)?;
         let mut endpoint_builder = GetIssue::builder();
@@ -131,7 +149,7 @@ impl RemoteConnector for RedmineRemoteConnector {
             redmine.json_response_body::<_, IssueWrapper<Issue>>(&endpoint)
                 .map_err(|e| e.to_string())?;
 
-        let mut task = issue_to_task(&issue, task_statuses)?;
+        let mut task = issue_to_task(&issue)?;
 
         if with_comments {
             append_journals_as_comments(&issue, &mut task);
@@ -339,6 +357,20 @@ fn get_redmine_instance(domain: &String) -> Result<Redmine, String> {
     Redmine::new(client, url.parse().unwrap(), &*api_key).map_err(|e| e.to_string())
 }
 
+fn get_status_id_by_name(redmine: &Redmine, name: &str) -> Result<Option<u64>, String> {
+    let endpoint = ListIssueStatuses::builder().build().map_err(|e| e.to_string())?;
+    let IssueStatusesWrapper { issue_statuses } =
+        redmine
+            .json_response_body::<_, IssueStatusesWrapper<IssueStatus>>(&endpoint)
+            .map_err(|e| e.to_string())?;
+
+    let name_lower = name.to_lowercase();
+    Ok(issue_statuses
+        .iter()
+        .find(|s| s.name.to_lowercase() == name_lower)
+        .map(|s| s.id))
+}
+
 fn get_base_url(domain: &String) -> Result<String, String> {
     match gittask::get_config_value("task.redmine.url") {
         Ok(url) => Ok(url),
@@ -358,18 +390,10 @@ fn get_api_key() -> Result<String, String> {
     }
 }
 
-fn issue_to_task(issue: &Issue, task_statuses: &Vec<String>) -> Result<Task, String> {
+fn issue_to_task(issue: &Issue) -> Result<Task, String> {
     let mut props = HashMap::new();
     props.insert("name".to_string(), issue.subject.clone().unwrap_or_else(|| String::new()));
-    
-    let status = if issue.status.name.to_lowercase().contains("closed") 
-        || issue.status.name.to_lowercase().contains("resolved") {
-        task_statuses.last().unwrap_or(&"CLOSED".to_string()).clone()
-    } else {
-        task_statuses.first().unwrap_or(&"OPEN".to_string()).clone()
-    };
-    props.insert("status".to_string(), status);
-    
+    props.insert("status".to_string(), issue.status.name.clone());
     props.insert("description".to_string(), issue.description.clone().unwrap_or_else(|| String::new()));
     
     let created_on= &issue.created_on;
