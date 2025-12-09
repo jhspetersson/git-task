@@ -386,7 +386,7 @@ fn get_api_key() -> Result<String, String> {
         Ok(key) => Ok(key),
         _ => std::env::var("REDMINE_API_KEY")
             .or_else(|_| std::env::var("REDMINE_TOKEN"))
-            .map_err(|_| "No Redmine API key found. Set task.redmine.api.key config or REDMINE_API_KEY environment variable.".to_string())
+            .map_err(|_| "No Redmine API key found. Set task.redmine.api.key config option, REDMINE_API_KEY or REDMINE_TOKEN environment variable.".to_string())
     }
 }
 
