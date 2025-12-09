@@ -18,7 +18,7 @@ use crate::operations::config::status::*;
 use crate::operations::label::*;
 
 #[derive(Parser)]
-#[command(version, about = "Local-first task manager/bug tracker within your git repository which can sync issues from/to GitHub or Gitlab.", arg_required_else_help(true))]
+#[command(version, about = "Local-first task manager/bug tracker within your git repository which can sync issues from/to GitHub, Gitlab, Jira Cloud and Redmine.", arg_required_else_help(true))]
 struct Args {
     #[command(subcommand)]
     command: Option<Command>,
@@ -83,7 +83,7 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
     },
@@ -101,7 +101,7 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
         /// Disable colors
@@ -130,7 +130,7 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
         /// Disable colors
@@ -160,7 +160,7 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
         /// Disable colors
@@ -230,7 +230,7 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
         /// Don't import task comments
@@ -247,7 +247,7 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
         /// Don't create task comments
@@ -281,7 +281,7 @@ enum Command {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
     },
@@ -310,7 +310,7 @@ enum CommentCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
     },
@@ -328,7 +328,7 @@ enum CommentCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
     },
@@ -344,7 +344,7 @@ enum CommentCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
     },
@@ -361,7 +361,7 @@ enum CommentCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
     },
@@ -387,7 +387,7 @@ enum LabelCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
     },
@@ -404,7 +404,7 @@ enum LabelCommand {
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
-        /// Use this remote connector (github, gitlab, jira)
+        /// Use this remote connector (github, gitlab, jira, redmine)
         #[arg(long = "connector", aliases = ["conn"])]
         connector_type: Option<String>,
     },

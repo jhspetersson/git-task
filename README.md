@@ -1,6 +1,6 @@
 # git-task
 
-Local-first task manager/bug tracker within your git repository which can import issues from GitHub, Gitlab or Jira Cloud.
+Local-first task manager/bug tracker within your git repository which can import issues from GitHub, GitLab, Jira Cloud and Redmine.
 
 [![Crates.io](https://img.shields.io/crates/v/git-task.svg)](https://crates.io/crates/fselect)
 [![build](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml/badge.svg)](https://github.com/jhspetersson/git-task/actions/workflows/rust.yml)
@@ -12,8 +12,9 @@ Local-first task manager/bug tracker within your git repository which can import
 [Concepts](#concepts)  
 [Commands](#commands)  
 [GitHub support](#github-support)
-[Gitlab support](#gitlab-support)  
-[JIRA support](#jira-support)
+[GitLab support](#gitlab-support)  
+[JIRA support](#jira-support)  
+[Redmine support](#redmine-support)
 
 
 ## Installation
@@ -28,7 +29,7 @@ Now you can switch to some git repo and run it as:
     git task create "My first task"
 
 Or import issues from GitHub (`GITHUB_TOKEN` or `GITHUB_API_TOKEN` env variable might be needed to be set up if you have a private repository)
-or Gitlab (`GITLAB_TOKEN` or `GITLAB_API_TOKEN` is needed then):
+or GitLab (`GITLAB_TOKEN` or `GITLAB_API_TOKEN` is needed then):
 
     git task pull
 
@@ -45,9 +46,9 @@ Status can be anything, but it is expected to be one of the several defined stat
 By default, there are three: `OPEN` for new tasks, `IN_PROGRESS` for the tasks that are in development, `CLOSED` for complete ones.
 You can freely edit this list.
 
-However, for the sake of sync with GitHub or Gitlab there are two config options to map remote `OPEN` and `CLOSED` statuses with local ones.
+However, for the sake of sync with GitHub or GitLab there are two config options to map remote `OPEN` and `CLOSED` statuses with local ones.
 
-Tasks can also have labels that are optionally synchronized with GitHub or Gitlab.
+Tasks can also have labels that are optionally synchronized with GitHub or GitLab.
 
 ## Commands
 
@@ -376,7 +377,7 @@ Show available commands or their arguments:
 
 For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable for GitHub.
 
-## Gitlab support
+## GitLab support
 
 For any operation you will need to set up `GITLAB_TOKEN` or `GITLAB_API_TOKEN` environment variable.
 
