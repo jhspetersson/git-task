@@ -89,6 +89,12 @@ Filter by author:
 
     git task list --author jhspetersson
 
+Filter by expression:
+
+    git task list --filter "status == 'OPEN' && author == 'jhspetersson'"
+    git task list --filter "priority > 1 || status == 'IN_PROGRESS'"
+    git task list --filter "id > 100"
+
 Show specific columns:
 
     git task list --columns id,status,name

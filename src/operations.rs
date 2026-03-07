@@ -9,10 +9,11 @@ use chrono::{Local, TimeZone};
 use nu_ansi_term::Color::DarkGray;
 use regex::Regex;
 
+use evalexpr::{ContextWithMutableVariables, HashMapContext};
 use gittask::{Comment, Label, Task};
 
 use crate::connectors::{get_matching_remote_connectors, RemoteConnector, RemoteTaskState};
-use crate::property::PropertyManager;
+use crate::property::{PropertyManager, PropertyValueType};
 use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_date, parse_ids, read_from_pipe, str_to_color, success_message};
 
@@ -851,6 +852,7 @@ fn make_comparison(first: &Task, second: &Task, prop: &str, value_type: &str) ->
 
 pub(crate) fn task_list(status: Option<Vec<String>>,
              keyword: Option<String>,
+             filter: Option<String>,
              from: Option<String>,
              until: Option<String>,
              author: Option<String>,
@@ -888,6 +890,37 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                     let keyword = keyword.as_ref().unwrap().as_str();
                     let props = task.get_all_properties();
                     if !props.iter().any(|entry| entry.1.contains(keyword)) {
+                        return false;
+                    }
+                }
+
+                if let Some(ref filter) = filter {
+                    let mut eval_context = HashMapContext::new();
+                    let context = extract_task_context(&task);
+
+                    for (k, v) in context {
+                        let property = prop_manager.get_properties().iter().find(|p| p.get_name() == k);
+                        let is_integer = match property {
+                            Some(property) => matches!(property.get_value_type(), PropertyValueType::Integer),
+                            None => false,
+                        };
+
+                        if is_integer {
+                            if let Ok(i) = v.parse::<i64>() {
+                                eval_context.set_value(k.into(), i.into()).unwrap();
+                            } else {
+                                eval_context.set_value(k.into(), v.into()).unwrap();
+                            }
+                        } else {
+                            eval_context.set_value(k.into(), v.into()).unwrap();
+                        }
+                    }
+
+                    if let Ok(result) = evalexpr::eval_boolean_with_context(filter, &eval_context) {
+                        if !result {
+                            return false;
+                        }
+                    } else {
                         return false;
                     }
                 }

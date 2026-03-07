@@ -55,6 +55,9 @@ enum Command {
         /// Limit displayed task count
         #[arg(short, long)]
         limit: Option<usize>,
+        /// Filter by expression, e.g. --filter "status == 'OPEN' && priority > 1"
+        #[arg(long)]
+        filter: Option<String>,
         /// Disable colors
         #[arg(long)]
         no_color: bool,
@@ -646,7 +649,7 @@ fn main() -> ExitCode {
     let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
     let success = match args.command {
-        Some(Command::List { status, keyword, from, until, author, columns, headers, sort, limit, no_color }) => task_list(status, keyword, from, until, author, columns, headers, sort, limit, no_color),
+        Some(Command::List { status, keyword, filter, from, until, author, columns, headers, sort, limit, no_color }) => task_list(status, keyword, filter, from, until, author, columns, headers, sort, limit, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
         Some(Command::Create { name, description, no_desc, push, remote, connector_type: connector }) => task_create(name, description, no_desc, push, &remote, &connector),
         Some(Command::Status { ids, status, push, remote, connector_type: connector, no_color }) => task_status(ids, status, push, &remote, &connector, no_color),
