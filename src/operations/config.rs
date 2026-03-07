@@ -1,4 +1,4 @@
-use crate::connectors::get_config_options_from_connectors;
+use crate::connectors::{get_config_options_from_connectors, get_matching_remote_connectors};
 use crate::util::{error_message, success_message};
 
 pub(crate) mod status;
@@ -99,4 +99,18 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
 pub(crate) fn task_config_list() -> bool {
     let from_connectors = get_config_options_from_connectors().join("\n");
     success_message("task.list.columns\ntask.list.show.headers\ntask.list.sort\ntask.status.open\ntask.status.closed\ntask.default.connector\ntask.ref\n".to_string() + &from_connectors)
+}
+
+pub(crate) fn task_config_connectors_list(name: Option<String>) -> bool {
+    match gittask::list_remotes(&name) {
+        Ok(remotes) => {
+            let connectors = get_matching_remote_connectors(remotes, &None);
+            let mut result = vec![];
+            for (connector, user, repo) in connectors {
+                result.push(format!("{}: {}/{}", connector.type_name(), user, repo));
+            }
+            success_message(result.join("\n"))
+        },
+        Err(e) => error_message(format!("ERROR: {e}"))
+    }
 }

@@ -372,6 +372,12 @@ You can also export, manually edit and import back task properties configuration
     git task config props import
     git task config props reset
 
+#### connectors
+
+List configured connectors:
+
+    git task connectors list
+
 ### help
 
 Show available commands or their arguments:

@@ -443,6 +443,21 @@ enum ConfigCommand {
         #[command(subcommand)]
         subcommand: PropertiesCommand,
     },
+    /// Configure connectors
+    Connectors {
+        #[command(subcommand)]
+        subcommand: ConnectorsCommand,
+    },
+}
+
+#[derive(Subcommand)]
+#[clap(visible_aliases(["conns", "conn"]))]
+pub(crate) enum ConnectorsCommand {
+    /// List configured connectors
+    List {
+        /// remote name
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -696,6 +711,13 @@ fn task_config(subcommand: ConfigCommand) -> bool {
         ConfigCommand::List => task_config_list(),
         ConfigCommand::Status { subcommand } => task_config_status(subcommand),
         ConfigCommand::Properties { subcommand } => task_config_properties(subcommand),
+        ConfigCommand::Connectors { subcommand } => task_config_connectors(subcommand),
+    }
+}
+
+fn task_config_connectors(subcommand: ConnectorsCommand) -> bool {
+    match subcommand {
+        ConnectorsCommand::List { name } => task_config_connectors_list(name),
     }
 }
 
