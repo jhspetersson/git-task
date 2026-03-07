@@ -63,7 +63,10 @@ impl RemoteConnector for RedmineRemoteConnector {
 
     fn supports_remote(&self, _url: &str) -> Option<(String, String)> {
         match gittask::get_config_value("task.redmine.url") {
-            Ok(_) => Some((String::new(), String::new())),
+            Ok(_) => match gittask::get_config_value("task.redmine.project.id") {
+                Ok(project_id) => Some((String::new(), project_id)),
+                _ => None,
+            }
             _ => None,
         }
     }
