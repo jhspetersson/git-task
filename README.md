@@ -91,9 +91,11 @@ Filter by author:
 
 Filter by expression:
 
-    git task list --filter "status == 'OPEN' && author == 'jhspetersson'"
-    git task list --filter "priority > 1 || status == 'IN_PROGRESS'"
+    git task list --filter 'status == "OPEN" && author == "jhspetersson"'
+    git task list --filter 'priority > 1 || status == "IN_PROGRESS"'
     git task list --filter "id > 100"
+
+Expression language used: [evalexpr](https://github.com/ISibboI/evalexpr).
 
 Show specific columns:
 
@@ -356,8 +358,8 @@ Task properties are automatically exported to the evaluation context as string o
 For example, we want task ID and names to be rendered with dark gray color and strikethrough style if the status is `CLOSED` 
 (like they do it in JetBrains products, e.g., YouTrack):
 
-    git task cfg prop cond add id "status == \"CLOSED\"" DarkGray strikethrough
-    git task cfg prop cond add name "status == \"CLOSED\"" DarkGray strikethrough
+    git task cfg prop cond add id 'status == "CLOSED"' DarkGray strikethrough
+    git task cfg prop cond add name 'status == "CLOSED"' DarkGray strikethrough
 
 Conditional formatting has a precedence over enum values, which supersede the default color and style of the defined property. 
 
