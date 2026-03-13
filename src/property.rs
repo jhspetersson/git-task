@@ -367,6 +367,10 @@ impl PropertyManager {
             return Err(format!("`{}` is a reserved property name", name));
         }
 
+        if self.properties.iter().any(|p| p.name == name) {
+            return Err("Property with this name already exists".to_string());
+        }
+
         let property = Property {
             name,
             value_type: value_type.parse()?,
@@ -606,5 +610,25 @@ mod tests {
         ]);
         let result = PropertyManager::find_cond_format(&cond_format, &context, &properties);
         assert!(result.is_some(), "Conditional format with DateTime property should match when using numeric comparison (1000000 > 100)");
+    }
+
+    #[test]
+    fn test_add_property_duplicate_name() {
+        let mut manager = PropertyManager {
+            properties: vec![
+                Property {
+                    name: "priority".to_string(),
+                    value_type: PropertyValueType::String,
+                    color: "Default".to_string(),
+                    style: None,
+                    enum_values: None,
+                    cond_format: None,
+                },
+            ],
+        };
+        let result = manager.add_property("priority".to_string(), "integer".to_string(), "Red".to_string(), None, None, None);
+        assert!(result.is_err(), "add_property should reject duplicate property name");
+
+        let _ = manager.set_defaults();
     }
 }
