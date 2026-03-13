@@ -78,14 +78,23 @@ impl StatusManager {
     }
 
     pub fn set_statuses(&mut self, statuses: Vec<Status>) -> Result<(), String> {
-        let name_contains_comma = statuses.iter().find(|s| s.name.contains(",") || s.shortcut.contains(",")).is_some();
-        match name_contains_comma {
-            true => Err("Status name and shortcut can't contain comma".to_string()),
-            false => {
-                self.statuses = statuses;
-                save_config(&self.statuses)
+        if statuses.iter().any(|s| s.name.contains(",") || s.shortcut.contains(",")) {
+            return Err("Status name and shortcut can't contain comma".to_string());
+        }
+
+        let mut seen_names = std::collections::HashSet::new();
+        let mut seen_shortcuts = std::collections::HashSet::new();
+        for s in &statuses {
+            if !seen_names.insert(&s.name) {
+                return Err(format!("Duplicate status name: {}", s.name));
+            }
+            if !seen_shortcuts.insert(&s.shortcut) {
+                return Err(format!("Duplicate shortcut: {}", s.shortcut));
             }
         }
+
+        self.statuses = statuses;
+        save_config(&self.statuses)
     }
 
     pub fn set_defaults(&mut self) -> Result<(), String> {
@@ -379,6 +388,28 @@ mod tests {
             manager.get_final_status()
         }));
         assert!(result.is_ok(), "get_final_status should not panic when no status has is_done=true");
+    }
+
+    #[test]
+    fn test_set_statuses_rejects_duplicate_names() {
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        let dupes = vec![
+            Status { name: "TODO".into(), shortcut: "t".into(), color: "Red".into(), style: None, is_done: false },
+            Status { name: "TODO".into(), shortcut: "d".into(), color: "Green".into(), style: None, is_done: true },
+        ];
+        let result = manager.set_statuses(dupes);
+        assert!(result.is_err(), "set_statuses should reject duplicate status names");
+    }
+
+    #[test]
+    fn test_set_statuses_rejects_duplicate_shortcuts() {
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        let dupes = vec![
+            Status { name: "TODO".into(), shortcut: "x".into(), color: "Red".into(), style: None, is_done: false },
+            Status { name: "DONE".into(), shortcut: "x".into(), color: "Green".into(), style: None, is_done: true },
+        ];
+        let result = manager.set_statuses(dupes);
+        assert!(result.is_err(), "set_statuses should reject duplicate shortcuts");
     }
 
     #[test]
