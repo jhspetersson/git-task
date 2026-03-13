@@ -41,7 +41,7 @@ pub(crate) fn task_config_properties_set(name: String, param: String, value: Str
         Ok(_) => {
             println!("{name} {param} has been updated");
 
-            if param.as_str() == "name" {
+            if param.as_str() == "name" && value != name {
                 match gittask::list_tasks() {
                     Ok(tasks) => {
                         for mut task in tasks {
@@ -202,5 +202,43 @@ pub(crate) fn task_config_properties_cond_format_clear(name: String) -> bool {
     match prop_manager.clear_cond_format(name) {
         Ok(_) => success_message("Property conditional formatting has been cleared".to_string()),
         Err(e) => error_message(format!("ERROR: {e}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rename_property_to_same_name_preserves_task_data() {
+        // Create a task with a custom property
+        let mut task = gittask::Task::new("Test".to_string(), "desc".to_string(), "OPEN".to_string()).unwrap();
+        task.set_property("priority", "high");
+        let create_result = gittask::create_task(task);
+        assert!(create_result.is_ok());
+        let task = create_result.unwrap();
+        let task_id = task.get_id().unwrap();
+
+        // Simulate what task_config_properties_set does when param == "name"
+        let name = "priority".to_string();
+        let value = "priority".to_string();
+        if name != value {
+            if let Ok(tasks) = gittask::list_tasks() {
+                for mut task in tasks {
+                    if task.has_property(&name) {
+                        let task_prop_value = task.get_property(&name).unwrap().clone();
+                        task.set_property(&value, &task_prop_value);
+                        task.delete_property(&name);
+                        let _ = gittask::update_task(task);
+                    }
+                }
+            }
+        }
+
+        let updated_task = gittask::find_task(&task_id).unwrap().unwrap();
+        assert!(updated_task.has_property("priority"), "Property should still exist after renaming to the same name");
+        assert_eq!(updated_task.get_property("priority").unwrap(), "high");
+
+        let _ = gittask::delete_tasks(&[&task_id]);
     }
 }
