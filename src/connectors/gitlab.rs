@@ -60,7 +60,7 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
-        match Regex::new(&(get_base_url() + "([a-z0-9-]+)/([a-z0-9-]+)\\.?")).unwrap().captures(url) {
+        match Regex::new(&(get_base_url() + "([a-zA-Z0-9._-]+)/([a-zA-Z0-9._-]+)\\.?")).unwrap().captures(url) {
             Some(caps) if caps.len() == 3 => {
                 let user = caps.get(1)?.as_str().to_string();
                 let repo = caps.get(2)?.as_str().to_string();
@@ -460,5 +460,14 @@ mod test {
         assert!(connector.supports_remote("https://gitlab.kitware.com/jhspetersson/rust-gitlab.git").is_some());
 
         gittask::set_config_value("task.gitlab.url", &gitlab_url).unwrap();
+    }
+
+    #[test]
+    fn test_remote_url_with_uppercase_and_underscore() {
+        let connector = GitlabRemoteConnector {};
+        gittask::set_config_value("task.gitlab.url", "https://gitlab.com/").unwrap();
+        let result = connector.supports_remote("https://gitlab.com/UserName/my_repo");
+        gittask::set_config_value("task.gitlab.url", "https://gitlab.com/").unwrap();
+        assert!(result.is_some());
     }
 }
