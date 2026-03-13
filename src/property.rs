@@ -475,7 +475,7 @@ impl PropertyManager {
                 match prev_enum_count == enum_values.len() {
                     true => Err("Enum value not found".to_string()),
                     false => {
-                        property.enum_values = Some(enum_values);
+                        property.enum_values = if enum_values.is_empty() { None } else { Some(enum_values) };
                         Self::save_config(&self.properties)
                     },
                 }
@@ -714,6 +714,66 @@ mod tests {
         ];
         let result = manager.set_properties(dupes);
         assert!(result.is_err(), "set_properties should reject duplicate property names");
+
+        let _ = manager.set_defaults();
+    }
+
+    #[test]
+    fn test_delete_last_enum_sets_none() {
+        let mut manager = PropertyManager {
+            properties: vec![
+                Property {
+                    name: "priority".to_string(),
+                    value_type: PropertyValueType::String,
+                    color: "Default".to_string(),
+                    style: None,
+                    enum_values: Some(vec![
+                        PropertyEnumValue {
+                            name: "HIGH".to_string(),
+                            color: "Red".to_string(),
+                            style: None,
+                        },
+                    ]),
+                    cond_format: None,
+                },
+            ],
+        };
+        let _ = manager.delete_enum_property("priority".to_string(), "HIGH".to_string());
+        assert!(manager.properties[0].enum_values.is_none(), "enum_values should be None after deleting last enum value, not Some([])");
+
+        let _ = manager.set_defaults();
+    }
+
+    #[test]
+    fn test_set_properties_rejects_reserved_names() {
+        let mut manager = PropertyManager {
+            properties: vec![],
+        };
+        let reserved = vec![
+            Property {
+                name: "id".to_string(),
+                value_type: PropertyValueType::Integer,
+                color: "Default".to_string(),
+                style: None,
+                enum_values: None,
+                cond_format: None,
+            },
+        ];
+        let result = manager.set_properties(reserved);
+        assert!(result.is_err(), "set_properties should reject reserved property name 'id'");
+
+        let reserved = vec![
+            Property {
+                name: "labels".to_string(),
+                value_type: PropertyValueType::String,
+                color: "Default".to_string(),
+                style: None,
+                enum_values: None,
+                cond_format: None,
+            },
+        ];
+        let result = manager.set_properties(reserved);
+        assert!(result.is_err(), "set_properties should reject reserved property name 'labels'");
 
         let _ = manager.set_defaults();
     }
