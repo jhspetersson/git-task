@@ -67,7 +67,7 @@ pub(crate) fn task_comment_set(
             if comments.is_none() || comments.as_ref().unwrap().is_empty() {
                 return error_message("Task has no comments".to_string());
             }
-            let comment = comments.as_mut().unwrap().iter_mut().find(|comment| comment.get_id().unwrap() == comment_id);
+            let comment = comments.as_mut().unwrap().iter_mut().find(|comment| comment.get_id().map(|id| id == comment_id).unwrap_or(false));
             if comment.is_none() {
                 return error_message("Comment not found".to_string());
             }
@@ -117,7 +117,7 @@ pub(crate) fn task_comment_edit(
             if comments.is_none() || comments.as_ref().unwrap().is_empty() {
                 return error_message("Task has no comments".to_string());
             }
-            let comment = comments.as_mut().unwrap().iter_mut().find(|comment| comment.get_id().unwrap() == comment_id);
+            let comment = comments.as_mut().unwrap().iter_mut().find(|comment| comment.get_id().map(|id| id == comment_id).unwrap_or(false));
             if comment.is_none() {
                 return error_message("Comment not found".to_string());
             }

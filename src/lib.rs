@@ -776,6 +776,26 @@ mod test {
     }
 
     #[test]
+    fn test_find_comment_by_id_with_no_id_comment() {
+        let mut task = Task::construct_task(
+            "Test task".to_string(),
+            "Description".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+        let comment_no_id = Comment { id: None, props: HashMap::new(), text: "No ID".to_string() };
+        let comment_with_id = Comment::new("5".to_string(), HashMap::new(), "Has ID".to_string());
+        task.set_comments(vec![comment_no_id, comment_with_id]);
+
+        let comments = task.get_comments().clone().unwrap();
+        let result = std::panic::catch_unwind(|| {
+            comments.iter().any(|c| c.get_id().map(|id| id == "5").unwrap_or(false))
+        });
+        assert!(result.is_ok(), "Finding comment by ID should not panic when other comments have no ID");
+        assert!(result.unwrap(), "Should find the comment with ID 5");
+    }
+
+    #[test]
     fn test_add_duplicate_label() {
         let mut task = Task::construct_task(
             "Test task".to_string(),
