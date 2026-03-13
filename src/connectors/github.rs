@@ -26,7 +26,7 @@ impl RemoteConnector for GithubRemoteConnector {
     }
 
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
-        match Regex::new("((https://)|(git@))github.com[/:](?P<user>[a-zA-Z0-9-]+)/(?P<repo>[a-zA-Z0-9-]+)(\\.git)?").unwrap().captures(url) {
+        match Regex::new("((https://)|(git@))github.com[/:](?P<user>[a-zA-Z0-9._-]+)/(?P<repo>[a-zA-Z0-9._-]+)(\\.git)?").unwrap().captures(url) {
             Some(caps) if caps.len() >= 3 => {
                 let user = caps.name("user")?.as_str().to_string();
                 let repo = caps.name("repo")?.as_str().to_string();
@@ -489,4 +489,11 @@ mod test {
         assert!(connector.supports_remote("git@github.com:VIK-777/java-telegram-meetup-bot.git").is_some());
         assert!(connector.supports_remote("https://github.com/jhspetersson/fselect.git").is_some());
     }
+
+    #[test]
+    fn test_remote_url_with_underscore() {
+        let connector = GithubRemoteConnector {};
+        assert!(connector.supports_remote("https://github.com/some_user/my_repo.git").is_some());
+    }
+
 }
