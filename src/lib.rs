@@ -452,7 +452,7 @@ fn get_next_id() -> Result<String, String> {
 }
 
 pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
-    let mut task = find_task(&id)?.unwrap();
+    let mut task = find_task(&id)?.ok_or_else(|| format!("Task ID {id} not found"))?;
     task.set_id(new_id.to_string());
     create_task(task)?;
     delete_tasks(&[&id])?;
@@ -745,6 +745,34 @@ mod test {
 
         let delete_result = delete_tasks(&["GH-42"]);
         assert!(delete_result.is_ok());
+    }
+
+    #[test]
+    fn test_update_task_id_nonexistent() {
+        let result = update_task_id("99999", "99998");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_update_comment_id_with_no_id_comment() {
+        let mut task = Task::construct_task(
+            "Test task".to_string(),
+            "Description".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+        let comment_with_id = Comment::new("1".to_string(), HashMap::new(), "Comment with ID".to_string());
+        let comment_without_id = Comment { id: None, props: HashMap::new(), text: "Comment without ID".to_string() };
+        task.set_comments(vec![comment_without_id, comment_with_id]);
+        let create_result = create_task(task);
+        assert!(create_result.is_ok());
+        let task = create_result.unwrap();
+        let task_id = task.get_id().unwrap();
+
+        let result = update_comment_id(&task_id, "1", "2");
+        assert!(result.is_ok());
+
+        let _ = delete_tasks(&[&task_id]);
     }
 
     #[test]
