@@ -206,24 +206,26 @@ pub(crate) fn task_replace(
 
 pub(crate) fn task_unset(ids: String, prop_name: String) -> bool {
     let ids = parse_ids(ids);
+    let mut success = true;
     for id in ids {
         match gittask::find_task(&id) {
             Ok(Some(mut task)) => {
                 if task.delete_property(&prop_name) {
                     match gittask::update_task(task) {
                         Ok(_) => println!("Task ID {id} updated"),
-                        Err(e) => eprintln!("ERROR: {e}")
+                        Err(e) => { eprintln!("ERROR: {e}"); success = false; }
                     }
                 } else {
-                    eprintln!("Task ID {id}: property not found")
+                    eprintln!("Task ID {id}: property not found");
+                    success = false;
                 }
             },
-            Ok(None) => eprintln!("Task ID {id} not found"),
-            Err(e) => eprintln!("ERROR: {e}")
+            Ok(None) => { eprintln!("Task ID {id} not found"); success = false; },
+            Err(e) => { eprintln!("ERROR: {e}"); success = false; }
         }
     };
 
-    true
+    success
 }
 
 pub(crate) fn task_edit(id: String, prop_name: String) -> bool {
