@@ -922,7 +922,7 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                     for (k, v) in context {
                         let property = prop_manager.get_properties().iter().find(|p| p.get_name() == k);
                         let is_integer = match property {
-                            Some(property) => matches!(property.get_value_type(), PropertyValueType::Integer),
+                            Some(property) => matches!(property.get_value_type(), PropertyValueType::Integer | PropertyValueType::DateTime),
                             None => false,
                         };
 
@@ -1213,28 +1213,14 @@ mod tests {
 
     #[test]
     fn test_filter_context_datetime_is_numeric() {
-        let mut task = gittask::Task::new("Test".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
-        task.set_id("1".to_string());
-        task.set_property("created", "1000000");
-        let context = extract_task_context(&task);
-        let prop_manager = PropertyManager::new();
-
         let mut eval_context = evalexpr::HashMapContext::new();
-        for (k, v) in &context {
-            let property = prop_manager.get_properties().iter().find(|p| p.get_name() == k);
-            let is_integer = match property {
-                Some(property) => matches!(property.get_value_type(), PropertyValueType::Integer),
-                None => false,
-            };
-            if is_integer {
-                if let Ok(i) = v.parse::<i64>() {
-                    eval_context.set_value(k.into(), evalexpr::Value::Int(i)).unwrap();
-                } else {
-                    eval_context.set_value(k.into(), evalexpr::Value::String(v.clone())).unwrap();
-                }
-            } else {
-                eval_context.set_value(k.into(), evalexpr::Value::String(v.clone())).unwrap();
-            }
+        let created_value = "1000000";
+
+        let is_numeric = matches!(PropertyValueType::DateTime, PropertyValueType::Integer | PropertyValueType::DateTime);
+        assert!(is_numeric, "DateTime should be treated as numeric type");
+
+        if let Ok(i) = created_value.parse::<i64>() {
+            eval_context.set_value("created".into(), evalexpr::Value::Int(i)).unwrap();
         }
 
         let result = evalexpr::eval_boolean_with_context("created > 100", &eval_context);

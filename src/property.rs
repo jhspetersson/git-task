@@ -575,6 +575,8 @@ mod tests {
         };
         let result = manager.set_parameter(&"priority".to_string(), &"name".to_string(), &"priority".to_string());
         assert!(result.is_ok(), "Setting property name to same value should succeed, not error with 'Name already exists'");
+
+        let _ = manager.set_defaults();
     }
 
     #[test]
