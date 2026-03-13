@@ -1134,7 +1134,7 @@ pub(crate) fn task_stats(no_color: bool) -> bool {
 fn check_no_color(no_color: bool) -> bool {
     no_color
         || gittask::get_config_value("color.ui").unwrap_or_else(|_| "true".to_string()) == "false"
-        || std::env::var("NO_COLOR").unwrap_or_else(|_| "0".to_string()) == "1"
+        || std::env::var("NO_COLOR").map(|v| !v.is_empty()).unwrap_or(false)
 }
 
 fn extract_task_context(task: &Task) -> HashMap<String, String> {
