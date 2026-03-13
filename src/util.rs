@@ -481,10 +481,18 @@ pub fn get_text_from_editor(text: Option<&String>) -> Option<String> {
             .status();
     }
 
-    if !status.unwrap().success() {
-        let _ = tmp_file.close();
-        eprintln!("Editor exited with a non-zero status. Changes might not be saved.");
-        return None;
+    match status {
+        Ok(s) if !s.success() => {
+            let _ = tmp_file.close();
+            eprintln!("Editor exited with a non-zero status. Changes might not be saved.");
+            return None;
+        },
+        Err(_) => {
+            let _ = tmp_file.close();
+            eprintln!("Failed to launch editor.");
+            return None;
+        },
+        _ => {}
     }
 
     let mut file = File::open(tmp_file.path()).unwrap();
@@ -765,6 +773,27 @@ mod tests {
     #[test]
     fn test_parse_bool_invalid() {
         assert!(parse_bool("not_a_bool").is_err());
+    }
+
+    #[test]
+    fn test_get_text_from_editor_both_fail() {
+        let prev_editor = std::env::var("EDITOR").ok();
+        let prev_visual = std::env::var("VISUAL").ok();
+        let prev_git_editor = std::env::var("GIT_EDITOR").ok();
+        unsafe {
+            std::env::set_var("GIT_EDITOR", "/nonexistent/editor/path");
+            std::env::remove_var("VISUAL");
+            std::env::remove_var("EDITOR");
+        }
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            get_text_from_editor(None)
+        }));
+        unsafe {
+            if let Some(v) = prev_editor { std::env::set_var("EDITOR", v); }
+            if let Some(v) = prev_visual { std::env::set_var("VISUAL", v); }
+            if let Some(v) = prev_git_editor { std::env::set_var("GIT_EDITOR", v); }
+        }
+        assert!(result.is_ok(), "get_text_from_editor should not panic when both editor and notepad fail");
     }
 
     #[test]
