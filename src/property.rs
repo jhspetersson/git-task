@@ -323,7 +323,9 @@ impl PropertyManager {
             Some(saved_prop) => {
                 let set_result = match parameter.as_str() {
                     "name" => {
-                        if properties.iter().find(|p| p.name == value.to_string() && p.name != saved_prop.name).is_some() {
+                        if value.to_lowercase() == "id" || value.to_lowercase() == "labels" {
+                            Err(format!("`{}` is a reserved property name", value))
+                        } else if properties.iter().find(|p| p.name == value.to_string() && p.name != saved_prop.name).is_some() {
                             Err("Name already exists for another property".to_string())
                         } else {
                             saved_prop.name = value.clone();
@@ -655,6 +657,57 @@ mod tests {
         };
         let result = manager.add_enum_property("priority".to_string(), "HIGH".to_string(), "Blue".to_string(), None);
         assert!(result.is_err(), "add_enum_property should reject duplicate enum value name");
+
+        let _ = manager.set_defaults();
+    }
+
+    #[test]
+    fn test_set_parameter_rejects_reserved_name() {
+        let mut manager = PropertyManager {
+            properties: vec![
+                Property {
+                    name: "priority".to_string(),
+                    value_type: PropertyValueType::String,
+                    color: "Default".to_string(),
+                    style: None,
+                    enum_values: None,
+                    cond_format: None,
+                },
+            ],
+        };
+        let result = manager.set_parameter(&"priority".to_string(), &"name".to_string(), &"id".to_string());
+        assert!(result.is_err(), "set_parameter should reject renaming to reserved name 'id'");
+        let result = manager.set_parameter(&"priority".to_string(), &"name".to_string(), &"labels".to_string());
+        assert!(result.is_err(), "set_parameter should reject renaming to reserved name 'labels'");
+
+        let _ = manager.set_defaults();
+    }
+
+    #[test]
+    fn test_set_properties_rejects_duplicate_names() {
+        let mut manager = PropertyManager {
+            properties: vec![],
+        };
+        let dupes = vec![
+            Property {
+                name: "priority".to_string(),
+                value_type: PropertyValueType::String,
+                color: "Default".to_string(),
+                style: None,
+                enum_values: None,
+                cond_format: None,
+            },
+            Property {
+                name: "priority".to_string(),
+                value_type: PropertyValueType::Integer,
+                color: "Red".to_string(),
+                style: None,
+                enum_values: None,
+                cond_format: None,
+            },
+        ];
+        let result = manager.set_properties(dupes);
+        assert!(result.is_err(), "set_properties should reject duplicate property names");
 
         let _ = manager.set_defaults();
     }
