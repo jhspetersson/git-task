@@ -1162,7 +1162,7 @@ pub(crate) fn task_stats(no_color: bool) -> bool {
 fn check_no_color(no_color: bool) -> bool {
     no_color
         || gittask::get_config_value("color.ui").unwrap_or_else(|_| "true".to_string()) == "false"
-        || std::env::var("NO_COLOR").map(|v| !v.is_empty()).unwrap_or(false)
+        || std::env::var("NO_COLOR").is_ok()
 }
 
 fn extract_task_context(task: &Task) -> HashMap<String, String> {
@@ -1266,5 +1266,13 @@ mod tests {
             import_from_input(None, &input)
         }));
         assert!(result.is_ok(), "import_from_input should not panic when task has no id");
+    }
+
+    #[test]
+    fn test_check_no_color_empty_value() {
+        unsafe { std::env::set_var("NO_COLOR", ""); }
+        let result = check_no_color(false);
+        unsafe { std::env::remove_var("NO_COLOR"); }
+        assert!(result, "NO_COLOR='' should disable color per the NO_COLOR spec");
     }
 }
