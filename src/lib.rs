@@ -117,7 +117,13 @@ impl Task {
             self.comments = Some(vec![]);
         }
 
-        let id = Some(id.unwrap_or_else(|| (self.comments.as_ref().unwrap().len() + 1).to_string()));
+        let id = Some(id.unwrap_or_else(|| {
+            let max_id = self.comments.as_ref().unwrap().iter()
+                .filter_map(|c| c.get_id().and_then(|id| id.parse::<u64>().ok()))
+                .max()
+                .unwrap_or(0);
+            (max_id + 1).to_string()
+        }));
 
         if !props.contains_key("created") {
             props.insert("created".to_string(), get_current_timestamp().to_string());
