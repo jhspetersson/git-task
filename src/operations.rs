@@ -570,9 +570,12 @@ pub(crate) fn task_push(
                         } else {
                             if !no_comments {
                                 let mut comments_updated = false;
-                                let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().map(|comment| comment.get_id().unwrap()).collect();
+                                let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
                                 for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
-                                    let local_comment_id = comment.get_id().unwrap();
+                                    let local_comment_id = match comment.get_id() {
+                                        Some(id) => id,
+                                        None => continue,
+                                    };
                                     if !remote_comment_ids.contains(&local_comment_id) {
                                         create_remote_comment(&connector, &user, &repo, &id, &comment);
                                         comments_updated = true;
@@ -631,7 +634,10 @@ pub(crate) fn task_push(
 }
 
 fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &String, repo: &String, id: &String, comment: &Comment) {
-    let local_comment_id = comment.get_id().unwrap();
+    let local_comment_id = match comment.get_id() {
+        Some(id) => id,
+        None => { eprintln!("ERROR: comment has no ID, skipping"); return; }
+    };
     match connector.create_remote_comment(user, repo, id, comment) {
         Ok(remote_comment_id) => {
             println!("Created REMOTE comment ID {}", remote_comment_id);
@@ -1203,6 +1209,37 @@ mod tests {
         task_b.set_property("created", "10");
         let result = make_comparison(&task_a, &task_b, "created", "datetime");
         assert_eq!(result, std::cmp::Ordering::Less, "datetime comparison should be numeric, not lexicographic (9 < 10)");
+    }
+
+    #[test]
+    fn test_filter_context_datetime_is_numeric() {
+        let mut task = gittask::Task::new("Test".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task.set_id("1".to_string());
+        task.set_property("created", "1000000");
+        let context = extract_task_context(&task);
+        let prop_manager = PropertyManager::new();
+
+        let mut eval_context = evalexpr::HashMapContext::new();
+        for (k, v) in &context {
+            let property = prop_manager.get_properties().iter().find(|p| p.get_name() == k);
+            let is_integer = match property {
+                Some(property) => matches!(property.get_value_type(), PropertyValueType::Integer),
+                None => false,
+            };
+            if is_integer {
+                if let Ok(i) = v.parse::<i64>() {
+                    eval_context.set_value(k.into(), evalexpr::Value::Int(i)).unwrap();
+                } else {
+                    eval_context.set_value(k.into(), evalexpr::Value::String(v.clone())).unwrap();
+                }
+            } else {
+                eval_context.set_value(k.into(), evalexpr::Value::String(v.clone())).unwrap();
+            }
+        }
+
+        let result = evalexpr::eval_boolean_with_context("created > 100", &eval_context);
+        assert!(result.is_ok(), "datetime filter should evaluate without error, got: {:?}", result);
+        assert!(result.unwrap(), "created (1000000) should be > 100 numerically");
     }
 
     #[test]
