@@ -323,7 +323,7 @@ impl PropertyManager {
             Some(saved_prop) => {
                 let set_result = match parameter.as_str() {
                     "name" => {
-                        if properties.iter().find(|property| property.name == value.to_string()).is_some() {
+                        if properties.iter().find(|p| p.name == value.to_string() && p.name != saved_prop.name).is_some() {
                             Err("Name already exists for another property".to_string())
                         } else {
                             saved_prop.name = value.clone();
@@ -549,6 +549,32 @@ mod tests {
         let source = vec!["HIGH".to_string(), "red".to_string(), "orphan".to_string()];
         let result = PropertyEnumValue::from(source);
         assert_eq!(result.len(), 1, "Odd trailing element should be ignored without panic");
+    }
+
+    #[test]
+    fn test_set_parameter_name_to_same_value() {
+        let mut manager = PropertyManager {
+            properties: vec![
+                Property {
+                    name: "priority".to_string(),
+                    value_type: PropertyValueType::String,
+                    color: "Default".to_string(),
+                    style: None,
+                    enum_values: None,
+                    cond_format: None,
+                },
+                Property {
+                    name: "severity".to_string(),
+                    value_type: PropertyValueType::String,
+                    color: "Default".to_string(),
+                    style: None,
+                    enum_values: None,
+                    cond_format: None,
+                },
+            ],
+        };
+        let result = manager.set_parameter(&"priority".to_string(), &"name".to_string(), &"priority".to_string());
+        assert!(result.is_ok(), "Setting property name to same value should succeed, not error with 'Name already exists'");
     }
 
     #[test]
