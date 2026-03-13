@@ -178,6 +178,7 @@ pub(crate) fn task_replace(
         },
         false => None
     };
+    let mut success = true;
     for id in ids {
         match gittask::find_task(&id) {
             Ok(Some(mut task)) => {
@@ -194,17 +195,19 @@ pub(crate) fn task_replace(
                                 task_push(id.to_string(), remote, connector_type, false, false, no_color);
                             }
                         },
-                        Err(e) => eprintln!("ERROR: {e}")
+                        Err(e) => { eprintln!("ERROR: {e}"); success = false; }
                     }
                 } else {
-                    eprintln!("Task ID {id}: property not found")
+                    eprintln!("Task ID {id}: property not found");
+                    success = false;
                 }
             },
-            _ => {}
+            Ok(None) => { eprintln!("Task ID {id} not found"); success = false; },
+            Err(e) => { eprintln!("ERROR: {e}"); success = false; }
         }
     }
 
-    true
+    success
 }
 
 pub(crate) fn task_unset(ids: String, prop_name: String) -> bool {
