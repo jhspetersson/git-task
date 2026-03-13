@@ -22,7 +22,11 @@ where
             if let Some((start, end)) = s.split_once("..") {
                 let start_num = start.parse::<u64>().unwrap();
                 let end_num = end.parse::<u64>().unwrap();
-                (start_num..=end_num).map(|n| n.to_string()).collect::<Vec<_>>()
+                if start_num <= end_num {
+                    (start_num..=end_num).map(|n| n.to_string()).collect::<Vec<_>>()
+                } else {
+                    (end_num..=start_num).rev().map(|n| n.to_string()).collect::<Vec<_>>()
+                }
             } else {
                 vec![s]
             }
@@ -698,5 +702,19 @@ mod tests {
         let expected = "000000".to_string();
         let result = color_str_to_rgb_str(input);
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_expand_range_reversed() {
+        let input = vec!["5..3".to_string()];
+        let result: Vec<String> = input.into_iter().expand_range().collect();
+        assert_eq!(result, vec!["5".to_string(), "4".to_string(), "3".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_ids_reversed_range() {
+        let input = "10..8".to_string();
+        let result = parse_ids(input);
+        assert_eq!(result, vec!["10".to_string(), "9".to_string(), "8".to_string()]);
     }
 }
