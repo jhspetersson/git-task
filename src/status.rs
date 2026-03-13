@@ -139,7 +139,7 @@ impl StatusManager {
     pub fn get_starting_status(&self) -> String {
         match gittask::get_config_value("task.status.open") {
             Ok(s) => s,
-            _ => self.statuses.first().unwrap().name.clone()
+            _ => self.statuses.first().map(|s| s.name.clone()).unwrap_or_default()
         }
     }
 
@@ -337,6 +337,15 @@ mod tests {
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let result = manager.set_property(&"OPEN".to_string(), &"shortcut".to_string(), &"o".to_string());
         assert!(result.is_ok(), "Setting shortcut to same value should succeed, not error with 'Shortcut already exists'");
+    }
+
+    #[test]
+    fn test_get_starting_status_empty_statuses() {
+        let manager = StatusManager { statuses: vec![] };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            manager.get_starting_status()
+        }));
+        assert!(result.is_ok(), "get_starting_status should not panic when statuses is empty");
     }
 
     #[test]
