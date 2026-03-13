@@ -174,7 +174,7 @@ pub(crate) fn task_replace(
             Ok(Some(mut task)) => {
                 if let Some(value) = task.get_property(&prop_name) {
                     let new_value = match regex {
-                        Some(ref regex) => regex.replace_all(value.as_str(), search.as_str()).to_string(),
+                        Some(ref regex) => regex.replace_all(value.as_str(), replace.as_str()).to_string(),
                         None => value.replace(&search, &replace)
                     };
                     task.set_property(&prop_name, &new_value);
