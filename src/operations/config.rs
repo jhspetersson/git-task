@@ -98,7 +98,7 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
 
 pub(crate) fn task_config_list() -> bool {
     let from_connectors = get_config_options_from_connectors().join("\n");
-    success_message("task.list.columns\ntask.list.show.headers\ntask.list.sort\ntask.status.open\ntask.status.closed\ntask.default.connector\ntask.ref\n".to_string() + &from_connectors)
+    success_message("task.list.columns\ntask.list.show.headers\ntask.list.sort\ntask.status.open\ntask.status.in_progress\ntask.status.closed\ntask.default.connector\ntask.ref\n".to_string() + &from_connectors)
 }
 
 pub(crate) fn task_config_connectors_list(name: Option<String>) -> bool {
