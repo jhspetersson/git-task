@@ -836,7 +836,7 @@ fn make_comparison(first: &Task, second: &Task, prop: &str, value_type: &str) ->
         },
         _ => {
             match value_type {
-                "integer" => {
+                "integer" | "datetime" => {
                     let first_value = match first.get_property(prop) {
                         Some(value) => value.parse::<u64>().unwrap_or(0),
                         _ => 0,
@@ -1193,6 +1193,16 @@ mod tests {
     fn test_task_replace_returns_false_on_nonexistent_task() {
         let result = task_replace("99999".to_string(), "name".to_string(), "old".to_string(), "new".to_string(), false, false, &None, &None, true);
         assert!(!result, "task_replace should return false when task is not found");
+    }
+
+    #[test]
+    fn test_make_comparison_datetime_numeric() {
+        let mut task_a = gittask::Task::new("A".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task_a.set_property("created", "9");
+        let mut task_b = gittask::Task::new("B".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task_b.set_property("created", "10");
+        let result = make_comparison(&task_a, &task_b, "created", "datetime");
+        assert_eq!(result, std::cmp::Ordering::Less, "datetime comparison should be numeric, not lexicographic (9 < 10)");
     }
 
     #[test]
