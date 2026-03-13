@@ -397,6 +397,9 @@ impl PropertyManager {
         match property {
             Some(property) => {
                 let mut enum_values = property.enum_values.clone().unwrap_or_else(|| vec![]);
+                if enum_values.iter().any(|ev| ev.name == enum_value_name) {
+                    return Err("Enum value with this name already exists".to_string());
+                }
                 enum_values.push(PropertyEnumValue {
                     name: enum_value_name,
                     color: enum_value_color,
@@ -610,6 +613,32 @@ mod tests {
         ]);
         let result = PropertyManager::find_cond_format(&cond_format, &context, &properties);
         assert!(result.is_some(), "Conditional format with DateTime property should match when using numeric comparison (1000000 > 100)");
+    }
+
+    #[test]
+    fn test_add_enum_property_duplicate_name() {
+        let mut manager = PropertyManager {
+            properties: vec![
+                Property {
+                    name: "priority".to_string(),
+                    value_type: PropertyValueType::String,
+                    color: "Default".to_string(),
+                    style: None,
+                    enum_values: Some(vec![
+                        PropertyEnumValue {
+                            name: "HIGH".to_string(),
+                            color: "Red".to_string(),
+                            style: None,
+                        },
+                    ]),
+                    cond_format: None,
+                },
+            ],
+        };
+        let result = manager.add_enum_property("priority".to_string(), "HIGH".to_string(), "Blue".to_string(), None);
+        assert!(result.is_err(), "add_enum_property should reject duplicate enum value name");
+
+        let _ = manager.set_defaults();
     }
 
     #[test]
