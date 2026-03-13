@@ -543,4 +543,18 @@ mod tests {
         assert_eq!(result[0].condition, "id > 5");
         assert_eq!(result[1].condition, "id < 3");
     }
+
+    #[test]
+    fn test_property_enum_value_from_odd_elements() {
+        let source = vec!["HIGH".to_string(), "red".to_string(), "orphan".to_string()];
+        let result = PropertyEnumValue::from(source);
+        assert_eq!(result.len(), 1, "Odd trailing element should be ignored without panic");
+    }
+
+    #[test]
+    fn test_property_cond_format_from_odd_elements() {
+        let source = vec!["id > 5".to_string(), "red".to_string(), "orphan".to_string()];
+        let result = PropertyCondFormat::from(source);
+        assert_eq!(result.len(), 1, "Odd trailing element should be ignored without panic");
+    }
 }
