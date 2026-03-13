@@ -224,7 +224,7 @@ impl StatusManager {
                             return Err("Status shortcut can't contain comma".to_string());
                         }
 
-                        if statuses.iter().find(|status| status.shortcut == value.to_string()).is_some() {
+                        if statuses.iter().find(|s| s.shortcut == value.to_string() && s.name != saved_status.name).is_some() {
                             Err("Shortcut already exists for another status".to_string())
                         } else {
                             saved_status.shortcut = value.clone(); Ok(None)
