@@ -86,7 +86,7 @@ pub struct PropertyEnumValue {
 impl PropertyEnumValue {
     fn from(source: Vec<String>) -> Vec<PropertyEnumValue> {
         let mut result = vec![];
-        for i in 0..=source.len()/2 {
+        for i in 0..source.len()/2 {
             result.push(PropertyEnumValue{
                 name: source[i * 2].clone(),
                 color: source[i * 2 + 1].clone(),
@@ -119,7 +119,7 @@ pub struct PropertyCondFormat {
 impl PropertyCondFormat {
     fn from(source: Vec<String>) -> Vec<PropertyCondFormat> {
         let mut result = vec![];
-        for i in 0..=source.len()/2 {
+        for i in 0..source.len()/2 {
             result.push(PropertyCondFormat{
                 condition: source[i * 2].clone(),
                 color: source[i * 2 + 1].clone(),
@@ -495,5 +495,52 @@ impl PropertyManager {
             },
             None => Err("Property not found".to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_property_enum_value_from_two_elements() {
+        let source = vec!["HIGH".to_string(), "red".to_string()];
+        let result = PropertyEnumValue::from(source);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].name, "HIGH");
+        assert_eq!(result[0].color, "red");
+    }
+
+    #[test]
+    fn test_property_enum_value_from_four_elements() {
+        let source = vec![
+            "HIGH".to_string(), "red".to_string(),
+            "LOW".to_string(), "green".to_string(),
+        ];
+        let result = PropertyEnumValue::from(source);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "HIGH");
+        assert_eq!(result[1].name, "LOW");
+    }
+
+    #[test]
+    fn test_property_cond_format_from_two_elements() {
+        let source = vec!["id > 5".to_string(), "red".to_string()];
+        let result = PropertyCondFormat::from(source);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].condition, "id > 5");
+        assert_eq!(result[0].color, "red");
+    }
+
+    #[test]
+    fn test_property_cond_format_from_four_elements() {
+        let source = vec![
+            "id > 5".to_string(), "red".to_string(),
+            "id < 3".to_string(), "green".to_string(),
+        ];
+        let result = PropertyCondFormat::from(source);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].condition, "id > 5");
+        assert_eq!(result[1].condition, "id < 3");
     }
 }
