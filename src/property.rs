@@ -210,6 +210,12 @@ impl PropertyManager {
     }
 
     pub fn set_properties(&mut self, properties: Vec<Property>) -> Result<(), String> {
+        let mut seen_names = std::collections::HashSet::new();
+        for p in &properties {
+            if !seen_names.insert(&p.name) {
+                return Err(format!("Duplicate property name: {}", p.name));
+            }
+        }
         self.properties = properties;
         Self::save_config(&self.properties)
     }
