@@ -433,6 +433,14 @@ pub fn parse_date(date: Option<String>) -> Option<MappedLocalTime<DateTime<Local
     })
 }
 
+pub fn parse_bool(value: &str) -> Result<bool, String> {
+    match value.to_lowercase().as_str() {
+        "true" | "y" | "1" => Ok(true),
+        "false" | "n" | "0" => Ok(false),
+        _ => Err(format!("Invalid bool value: {value}")),
+    }
+}
+
 pub fn parse_datetime_to_seconds(datetime: String) -> String {
     DateTime::parse_from_rfc3339(&datetime).map(|dt| dt.with_timezone(&Utc).timestamp().to_string()).unwrap_or_default()
 }
@@ -736,6 +744,27 @@ mod tests {
             parse_datetime_to_seconds("not-a-datetime".to_string())
         });
         assert!(result.is_ok(), "parse_datetime_to_seconds should not panic on invalid input");
+    }
+
+    #[test]
+    fn test_parse_bool_true_values() {
+        assert_eq!(parse_bool("true"), Ok(true));
+        assert_eq!(parse_bool("y"), Ok(true));
+        assert_eq!(parse_bool("Y"), Ok(true));
+        assert_eq!(parse_bool("1"), Ok(true));
+    }
+
+    #[test]
+    fn test_parse_bool_false_values() {
+        assert_eq!(parse_bool("false"), Ok(false));
+        assert_eq!(parse_bool("n"), Ok(false));
+        assert_eq!(parse_bool("N"), Ok(false));
+        assert_eq!(parse_bool("0"), Ok(false));
+    }
+
+    #[test]
+    fn test_parse_bool_invalid() {
+        assert!(parse_bool("not_a_bool").is_err());
     }
 
     #[test]

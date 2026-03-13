@@ -1,7 +1,7 @@
 use nu_ansi_term::AnsiString;
 use serde::{Deserialize, Serialize};
 
-use crate::util::str_to_color;
+use crate::util::{parse_bool, str_to_color};
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Status {
@@ -237,9 +237,9 @@ impl StatusManager {
                         saved_status.style = Some(value.clone()); Ok(None)
                     },
                     "is_done" => {
-                        match value.parse::<bool>() {
+                        match parse_bool(value) {
                             Ok(v) => { saved_status.is_done = v; Ok(None) },
-                            Err(_) => Err(format!("Invalid bool value: {value}"))
+                            Err(e) => Err(e)
                         }
                     },
                     _ => Err("Unknown property".to_string())
@@ -310,6 +310,19 @@ mod tests {
         }));
         assert!(result.is_ok(), "set_property is_done should not panic on invalid bool");
         assert!(result.unwrap().is_err(), "set_property is_done should return Err for invalid bool");
+    }
+
+    #[test]
+    fn test_set_property_is_done_shorthand_values() {
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        assert!(manager.set_property(&"OPEN".to_string(), &"is_done".to_string(), &"y".to_string()).is_ok());
+        assert_eq!(*manager.statuses[0].is_done(), true);
+        assert!(manager.set_property(&"OPEN".to_string(), &"is_done".to_string(), &"n".to_string()).is_ok());
+        assert_eq!(*manager.statuses[0].is_done(), false);
+        assert!(manager.set_property(&"OPEN".to_string(), &"is_done".to_string(), &"1".to_string()).is_ok());
+        assert_eq!(*manager.statuses[0].is_done(), true);
+        assert!(manager.set_property(&"OPEN".to_string(), &"is_done".to_string(), &"0".to_string()).is_ok());
+        assert_eq!(*manager.statuses[0].is_done(), false);
     }
 
     #[test]

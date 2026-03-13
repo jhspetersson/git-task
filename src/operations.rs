@@ -15,7 +15,7 @@ use gittask::{Comment, Label, Task};
 use crate::connectors::{get_matching_remote_connectors, RemoteConnector, RemoteTaskState};
 use crate::property::{PropertyManager, PropertyValueType};
 use crate::status::StatusManager;
-use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_date, parse_ids, read_from_pipe, str_to_color, success_message};
+use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_bool, parse_date, parse_ids, read_from_pipe, str_to_color, success_message};
 
 pub(crate) fn task_create(
     name: String,
@@ -360,7 +360,7 @@ pub(crate) fn task_pull(
                 let state = match status {
                     Some(s) => {
                         let status = status_manager.get_full_status_name(&s);
-                        let is_done = status_manager.get_property(&status, "is_done").unwrap().parse::<bool>().unwrap();
+                        let is_done = status_manager.get_property(&status, "is_done").and_then(|v| parse_bool(&v).ok()).unwrap_or(false);
                         if is_done { RemoteTaskState::Closed(status.clone(), status) } else { RemoteTaskState::Open(status.clone(), status) }
                     },
                     None => RemoteTaskState::All
@@ -1035,7 +1035,7 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                 });
 
                 let show_headers = headers || match gittask::get_config_value("task.list.show.headers") {
-                    Ok(show_headers) => show_headers.parse::<bool>().unwrap_or(false),
+                    Ok(show_headers) => parse_bool(&show_headers).unwrap_or(false),
                     _ => false
                 };
 
