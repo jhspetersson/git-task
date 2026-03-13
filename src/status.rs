@@ -101,6 +101,10 @@ impl StatusManager {
             return Err("Status with this name already exists".to_string());
         }
 
+        if self.statuses.iter().any(|s| s.shortcut == shortcut) {
+            return Err("Status with this shortcut already exists".to_string());
+        }
+
         let status = Status {
             name,
             shortcut,
@@ -375,6 +379,13 @@ mod tests {
             manager.get_final_status()
         }));
         assert!(result.is_ok(), "get_final_status should not panic when no status has is_done=true");
+    }
+
+    #[test]
+    fn test_add_status_duplicate_shortcut() {
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        let result = manager.add_status("NEW".to_string(), "o".to_string(), "Blue".to_string(), false);
+        assert!(result.is_err(), "add_status should reject duplicate shortcut");
     }
 
     #[test]
