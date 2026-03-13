@@ -237,7 +237,10 @@ impl StatusManager {
                         saved_status.style = Some(value.clone()); Ok(None)
                     },
                     "is_done" => {
-                        saved_status.is_done = value.parse::<bool>().unwrap(); Ok(None)
+                        match value.parse::<bool>() {
+                            Ok(v) => { saved_status.is_done = v; Ok(None) },
+                            Err(_) => Err(format!("Invalid bool value: {value}"))
+                        }
                     },
                     _ => Err("Unknown property".to_string())
                 };
@@ -274,4 +277,52 @@ fn save_config(statuses: &Vec<Status>) -> Result<(), String> {
 pub fn parse_statuses(input: String) -> Result<Vec<Status>, String> {
     let result: Vec<Status> = serde_json::from_str(&input).map_err(|e| e.to_string())?;
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_test_statuses() -> Vec<Status> {
+        vec![
+            Status {
+                name: String::from("OPEN"),
+                shortcut: String::from("o"),
+                color: String::from("Red"),
+                style: None,
+                is_done: false,
+            },
+            Status {
+                name: String::from("CLOSED"),
+                shortcut: String::from("c"),
+                color: String::from("Green"),
+                style: None,
+                is_done: true,
+            },
+        ]
+    }
+
+    #[test]
+    fn test_set_property_is_done_invalid_value() {
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            manager.set_property(&"OPEN".to_string(), &"is_done".to_string(), &"not_a_bool".to_string())
+        }));
+        assert!(result.is_ok(), "set_property is_done should not panic on invalid bool");
+        assert!(result.unwrap().is_err(), "set_property is_done should return Err for invalid bool");
+    }
+
+    #[test]
+    fn test_set_property_name_to_same_value() {
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        let result = manager.set_property(&"OPEN".to_string(), &"name".to_string(), &"OPEN".to_string());
+        assert!(result.is_ok(), "Setting name to same value should succeed, not error with 'Name already exists'");
+    }
+
+    #[test]
+    fn test_set_property_shortcut_to_same_value() {
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        let result = manager.set_property(&"OPEN".to_string(), &"shortcut".to_string(), &"o".to_string());
+        assert!(result.is_ok(), "Setting shortcut to same value should succeed, not error with 'Shortcut already exists'");
+    }
 }
