@@ -172,7 +172,10 @@ pub(crate) fn task_replace(
 ) -> bool {
     let ids = parse_ids(ids);
     let regex = match regex {
-        true => Some(Box::new(Regex::new(search.as_str()).unwrap())),
+        true => match Regex::new(search.as_str()) {
+            Ok(r) => Some(Box::new(r)),
+            Err(e) => return error_message(format!("Invalid regex: {e}")),
+        },
         false => None
     };
     for id in ids {
@@ -1181,5 +1184,20 @@ mod tests {
     fn test_task_unset_returns_false_on_nonexistent_task() {
         let result = task_unset("99999".to_string(), "name".to_string());
         assert!(!result, "task_unset should return false when task is not found");
+    }
+
+    #[test]
+    fn test_task_replace_returns_false_on_nonexistent_task() {
+        let result = task_replace("99999".to_string(), "name".to_string(), "old".to_string(), "new".to_string(), false, false, &None, &None, true);
+        assert!(!result, "task_replace should return false when task is not found");
+    }
+
+    #[test]
+    fn test_task_replace_invalid_regex_no_panic() {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            task_replace("1".to_string(), "name".to_string(), "[invalid".to_string(), "".to_string(), true, false, &None, &None, true)
+        }));
+        assert!(result.is_ok(), "task_replace should not panic on invalid regex");
+        assert!(!result.unwrap(), "task_replace should return false on invalid regex");
     }
 }
