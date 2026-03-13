@@ -245,8 +245,10 @@ pub(crate) fn task_edit(id: String, prop_name: String) -> bool {
                             match gittask::update_task(task) {
                                 Ok(_) => {
                                     println!("Task ID {id} -> {text} updated");
-                                    if let Err(e) = gittask::delete_tasks(&[&id]) {
-                                        eprintln!("ERROR: {e}");
+                                    if text != id {
+                                        if let Err(e) = gittask::delete_tasks(&[&id]) {
+                                            eprintln!("ERROR: {e}");
+                                        }
                                     }
                                     true
                                 },
@@ -1266,6 +1268,31 @@ mod tests {
             import_from_input(None, &input)
         }));
         assert!(result.is_ok(), "import_from_input should not panic when task has no id");
+    }
+
+    #[test]
+    fn test_task_edit_id_same_value() {
+        let task = gittask::Task::new("Test".to_string(), "desc".to_string(), "OPEN".to_string()).unwrap();
+        let create_result = gittask::create_task(task);
+        assert!(create_result.is_ok());
+        let task = create_result.unwrap();
+        let task_id = task.get_id().unwrap();
+
+        // Simulate what task_edit does for "id" when user doesn't change the id
+        let mut task = gittask::find_task(&task_id).unwrap().unwrap();
+        let text = task_id.clone(); // same id
+        task.set_id(text.clone());
+        let update_result = gittask::update_task(task);
+        assert!(update_result.is_ok());
+        if text != task_id {
+            let _ = gittask::delete_tasks(&[&task_id]);
+        }
+
+        let find_result = gittask::find_task(&task_id);
+        assert!(find_result.is_ok());
+        assert!(find_result.unwrap().is_some(), "Task should still exist after editing ID to the same value");
+
+        let _ = gittask::delete_tasks(&[&task_id]);
     }
 
     #[test]
