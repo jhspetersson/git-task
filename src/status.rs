@@ -212,7 +212,7 @@ impl StatusManager {
                         }
 
                         let prev_value = saved_status.name.clone();
-                        if statuses.iter().find(|status| status.name == value.to_string()).is_some() {
+                        if statuses.iter().find(|s| s.name == value.to_string() && s.name != saved_status.name).is_some() {
                             Err("Name already exists for another status".to_string())
                         } else {
                             saved_status.name = value.clone();
