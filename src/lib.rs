@@ -455,7 +455,9 @@ pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
     let mut task = find_task(&id)?.ok_or_else(|| format!("Task ID {id} not found"))?;
     task.set_id(new_id.to_string());
     create_task(task)?;
-    delete_tasks(&[&id])?;
+    if id != new_id {
+        delete_tasks(&[&id])?;
+    }
 
     Ok(())
 }
@@ -814,6 +816,29 @@ mod test {
         });
         assert!(result.is_ok(), "Collecting comment IDs should not panic when some comments have no ID");
         assert_eq!(result.unwrap(), vec!["5".to_string()]);
+    }
+
+    #[test]
+    fn test_update_task_id_same_id() {
+        let task = Task::construct_task(
+            "Test task".to_string(),
+            "Description".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+        let create_result = create_task(task);
+        assert!(create_result.is_ok());
+        let task = create_result.unwrap();
+        let id = task.get_id().unwrap();
+
+        let result = update_task_id(&id, &id);
+        assert!(result.is_ok());
+
+        let find_result = find_task(&id);
+        assert!(find_result.is_ok());
+        assert!(find_result.unwrap().is_some(), "Task should still exist after updating ID to the same value");
+
+        let _ = delete_tasks(&[&id]);
     }
 
     #[test]
