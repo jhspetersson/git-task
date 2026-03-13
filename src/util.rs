@@ -163,8 +163,8 @@ fn fixed_to_rgb_str(color: u8) -> &'static str {
         7 => "c0c0c0",
         8 => "808080",
         9 => "ff0000",
-        10 => "ffff00",
-        11 => "00ff00",
+        10 => "00ff00",
+        11 => "ffff00",
         12 => "0000ff",
         13 => "ff00ff",
         14 => "00ffff",
@@ -716,5 +716,17 @@ mod tests {
         let input = "10..8".to_string();
         let result = parse_ids(input);
         assert_eq!(result, vec!["10".to_string(), "9".to_string(), "8".to_string()]);
+    }
+
+    #[test]
+    fn test_fixed_color_10_is_bright_green() {
+        let result = color_str_to_rgb_str("10");
+        assert_eq!(result, "00ff00", "ANSI color 10 should be bright green (00ff00)");
+    }
+
+    #[test]
+    fn test_fixed_color_11_is_bright_yellow() {
+        let result = color_str_to_rgb_str("11");
+        assert_eq!(result, "ffff00", "ANSI color 11 should be bright yellow (ffff00)");
     }
 }
