@@ -799,7 +799,7 @@ fn print_comment(comment: &Comment, prop_manager: &PropertyManager, no_color: bo
 
 fn print_label(label: &Label, no_color: bool) {
     match no_color {
-        true => print!("{}", label.get_name()),
+        true => print!("{} ", label.get_name()),
         false => {
             let color = str_to_color(label.get_color().as_str(), &None);
             print!("{} ", color.paint(label.get_name()));
