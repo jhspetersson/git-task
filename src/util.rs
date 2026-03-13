@@ -434,7 +434,7 @@ pub fn parse_date(date: Option<String>) -> Option<MappedLocalTime<DateTime<Local
 }
 
 pub fn parse_datetime_to_seconds(datetime: String) -> String {
-    DateTime::parse_from_rfc3339(&datetime).unwrap().with_timezone(&Utc).timestamp().to_string()
+    DateTime::parse_from_rfc3339(&datetime).map(|dt| dt.with_timezone(&Utc).timestamp().to_string()).unwrap_or_default()
 }
 
 pub fn read_from_pipe() -> Option<String> {
@@ -728,6 +728,14 @@ mod tests {
     fn test_fixed_color_11_is_bright_yellow() {
         let result = color_str_to_rgb_str("11");
         assert_eq!(result, "ffff00", "ANSI color 11 should be bright yellow (ffff00)");
+    }
+
+    #[test]
+    fn test_parse_datetime_to_seconds_invalid_format() {
+        let result = std::panic::catch_unwind(|| {
+            parse_datetime_to_seconds("not-a-datetime".to_string())
+        });
+        assert!(result.is_ok(), "parse_datetime_to_seconds should not panic on invalid input");
     }
 
     #[test]
