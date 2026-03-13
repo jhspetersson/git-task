@@ -949,7 +949,10 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                 if from.is_some() || until.is_some() {
                     let created = task.get_property("created");
                     if let Some(created) = created {
-                        let created = Local.timestamp_opt(created.parse().unwrap(), 0).unwrap();
+                        let created = match created.parse().ok().and_then(|ts| Local.timestamp_opt(ts, 0).single()) {
+                            Some(dt) => dt,
+                            None => return true,
+                        };
 
                         if from.is_some() {
                             if created < from.unwrap().earliest().unwrap() {
@@ -1235,5 +1238,30 @@ mod tests {
         }));
         assert!(result.is_ok(), "task_replace should not panic on invalid regex");
         assert!(!result.unwrap(), "task_replace should return false on invalid regex");
+    }
+
+    #[test]
+    fn test_date_filter_with_non_numeric_created() {
+        let mut task = gittask::Task::new("Test".to_string(), "desc".to_string(), "OPEN".to_string()).unwrap();
+        task.set_property("created", "not-a-number");
+        let create_result = gittask::create_task(task);
+        assert!(create_result.is_ok());
+        let task = create_result.unwrap();
+        let task_id = task.get_id().unwrap();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            task_list(None, None, None, Some("2020-01-01".to_string()), None, None, None, false, None, None, true)
+        }));
+        let _ = gittask::delete_tasks(&[&task_id]);
+        assert!(result.is_ok(), "task_list with --from should not panic when a task has non-numeric created value");
+    }
+
+    #[test]
+    fn test_import_task_without_id() {
+        let input = r#"[{"props":{"name":"test","status":"OPEN","description":"d","created":"123"},"comments":null,"labels":null}]"#.to_string();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            import_from_input(None, &input)
+        }));
+        assert!(result.is_ok(), "import_from_input should not panic when task has no id");
     }
 }
