@@ -172,7 +172,7 @@ impl StatusManager {
             _ => {
                 self.statuses.iter().find_map(|saved_status| {
                     if saved_status.is_done { Some(saved_status.name.clone()) } else { None }
-                }).unwrap()
+                }).unwrap_or_else(|| self.statuses.last().unwrap().name.clone())
             }
         }
     }
@@ -337,5 +337,30 @@ mod tests {
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let result = manager.set_property(&"OPEN".to_string(), &"shortcut".to_string(), &"o".to_string());
         assert!(result.is_ok(), "Setting shortcut to same value should succeed, not error with 'Shortcut already exists'");
+    }
+
+    #[test]
+    fn test_get_final_status_no_done_status() {
+        let statuses = vec![
+            Status {
+                name: String::from("TODO"),
+                shortcut: String::from("t"),
+                color: String::from("Red"),
+                style: None,
+                is_done: false,
+            },
+            Status {
+                name: String::from("DOING"),
+                shortcut: String::from("d"),
+                color: String::from("Yellow"),
+                style: None,
+                is_done: false,
+            },
+        ];
+        let manager = StatusManager { statuses };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            manager.get_final_status()
+        }));
+        assert!(result.is_ok(), "get_final_status should not panic when no status has is_done=true");
     }
 }
