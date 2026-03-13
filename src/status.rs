@@ -97,6 +97,10 @@ impl StatusManager {
             return Err("Status name and shortcut can't contain comma".to_string());
         }
 
+        if self.statuses.iter().any(|s| s.name == name) {
+            return Err("Status with this name already exists".to_string());
+        }
+
         let status = Status {
             name,
             shortcut,
@@ -371,5 +375,12 @@ mod tests {
             manager.get_final_status()
         }));
         assert!(result.is_ok(), "get_final_status should not panic when no status has is_done=true");
+    }
+
+    #[test]
+    fn test_add_status_duplicate_name() {
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        let result = manager.add_status("OPEN".to_string(), "x".to_string(), "Blue".to_string(), false);
+        assert!(result.is_err(), "add_status should reject duplicate status name");
     }
 }
