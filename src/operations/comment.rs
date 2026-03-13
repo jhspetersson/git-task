@@ -21,8 +21,9 @@ pub(crate) fn task_comment_add(
             match gittask::update_task(task) {
                 Ok(_) => {
                     println!("Task ID {task_id} updated");
-                    let mut success = false;
+                    let mut success = true;
                     if push {
+                        success = false;
                         match get_user_repo(remote, connector_type) {
                             Ok((connector, user, repo)) => {
                                 match connector.create_remote_comment(&user, &repo, &task_id, &comment) {
@@ -77,8 +78,9 @@ pub(crate) fn task_comment_set(
             match gittask::update_task(task) {
                 Ok(_) => {
                     println!("Task ID {task_id} updated");
-                    let mut success = false;
+                    let mut success = true;
                     if push {
+                        success = false;
                         match get_user_repo(remote, connector_type) {
                             Ok((connector, user, repo)) => {
                                 match connector.update_remote_comment(&user, &repo, &task_id, &comment_id, &text) {
@@ -128,8 +130,9 @@ pub(crate) fn task_comment_edit(
                     match gittask::update_task(task) {
                         Ok(_) => {
                             println!("Task ID {task_id} updated");
-                            let mut success = false;
+                            let mut success = true;
                             if push {
+                                success = false;
                                 match get_user_repo(remote, connector_type) {
                                     Ok((connector, user, repo)) => {
                                         match connector.update_remote_comment(&user, &repo, &task_id, &comment_id, &text) {
@@ -170,8 +173,9 @@ pub(crate) fn task_comment_delete(
                     match gittask::update_task(task) {
                         Ok(_) => {
                             println!("Task ID {task_id} updated");
-                            let mut success = false;
+                            let mut success = true;
                             if push {
+                                success = false;
                                 match get_user_repo(remote, connector_type) {
                                     Ok((connector, user, repo)) => {
                                         match connector.delete_remote_comment(&user, &repo, &task_id, &comment_id) {

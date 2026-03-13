@@ -39,8 +39,9 @@ pub(crate) fn task_create(
     match gittask::create_task(task.unwrap()) {
         Ok(task) => {
             println!("Task ID {} created", task.get_id().unwrap());
-            let mut success = false;
+            let mut success = true;
             if push {
+                success = false;
                 match get_user_repo(remote, connector_type) {
                     Ok((connector, user, repo)) => {
                         match connector.create_remote_task(&user, &repo, &task) {
@@ -665,8 +666,9 @@ pub(crate) fn task_delete(
     match gittask::delete_tasks(&ids) {
         Ok(_) => {
             println!("Task(s) {} deleted", ids.join(", "));
-            let mut success = false;
+            let mut success = true;
             if push {
+                success = false;
                 match get_user_repo(remote, connector_type) {
                     Ok((connector, user, repo)) => {
                         for id in ids {

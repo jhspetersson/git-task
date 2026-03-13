@@ -16,8 +16,9 @@ pub(crate) fn task_label_add(
             match gittask::update_task(task) {
                 Ok(_) => {
                     println!("Task ID {task_id} updated");
-                    let mut success = false;
+                    let mut success = true;
                     if push {
+                        success = false;
                         match get_user_repo(remote, connector_type) {
                             Ok((connector, user, repo)) => {
                                 match connector.create_remote_label(&user, &repo, &task_id, &label) {
@@ -55,8 +56,9 @@ pub(crate) fn task_label_delete(
                     match gittask::update_task(task) {
                         Ok(_) => {
                             println!("Task ID {task_id} updated");
-                            let mut success = false;
+                            let mut success = true;
                             if push {
+                                success = false;
                                 match get_user_repo(remote, connector_type) {
                                     Ok((connector, user, repo)) => {
                                         match connector.delete_remote_label(&user, &repo, &task_id, &name) {
