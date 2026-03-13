@@ -427,9 +427,9 @@ pub fn format_datetime(seconds: u64) -> String {
 }
 
 pub fn parse_date(date: Option<String>) -> Option<MappedLocalTime<DateTime<Local>>> {
-    date.map(|date| {
-        let naive_date = NaiveDate::parse_from_str(&date, "%Y-%m-%d").unwrap();
-        Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap())
+    date.and_then(|date| {
+        let naive_date = NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok()?;
+        Some(Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap()))
     })
 }
 
@@ -728,5 +728,14 @@ mod tests {
     fn test_fixed_color_11_is_bright_yellow() {
         let result = color_str_to_rgb_str("11");
         assert_eq!(result, "ffff00", "ANSI color 11 should be bright yellow (ffff00)");
+    }
+
+    #[test]
+    fn test_parse_date_invalid_format() {
+        let result = std::panic::catch_unwind(|| {
+            parse_date(Some("not-a-date".to_string()))
+        });
+        assert!(result.is_ok(), "parse_date should not panic on invalid input");
+        assert!(result.unwrap().is_none(), "parse_date should return None for invalid date");
     }
 }
