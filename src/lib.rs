@@ -344,9 +344,9 @@ pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
     let parents = vec![parent_commit];
     let me = &map_err!(repo.signature());
 
-    let mut ids = ids.iter().map(|id| id.parse::<u64>().unwrap()).collect::<Vec<_>>();
-    ids.sort();
-    let ids = ids.iter().map(|id| id.to_string()).collect::<Vec<_>>().join(", ");
+    let mut ids = ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
+    ids.sort_by(|a, b| a.parse::<u64>().unwrap_or(0).cmp(&b.parse::<u64>().unwrap_or(0)));
+    let ids = ids.join(", ");
     map_err!(repo.commit(Some(&get_ref_path()), me, me, format!("Delete task {}", ids).as_str(), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
     Ok(())
@@ -729,6 +729,22 @@ mod test {
             .collect();
         let unique_ids: std::collections::HashSet<String> = all_ids.iter().cloned().collect();
         assert_eq!(all_ids.len(), unique_ids.len(), "Comment IDs must be unique, got: {:?}", all_ids);
+    }
+
+    #[test]
+    fn test_delete_task_with_non_numeric_id() {
+        let mut task = Task::construct_task(
+            "Remote task".to_string(),
+            "Description".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+        task.set_id("GH-42".to_string());
+        let create_result = create_task(task);
+        assert!(create_result.is_ok());
+
+        let delete_result = delete_tasks(&["GH-42"]);
+        assert!(delete_result.is_ok());
     }
 
     #[test]
