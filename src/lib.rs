@@ -149,7 +149,7 @@ impl Task {
             return Err("Task has no comments".to_string());
         }
 
-        let index = self.comments.as_ref().unwrap().iter().position(|comment| comment.get_id().unwrap() == id.deref());
+        let index = self.comments.as_ref().unwrap().iter().position(|comment| comment.get_id().map(|cid| cid == id.deref()).unwrap_or(false));
 
         if index.is_none() {
             return Err(format!("Comment ID {id} not found"));
@@ -633,6 +633,9 @@ mod test {
 
     #[test]
     fn test_clear_tasks() {
+        // Clear any leftover tasks from other tests first
+        let _ = crate::clear_tasks();
+
         let id = get_next_id().unwrap_or_else(|_| "1".to_string());
         let task = Task::construct_task("Test task".to_string(), "Description goes here".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let create_result = create_task(task);
@@ -672,5 +675,66 @@ mod test {
         assert!(find_result.is_ok());
         let task = find_result.unwrap();
         assert!(task.is_none());
+    }
+
+    #[test]
+    fn test_delete_comment_without_id() {
+        let mut task = Task::construct_task(
+            "Test task".to_string(),
+            "Description".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+        let comment = Comment {
+            id: None,
+            props: HashMap::new(),
+            text: "A comment without ID".to_string(),
+        };
+        task.comments = Some(vec![comment]);
+
+        let result = task.delete_comment(&"1".to_string());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_add_comment_id_no_collision_after_deletion() {
+        let mut task = Task::construct_task(
+            "Test task".to_string(),
+            "Description".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+
+        task.add_comment(None, HashMap::new(), "Comment 1".to_string());
+        task.add_comment(None, HashMap::new(), "Comment 2".to_string());
+        task.add_comment(None, HashMap::new(), "Comment 3".to_string());
+
+        task.delete_comment(&"2".to_string()).unwrap();
+
+        let _new_comment = task.add_comment(None, HashMap::new(), "Comment 4".to_string());
+
+        let all_ids: Vec<String> = task.comments.as_ref().unwrap()
+            .iter()
+            .map(|c| c.get_id().unwrap())
+            .collect();
+        let unique_ids: std::collections::HashSet<String> = all_ids.iter().cloned().collect();
+        assert_eq!(all_ids.len(), unique_ids.len(), "Comment IDs must be unique, got: {:?}", all_ids);
+    }
+
+    #[test]
+    fn test_add_duplicate_label() {
+        let mut task = Task::construct_task(
+            "Test task".to_string(),
+            "Description".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+
+        task.add_label("bug".to_string(), None, None);
+        task.add_label("bug".to_string(), None, None);
+
+        let labels = task.get_labels().as_ref().unwrap();
+        let unique_names: std::collections::HashSet<String> = labels.iter().map(|l| l.get_name()).collect();
+        assert_eq!(labels.len(), unique_names.len(), "Label names must be unique, got duplicates");
     }
 }
