@@ -224,7 +224,7 @@ impl RemoteConnector for RedmineRemoteConnector {
             }
         }
 
-        Ok(String::new())
+        Err("Could not find matching journal for comment".to_string())
     }
 
     #[allow(unused)]
