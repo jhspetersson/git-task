@@ -212,6 +212,9 @@ impl PropertyManager {
     pub fn set_properties(&mut self, properties: Vec<Property>) -> Result<(), String> {
         let mut seen_names = std::collections::HashSet::new();
         for p in &properties {
+            if p.name.to_lowercase() == "id" || p.name.to_lowercase() == "labels" {
+                return Err(format!("`{}` is a reserved property name", p.name));
+            }
             if !seen_names.insert(&p.name) {
                 return Err(format!("Duplicate property name: {}", p.name));
             }
