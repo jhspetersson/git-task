@@ -299,7 +299,10 @@ fn import_from_input(ids: Option<String>, input: &String) -> bool {
         let ids = ids.map(parse_ids);
 
         for task in tasks {
-            let id = task.get_id().unwrap().to_string();
+            let id = match task.get_id() {
+                Some(id) => id,
+                None => { eprintln!("ERROR: task has no id, skipping"); continue; }
+            };
 
             if let Some(ids) = &ids {
                 if !ids.contains(&id) {
