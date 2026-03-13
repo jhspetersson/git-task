@@ -263,7 +263,7 @@ impl PropertyManager {
             match property {
                 Some(property) => {
                     match property.value_type {
-                        PropertyValueType::Integer => {
+                        PropertyValueType::Integer | PropertyValueType::DateTime => {
                             eval_context.set_value(k.into(), v.clone().parse::<i64>().unwrap_or(0).into()).unwrap();
                         },
                         _ => {
@@ -584,5 +584,27 @@ mod tests {
         let source = vec!["id > 5".to_string(), "red".to_string(), "orphan".to_string()];
         let result = PropertyCondFormat::from(source);
         assert_eq!(result.len(), 1, "Odd trailing element should be ignored without panic");
+    }
+
+    #[test]
+    fn test_find_cond_format_datetime_is_numeric() {
+        let cond_format = Some(vec![PropertyCondFormat {
+            condition: "created > 100".to_string(),
+            color: "Red".to_string(),
+            style: None,
+        }]);
+        let properties = vec![Property {
+            name: "created".to_string(),
+            value_type: PropertyValueType::DateTime,
+            color: "Default".to_string(),
+            style: None,
+            enum_values: None,
+            cond_format: None,
+        }];
+        let context = std::collections::HashMap::from([
+            ("created".to_string(), "1000000".to_string()),
+        ]);
+        let result = PropertyManager::find_cond_format(&cond_format, &context, &properties);
+        assert!(result.is_some(), "Conditional format with DateTime property should match when using numeric comparison (1000000 > 100)");
     }
 }
