@@ -461,12 +461,12 @@ pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
 }
 
 pub fn update_comment_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
-    let mut task = find_task(&task_id)?.unwrap().clone();
+    let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?.clone();
     let comments = task.get_comments();
     match comments {
         Some(comments) => {
             let updated_comments = comments.iter().map(|c| {
-                if c.get_id().unwrap() == id {
+                if c.get_id().map(|cid| cid == id).unwrap_or(false) {
                     let mut c = c.clone();
                     c.set_id(new_id.to_string());
                     c
