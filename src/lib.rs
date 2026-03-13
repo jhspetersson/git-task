@@ -175,6 +175,10 @@ impl Task {
             self.labels = Some(vec![]);
         }
 
+        if let Some(existing) = self.labels.as_ref().unwrap().iter().find(|l| l.name == name) {
+            return existing.clone();
+        }
+
         let label = Label {
             name: name.clone(),
             description,
