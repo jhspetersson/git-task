@@ -947,10 +947,13 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                 }
 
                 if author.as_ref().is_some() {
-                    if let Some(task_author) = task.get_property("author") {
-                        if author.as_ref().unwrap().to_lowercase() != task_author.to_lowercase() {
-                            return false;
-                        }
+                    match task.get_property("author") {
+                        Some(task_author) => {
+                            if author.as_ref().unwrap().to_lowercase() != task_author.to_lowercase() {
+                                return false;
+                            }
+                        },
+                        None => return false,
                     }
                 }
 
