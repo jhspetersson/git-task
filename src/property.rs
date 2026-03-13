@@ -307,7 +307,7 @@ impl PropertyManager {
                     "name" => Some(saved_prop.name.clone()),
                     "value_type" => Some(saved_prop.value_type.to_string()),
                     "color" => Some(saved_prop.color.clone()),
-                    "style" => saved_prop.style.clone(),
+                    "style" => Some(saved_prop.style.clone().unwrap_or_default()),
                     _ => None
                 }
             } else { None }
@@ -613,6 +613,24 @@ mod tests {
         ]);
         let result = PropertyManager::find_cond_format(&cond_format, &context, &properties);
         assert!(result.is_some(), "Conditional format with DateTime property should match when using numeric comparison (1000000 > 100)");
+    }
+
+    #[test]
+    fn test_get_parameter_style_none_returns_some() {
+        let manager = PropertyManager {
+            properties: vec![
+                Property {
+                    name: "priority".to_string(),
+                    value_type: PropertyValueType::String,
+                    color: "Default".to_string(),
+                    style: None,
+                    enum_values: None,
+                    cond_format: None,
+                },
+            ],
+        };
+        let result = manager.get_parameter("priority", "style");
+        assert!(result.is_some(), "get_parameter for style should return Some(\"\") when style is None, not None");
     }
 
     #[test]
