@@ -104,6 +104,7 @@ pub(crate) fn task_set(
     no_color: bool
 ) -> bool {
     let ids = parse_ids(ids);
+    let mut success = true;
     match prop_name.as_str() {
         "id" => {
             for id in &ids {
@@ -117,6 +118,7 @@ pub(crate) fn task_set(
                     },
                     Err(e) => {
                         error_message(format!("ERROR: {e}"));
+                        success = false;
                     }
                 }
             }
@@ -137,21 +139,24 @@ pub(crate) fn task_set(
                             },
                             Err(e) => {
                                 error_message(format!("ERROR: {e}"));
+                                success = false;
                             },
                         }
                     },
                     Ok(None) => {
                         error_message(format!("Task ID {id} not found"));
+                        success = false;
                     },
                     Err(e) =>{
                         error_message(format!("ERROR: {e}"));
+                        success = false;
                     }
                 }
             }
         }
     }
 
-    true
+    success
 }
 
 pub(crate) fn task_replace(
@@ -1157,5 +1162,22 @@ fn get_connector<'a>(connector_type: &Option<String>) -> Option<String> {
             },
             _ => None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_task_set_returns_false_on_nonexistent_task() {
+        let result = task_set("99999".to_string(), "name".to_string(), "test".to_string(), false, &None, &None, true);
+        assert!(!result, "task_set should return false when task is not found");
+    }
+
+    #[test]
+    fn test_task_unset_returns_false_on_nonexistent_task() {
+        let result = task_unset("99999".to_string(), "name".to_string());
+        assert!(!result, "task_unset should return false when task is not found");
     }
 }
