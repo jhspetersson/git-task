@@ -673,12 +673,27 @@ fn format_adf(text: &String) -> serde_json::Value {
 
 fn parse_creator(creator: &serde_json::Value) -> String {
     if let serde_json::Value::Object(creator) = creator {
-        if let Some(serde_json::Value::String(display_name)) = creator.get("emailAddress") {
+        if let Some(serde_json::Value::String(display_name)) = creator.get("displayName") {
             return display_name.to_string();
         }
     }
 
     "".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_creator_uses_display_name() {
+        let creator = serde_json::json!({
+            "displayName": "John Doe",
+            "emailAddress": "john@example.com"
+        });
+        let result = parse_creator(&creator);
+        assert_eq!(result, "John Doe", "parse_creator should use displayName, not emailAddress");
+    }
 }
 
 fn parse_status(status: &serde_json::Value) -> String {
