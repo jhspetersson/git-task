@@ -10,7 +10,7 @@ use regex::Regex;
 use tokio::pin;
 use tokio::runtime::Runtime;
 
-use gittask::{Comment, Label, Task};
+use gittask::{Comment, Label, Subtask, Task};
 use crate::connectors::{RemoteConnector, RemoteTaskState};
 use crate::util::color_str_to_rgb_str;
 
@@ -199,6 +199,61 @@ impl RemoteConnector for GithubRemoteConnector {
             Some(_) => RUNTIME.block_on(delete_label(user, repo, task_id.parse().unwrap(), name)),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
         }
+    }
+
+    fn supports_subtasks(&self) -> bool {
+        true
+    }
+
+    fn list_remote_subtasks(&self, user: &String, repo: &String, task_id: &String) -> Result<Vec<Subtask>, String> {
+        RUNTIME.block_on(list_sub_issues(user, repo, task_id.parse().map_err(|e: std::num::ParseIntError| e.to_string())?))
+    }
+
+    fn create_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask: &Subtask) -> Result<String, String> {
+        if get_token_from_env().is_none() {
+            return Err("Could not find GITHUB_TOKEN environment variable.".to_string());
+        }
+        let parent_number = task_id.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let sub_number = match subtask.get_id().and_then(|id| id.parse::<u64>().ok()) {
+            Some(n) => n,
+            None => {
+                let task = Task::from_properties(
+                    "0".to_string(),
+                    std::collections::HashMap::from([
+                        ("name".to_string(), subtask.get_name().to_string()),
+                        ("status".to_string(), subtask.get_status().to_string()),
+                        ("description".to_string(), String::new()),
+                    ]),
+                ).map_err(|e| e.to_string())?;
+                RUNTIME.block_on(create_issue(user, repo, &task))?.parse().map_err(|e: std::num::ParseIntError| e.to_string())?
+            },
+        };
+        RUNTIME.block_on(add_sub_issue(user, repo, parent_number, sub_number))?;
+        Ok(sub_number.to_string())
+    }
+
+    fn update_remote_subtask(&self, user: &String, repo: &String, _task_id: &String, subtask: &Subtask) -> Result<(), String> {
+        if get_token_from_env().is_none() {
+            return Err("Could not find GITHUB_TOKEN environment variable.".to_string());
+        }
+        let sub_number = subtask.get_id()
+            .ok_or_else(|| "Subtask has no ID".to_string())?
+            .parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let state = if subtask.get_status().to_lowercase().contains("close") || subtask.get_status().to_uppercase() == "CLOSED" {
+            IssueState::Closed
+        } else {
+            IssueState::Open
+        };
+        RUNTIME.block_on(update_sub_issue(user, repo, sub_number, subtask.get_name(), state))
+    }
+
+    fn delete_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask_id: &String) -> Result<(), String> {
+        if get_token_from_env().is_none() {
+            return Err("Could not find GITHUB_TOKEN environment variable.".to_string());
+        }
+        let parent_number = task_id.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+        let sub_number = subtask_id.parse().map_err(|e: std::num::ParseIntError| e.to_string())?;
+        RUNTIME.block_on(remove_sub_issue(user, repo, parent_number, sub_number))
     }
 }
 
@@ -463,6 +518,51 @@ async fn get_issue_id(user: &String, repo: &String, n: u64) -> Result<String, St
     let issue = crab.issues(user, repo).get(n).await;
     match issue {
         Ok(issue) => Ok(issue.node_id),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+async fn list_sub_issues(user: &String, repo: &String, n: u64) -> Result<Vec<Subtask>, String> {
+    let crab = get_octocrab_instance().await;
+    let url = format!("/repos/{user}/{repo}/issues/{n}/sub_issues");
+    let issues: Vec<octocrab::models::issues::Issue> = crab
+        .get::<Vec<octocrab::models::issues::Issue>, _, ()>(url, None)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    Ok(issues.iter().map(|issue| {
+        let status = if issue.state == IssueState::Open { "OPEN" } else { "CLOSED" };
+        let mut props = HashMap::new();
+        props.insert("created".to_string(), issue.created_at.timestamp().to_string());
+        props.insert("author".to_string(), issue.user.login.clone());
+        Subtask::new(Some(issue.number.to_string()), issue.title.clone(), status.to_string(), props)
+    }).collect())
+}
+
+async fn add_sub_issue(user: &String, repo: &String, parent: u64, sub: u64) -> Result<(), String> {
+    let crab = get_octocrab_instance().await;
+    let url = format!("/repos/{user}/{repo}/issues/{parent}/sub_issues");
+    let body = serde_json::json!({ "sub_issue_id": sub });
+    crab.post::<_, serde_json::Value>(url, Some(&body))
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+async fn remove_sub_issue(user: &String, repo: &String, parent: u64, sub: u64) -> Result<(), String> {
+    let crab = get_octocrab_instance().await;
+    let url = format!("/repos/{user}/{repo}/issues/{parent}/sub_issue");
+    let body = serde_json::json!({ "sub_issue_id": sub });
+    crab.delete::<serde_json::Value, _, _>(url, Some(&body))
+        .await
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+async fn update_sub_issue(user: &String, repo: &String, n: u64, title: &str, state: IssueState) -> Result<(), String> {
+    let crab = get_octocrab_instance().await;
+    match crab.issues(user, repo).update(n).title(title).state(state).send().await {
+        Ok(_) => Ok(()),
         Err(e) => Err(e.to_string()),
     }
 }

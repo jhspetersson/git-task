@@ -16,6 +16,7 @@ use crate::operations::config::*;
 use crate::operations::config::properties::*;
 use crate::operations::config::status::*;
 use crate::operations::label::*;
+use crate::operations::subtask::*;
 
 #[derive(Parser)]
 #[command(version, about = "Local-first task manager/bug tracker within your git repository which can sync issues from/to GitHub, Gitlab, Jira Cloud and Redmine.", arg_required_else_help(true))]
@@ -189,6 +190,12 @@ enum Command {
         #[command(subcommand)]
         subcommand: CommentCommand,
     },
+    /// Add, update or delete subtasks
+    #[clap(visible_aliases(["sub", "subtasks"]))]
+    Subtask {
+        #[command(subcommand)]
+        subcommand: SubtaskCommand,
+    },
     /// Add, update or delete labels
     #[clap(visible_aliases(["lab", "lbl"]))]
     Label {
@@ -242,6 +249,9 @@ enum Command {
         /// Don't import task labels
         #[arg(long, aliases = ["nl"])]
         no_labels: bool,
+        /// Don't import task subtasks
+        #[arg(long, aliases = ["ns"])]
+        no_subtasks: bool,
     },
     /// Push task status to the remote source (e.g., GitHub)
     Push {
@@ -259,6 +269,9 @@ enum Command {
         /// Don't create task labels
         #[arg(long, aliases = ["nl"])]
         no_labels: bool,
+        /// Don't sync task subtasks
+        #[arg(long, aliases = ["ns"])]
+        no_subtasks: bool,
         /// Disable colors
         #[arg(long)]
         no_color: bool,
@@ -359,6 +372,93 @@ enum CommentCommand {
         /// comment ID
         comment_id: String,
         /// Also delete comment from the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira, redmine)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SubtaskCommand {
+    /// Add a subtask
+    #[clap(visible_aliases(["create", "new"]))]
+    Add {
+        /// parent task ID
+        task_id: String,
+        /// subtask name
+        name: Option<String>,
+        /// subtask status (defaults to the starting status)
+        #[arg(short, long)]
+        status: Option<String>,
+        /// Also push subtask to the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira, redmine)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
+    },
+    /// Set a property of a subtask (name, status or custom)
+    Set {
+        /// parent task ID
+        task_id: String,
+        /// subtask ID
+        subtask_id: String,
+        /// property name (name, status or custom)
+        prop_name: String,
+        /// property value
+        value: String,
+        /// Also push subtask to the remote source (e.g., GitHub)
+        #[arg(short, long)]
+        push: bool,
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira, redmine)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
+    },
+    /// Delete a property from a subtask
+    Unset {
+        /// parent task ID
+        task_id: String,
+        /// subtask ID
+        subtask_id: String,
+        /// property name
+        prop_name: String,
+    },
+    /// Edit a subtask property in the editor
+    Edit {
+        /// parent task ID
+        task_id: String,
+        /// subtask ID
+        subtask_id: String,
+        /// property name (defaults to name)
+        prop_name: Option<String>,
+    },
+    /// List subtasks of a task
+    List {
+        /// parent task ID
+        task_id: String,
+        /// Disable colors
+        #[arg(long)]
+        no_color: bool,
+    },
+    /// Delete a subtask
+    #[clap(visible_aliases(["del", "remove", "rem"]))]
+    Delete {
+        /// parent task ID
+        task_id: String,
+        /// subtask ID
+        subtask_id: String,
+        /// Also delete subtask from the remote source (e.g., GitHub)
         #[arg(short, long)]
         push: bool,
         /// Use this remote if there are several of them
@@ -674,11 +774,12 @@ fn main() -> ExitCode {
         Some(Command::Unset { ids, prop_name }) => task_unset(ids, prop_name),
         Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
+        Some(Command::Subtask { subcommand }) => task_subtask(subcommand),
         Some(Command::Label { subcommand }) => task_label(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, status, limit, format, pretty }) => task_export(ids, status, limit, format, pretty),
-        Some(Command::Pull { ids, limit, status, remote, connector_type: connector, no_comments, no_labels }) => task_pull(ids, limit, status, &remote, &connector, no_comments, no_labels),
-        Some(Command::Push { ids, remote, connector_type: connector, no_comments, no_labels, no_color }) => task_push(ids, &remote, &connector, no_comments, no_labels, no_color),
+        Some(Command::Pull { ids, limit, status, remote, connector_type: connector, no_comments, no_labels, no_subtasks }) => task_pull(ids, limit, status, &remote, &connector, no_comments, no_labels, no_subtasks),
+        Some(Command::Push { ids, remote, connector_type: connector, no_comments, no_labels, no_subtasks, no_color }) => task_push(ids, &remote, &connector, no_comments, no_labels, no_subtasks, no_color),
         Some(Command::Stats { no_color }) => task_stats(no_color),
         Some(Command::Delete { ids, status, push, remote, connector_type: connector }) => task_delete(ids, status, push, &remote, &connector),
         Some(Command::Clear) => task_clear(),
@@ -694,6 +795,23 @@ fn task_comment(subcommand: CommentCommand) -> bool {
         CommentCommand::Set { task_id, comment_id, text, push, remote, connector_type: connector } => task_comment_set(task_id, comment_id, text, push, &remote, &connector),
         CommentCommand::Edit { task_id, comment_id, push, remote, connector_type: connector } => task_comment_edit(task_id, comment_id, push, &remote, &connector),
         CommentCommand::Delete { task_id, comment_id, push, remote, connector_type: connector } => task_comment_delete(task_id, comment_id, push, &remote, &connector),
+    }
+}
+
+fn task_subtask(subcommand: SubtaskCommand) -> bool {
+    match subcommand {
+        SubtaskCommand::Add { task_id, name, status, push, remote, connector_type: connector } =>
+            task_subtask_add(task_id, name, status, push, &remote, &connector),
+        SubtaskCommand::Set { task_id, subtask_id, prop_name, value, push, remote, connector_type: connector } =>
+            task_subtask_set(task_id, subtask_id, prop_name, value, push, &remote, &connector),
+        SubtaskCommand::Unset { task_id, subtask_id, prop_name } =>
+            task_subtask_unset(task_id, subtask_id, prop_name),
+        SubtaskCommand::Edit { task_id, subtask_id, prop_name } =>
+            task_subtask_edit(task_id, subtask_id, prop_name),
+        SubtaskCommand::List { task_id, no_color } =>
+            task_subtask_list(task_id, no_color),
+        SubtaskCommand::Delete { task_id, subtask_id, push, remote, connector_type: connector } =>
+            task_subtask_delete(task_id, subtask_id, push, &remote, &connector),
     }
 }
 

@@ -1,6 +1,7 @@
 pub(crate) mod comment;
 pub(crate) mod config;
 pub(crate) mod label;
+pub(crate) mod subtask;
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -10,7 +11,7 @@ use nu_ansi_term::Color::DarkGray;
 use regex::Regex;
 
 use evalexpr::{ContextWithMutableVariables, HashMapContext};
-use gittask::{Comment, Label, Task};
+use gittask::{Comment, Label, Subtask, Task};
 
 use crate::connectors::{get_matching_remote_connectors, RemoteConnector, RemoteTaskState};
 use crate::property::{PropertyManager, PropertyValueType};
@@ -113,7 +114,7 @@ pub(crate) fn task_set(
                         println!("Task ID {id} -> {value} updated");
 
                         if push {
-                            task_push(value.clone(), remote, connector_type, false, false, no_color);
+                            task_push(value.clone(), remote, connector_type, false, false, false, no_color);
                         }
                     },
                     Err(e) => {
@@ -134,7 +135,7 @@ pub(crate) fn task_set(
                                 println!("Task ID {id} updated");
 
                                 if push {
-                                    task_push(id.to_string(), remote, connector_type, false, false, no_color);
+                                    task_push(id.to_string(), remote, connector_type, false, false, false, no_color);
                                 }
                             },
                             Err(e) => {
@@ -192,7 +193,7 @@ pub(crate) fn task_replace(
                         Ok(_) => {
                             println!("Task ID {id} updated");
                             if push {
-                                task_push(id.to_string(), remote, connector_type, false, false, no_color);
+                                task_push(id.to_string(), remote, connector_type, false, false, false, no_color);
                             }
                         },
                         Err(e) => { eprintln!("ERROR: {e}"); success = false; }
@@ -331,6 +332,7 @@ pub(crate) fn task_pull(
     connector_type: &Option<String>,
     no_comments: bool,
     no_labels: bool,
+    no_subtasks: bool,
 ) -> bool {
     match get_user_repo(remote, connector_type) {
         Ok((connector, user, repo)) => {
@@ -347,11 +349,18 @@ pub(crate) fn task_pull(
                 task_statuses.insert(1, status_in_progress);
             }
 
+            let fetch_subtasks = !no_subtasks && connector.supports_subtasks();
+
             if ids.is_some() {
                 for id in ids.unwrap() {
                     match connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses) {
-                        Ok(task) => {
-                            match import_remote_task(task, no_comments) {
+                        Ok(mut task) => {
+                            if fetch_subtasks {
+                                if let Ok(subtasks) = connector.list_remote_subtasks(&user, &repo, &id) {
+                                    task.set_subtasks(subtasks);
+                                }
+                            }
+                            match import_remote_task(task, no_comments, fetch_subtasks) {
                                 Ok(Some(id)) => println!("Task ID {id} updated"),
                                 Ok(None) => println!("Task ID {id} skipped, nothing to update"),
                                 Err(e) => eprintln!("ERROR: {e}"),
@@ -377,9 +386,14 @@ pub(crate) fn task_pull(
                         if tasks.is_empty() {
                             success_message("No tasks found".to_string())
                         } else {
-                            for task in tasks {
+                            for mut task in tasks {
                                 let task_id = task.get_id().unwrap();
-                                match import_remote_task(task, no_comments) {
+                                if fetch_subtasks {
+                                    if let Ok(subtasks) = connector.list_remote_subtasks(&user, &repo, &task_id) {
+                                        task.set_subtasks(subtasks);
+                                    }
+                                }
+                                match import_remote_task(task, no_comments, fetch_subtasks) {
                                     Ok(Some(id)) => println!("Task ID {id} updated"),
                                     Ok(None) => println!("Task ID {task_id} skipped, nothing to update"),
                                     Err(e) => eprintln!("ERROR: {e}"),
@@ -396,13 +410,17 @@ pub(crate) fn task_pull(
     }
 }
 
-fn import_remote_task(remote_task: Task, no_comments: bool) -> Result<Option<String>, String> {
+fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool) -> Result<Option<String>, String> {
     match gittask::find_task(&remote_task.get_id().unwrap()) {
         Ok(Some(mut local_task)) => {
+            let subtasks_equal = !with_subtasks
+                || subtasks_are_equal(local_task.get_subtasks(), remote_task.get_subtasks());
+
             if local_task.get_property("name") == remote_task.get_property("name")
                 && local_task.get_property("description") == remote_task.get_property("description")
                 && local_task.get_property("status") == remote_task.get_property("status")
-                && (no_comments || comments_are_equal(local_task.get_comments(), remote_task.get_comments())) {
+                && (no_comments || comments_are_equal(local_task.get_comments(), remote_task.get_comments()))
+                && subtasks_equal {
                 Ok(None)
             } else {
                 local_task.set_property("name", remote_task.get_property("name").unwrap());
@@ -411,6 +429,11 @@ fn import_remote_task(remote_task: Task, no_comments: bool) -> Result<Option<Str
                 if !no_comments {
                     if let Some(comments) = remote_task.get_comments() {
                         local_task.set_comments(comments.to_vec());
+                    }
+                }
+                if with_subtasks {
+                    if let Some(subtasks) = remote_task.get_subtasks() {
+                        local_task.set_subtasks(subtasks.to_vec());
                     }
                 }
 
@@ -425,6 +448,15 @@ fn import_remote_task(remote_task: Task, no_comments: bool) -> Result<Option<Str
             Err(e) => Err(e),
         },
         Err(e) => Err(e)
+    }
+}
+
+fn subtasks_are_equal(local: &Option<Vec<Subtask>>, remote: &Option<Vec<Subtask>>) -> bool {
+    match (local, remote) {
+        (None, None) => true,
+        (Some(l), Some(r)) => l == r,
+        (None, Some(r)) => r.is_empty(),
+        (Some(l), None) => l.is_empty(),
     }
 }
 
@@ -518,6 +550,7 @@ pub(crate) fn task_push(
     connector_type: &Option<String>,
     no_comments: bool,
     no_labels: bool,
+    no_subtasks: bool,
     no_color: bool
 ) -> bool {
     let ids = parse_ids(ids);
@@ -534,6 +567,7 @@ pub(crate) fn task_push(
             }
 
             let no_color = check_no_color(no_color);
+            let sync_subtasks = !no_subtasks && connector.supports_subtasks();
             for id in ids {
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
@@ -573,8 +607,8 @@ pub(crate) fn task_push(
                                 Err(e) => eprintln!("ERROR: {e}")
                             }
                         } else {
+                            let mut anything_synced = false;
                             if !no_comments {
-                                let mut comments_updated = false;
                                 let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
                                 for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
                                     let local_comment_id = match comment.get_id() {
@@ -583,13 +617,14 @@ pub(crate) fn task_push(
                                     };
                                     if !remote_comment_ids.contains(&local_comment_id) {
                                         create_remote_comment(&connector, &user, &repo, &id, &comment);
-                                        comments_updated = true;
+                                        anything_synced = true;
                                     }
                                 }
-                                if !comments_updated {
-                                    println!("Nothing to sync");
-                                }
-                            } else {
+                            }
+                            if sync_subtasks {
+                                anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task);
+                            }
+                            if !anything_synced {
                                 println!("Nothing to sync");
                             }
                         }
@@ -624,6 +659,10 @@ pub(crate) fn task_push(
                                         }
                                     }
                                 }
+
+                                if sync_subtasks {
+                                    sync_local_subtasks(&connector, &user, &repo, &id, &local_task);
+                                }
                             },
                             Err(e) => eprintln!("ERROR: {e}")
                         }
@@ -636,6 +675,56 @@ pub(crate) fn task_push(
         },
         Err(e) => error_message(format!("ERROR: {e}"))
     }
+}
+
+fn sync_local_subtasks(
+    connector: &Box<&'static dyn RemoteConnector>,
+    user: &String,
+    repo: &String,
+    task_id: &String,
+    local_task: &Task,
+) -> bool {
+    let local_subtasks = match local_task.get_subtasks() {
+        Some(subtasks) if !subtasks.is_empty() => subtasks.clone(),
+        _ => return false,
+    };
+
+    let remote_subtasks = connector
+        .list_remote_subtasks(user, repo, task_id)
+        .unwrap_or_default();
+
+    let remote_ids: Vec<String> = remote_subtasks.iter().filter_map(|s| s.get_id()).collect();
+    let mut synced = false;
+    for subtask in &local_subtasks {
+        let local_id = match subtask.get_id() {
+            Some(id) => id,
+            None => continue,
+        };
+        if remote_ids.contains(&local_id) {
+            if let Err(e) = connector.update_remote_subtask(user, repo, task_id, subtask) {
+                eprintln!("ERROR syncing REMOTE subtask {local_id}: {e}");
+            } else {
+                println!("Sync: REMOTE subtask ID {local_id} updated");
+                synced = true;
+            }
+        } else {
+            match connector.create_remote_subtask(user, repo, task_id, subtask) {
+                Ok(remote_id) => {
+                    println!("Created REMOTE subtask ID {remote_id}");
+                    if local_id != remote_id {
+                        if let Err(e) = gittask::update_subtask_id(task_id, &local_id, &remote_id) {
+                            eprintln!("ERROR: {e}");
+                        } else {
+                            println!("Subtask ID {local_id} -> {remote_id} updated");
+                        }
+                    }
+                    synced = true;
+                },
+                Err(e) => eprintln!("ERROR creating REMOTE subtask: {e}"),
+            }
+        }
+    }
+    synced
 }
 
 fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &String, repo: &String, id: &String, comment: &Comment) {
@@ -787,11 +876,29 @@ fn print_task(task: Task, no_color: bool) {
         println!("{}: {}", description_title, prop_manager.format_value("description", description, &context, properties, no_color));
     }
 
+    if let Some(subtasks) = task.get_subtasks() {
+        if !subtasks.is_empty() {
+            let status_manager = StatusManager::new();
+            let subtasks_title = colorize_string("Subtasks", DarkGray, no_color);
+            println!("{}:", subtasks_title);
+            for subtask in subtasks {
+                print_subtask(subtask, &status_manager, no_color);
+            }
+        }
+    }
+
     if let Some(comments) = task.get_comments() {
         for comment in comments {
             print_comment(comment, &prop_manager, no_color);
         }
     }
+}
+
+fn print_subtask(subtask: &Subtask, status_manager: &StatusManager, no_color: bool) {
+    let id = subtask.get_id().unwrap_or_else(|| "---".to_string());
+    let id_title = colorize_string("  ID", DarkGray, no_color);
+    let status = status_manager.format_status(subtask.get_status(), no_color);
+    println!("{}: {} | {} | {}", id_title, id, status, subtask.get_name());
 }
 
 fn print_comment(comment: &Comment, prop_manager: &PropertyManager, no_color: bool) {
@@ -1161,7 +1268,7 @@ pub(crate) fn task_stats(no_color: bool) -> bool {
     }
 }
 
-fn check_no_color(no_color: bool) -> bool {
+pub(crate) fn check_no_color(no_color: bool) -> bool {
     no_color
         || gittask::get_config_value("color.ui").unwrap_or_else(|_| "true".to_string()) == "false"
         || std::env::var("NO_COLOR").is_ok()
@@ -1293,6 +1400,63 @@ mod tests {
         assert!(find_result.unwrap().is_some(), "Task should still exist after editing ID to the same value");
 
         let _ = gittask::delete_tasks(&[&task_id]);
+    }
+
+    #[test]
+    fn test_subtask_add_and_delete_flow() {
+        use crate::operations::subtask::{task_subtask_add, task_subtask_delete, task_subtask_set};
+        let task = gittask::Task::new("Parent".to_string(), "d".to_string(), "OPEN".to_string()).unwrap();
+        let created = gittask::create_task(task).unwrap();
+        let task_id = created.get_id().unwrap();
+
+        assert!(task_subtask_add(task_id.clone(), Some("Sub1".to_string()), None, false, &None, &None));
+        assert!(task_subtask_add(task_id.clone(), Some("Sub2".to_string()), Some("CLOSED".to_string()), false, &None, &None));
+
+        let task = gittask::find_task(&task_id).unwrap().unwrap();
+        let subtasks = task.get_subtasks().as_ref().unwrap();
+        assert_eq!(subtasks.len(), 2);
+        assert_eq!(subtasks[1].get_status(), "CLOSED");
+
+        assert!(task_subtask_set(task_id.clone(), "1".to_string(), "name".to_string(), "SubRenamed".to_string(), false, &None, &None));
+        let task = gittask::find_task(&task_id).unwrap().unwrap();
+        assert_eq!(task.get_subtask("1").unwrap().get_name(), "SubRenamed");
+
+        assert!(task_subtask_delete(task_id.clone(), "1".to_string(), false, &None, &None));
+        let task = gittask::find_task(&task_id).unwrap().unwrap();
+        assert_eq!(task.get_subtasks().as_ref().unwrap().len(), 1);
+
+        let _ = gittask::delete_tasks(&[&task_id]);
+    }
+
+    #[test]
+    fn test_subtask_add_rejects_missing_name_without_pipe() {
+        use crate::operations::subtask::task_subtask_add;
+        let task = gittask::Task::new("P".to_string(), "d".to_string(), "OPEN".to_string()).unwrap();
+        let created = gittask::create_task(task).unwrap();
+        let id = created.get_id().unwrap();
+
+        let ok = task_subtask_add(id.clone(), Some("  ".to_string()), None, false, &None, &None);
+        assert!(!ok, "whitespace-only name should be rejected");
+
+        let _ = gittask::delete_tasks(&[&id]);
+    }
+
+    #[test]
+    fn test_subtask_export_roundtrip() {
+        let task = gittask::Task::new("Parent".to_string(), "d".to_string(), "OPEN".to_string()).unwrap();
+        let mut created = gittask::create_task(task).unwrap();
+        let id = created.get_id().unwrap();
+        created.add_subtask(Some("10".to_string()), "Sub".to_string(), "OPEN".to_string(), std::collections::HashMap::new()).unwrap();
+        gittask::update_task(created).unwrap();
+
+        let tasks = gittask::list_tasks().unwrap();
+        let json = serde_json::to_string(&tasks).unwrap();
+        let input: Vec<gittask::Task> = serde_json::from_str(&json).unwrap();
+        let reimported = input.iter().find(|t| t.get_id().unwrap() == id).unwrap();
+        assert!(reimported.get_subtasks().is_some());
+        assert_eq!(reimported.get_subtasks().as_ref().unwrap()[0].get_name(), "Sub");
+
+        let _ = gittask::delete_tasks(&[&id]);
     }
 
     #[test]

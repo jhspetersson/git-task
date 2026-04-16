@@ -8,7 +8,7 @@ use jira_v3_openapi::models::IssueTransition;
 use regex::Regex;
 use tokio::runtime::Runtime;
 
-use gittask::{Task, Comment, Label};
+use gittask::{Task, Comment, Label, Subtask};
 
 use crate::connectors::{RemoteConnector, RemoteTaskState};
 use crate::util::error_message;
@@ -562,6 +562,160 @@ impl RemoteConnector for JiraRemoteConnector {
                     }
                 },
                 Err(e) => Err(format!("Failed to get issue: {}", e))
+            }
+        })
+    }
+
+    fn supports_subtasks(&self) -> bool {
+        true
+    }
+
+    fn list_remote_subtasks(&self, domain: &String, project: &String, task_id: &String) -> Result<Vec<Subtask>, String> {
+        let config = get_configuration(domain)?;
+
+        RUNTIME.block_on(async {
+            match issues_api::get_issue(
+                &config,
+                task_id_to_issue_key(project, task_id).as_str(),
+                Some(vec!["subtasks".to_string()]),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ).await {
+                Ok(issue) => {
+                    let mut result = vec![];
+                    if let Some(fields) = issue.fields
+                        && let Some(serde_json::Value::Array(subtasks)) = fields.get("subtasks") {
+                            for sub in subtasks {
+                                if let serde_json::Value::Object(sub_obj) = sub {
+                                    let key = sub_obj.get("key").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                    let (name, status) = match sub_obj.get("fields") {
+                                        Some(serde_json::Value::Object(sub_fields)) => {
+                                            let name = sub_fields.get("summary").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                                            let status = sub_fields.get("status").map(parse_status).unwrap_or_default();
+                                            (name, status)
+                                        }
+                                        _ => (String::new(), String::new()),
+                                    };
+                                    result.push(Subtask::new(Some(issue_key_to_task_id(&key)), name, status, HashMap::new()));
+                                }
+                            }
+                        }
+                    Ok(result)
+                },
+                Err(e) => Err(format!("Failed to list subtasks: {}", e))
+            }
+        })
+    }
+
+    fn create_remote_subtask(&self, domain: &String, project: &String, task_id: &String, subtask: &Subtask) -> Result<String, String> {
+        let config = get_configuration(domain)?;
+
+        RUNTIME.block_on(async {
+            let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
+                fields: Some(HashMap::from([
+                    ("project".to_string(), serde_json::json!({ "key": project })),
+                    ("parent".to_string(), serde_json::json!({ "key": task_id_to_issue_key(project, task_id) })),
+                    ("summary".to_string(), serde_json::json!(subtask.get_name())),
+                    ("issuetype".to_string(), serde_json::json!({ "name": "Sub-task" })),
+                ])),
+                ..Default::default()
+            };
+
+            match issues_api::create_issue(&config, issue_details, None).await {
+                Ok(response) => {
+                    match response.key {
+                        Some(key) => Ok(issue_key_to_task_id(&key)),
+                        None => Err("Failed to create subtask: no key returned.".to_string())
+                    }
+                },
+                Err(e) => Err(format!("Failed to create subtask: {}", e))
+            }
+        })
+    }
+
+    fn update_remote_subtask(&self, domain: &String, project: &String, _task_id: &String, subtask: &Subtask) -> Result<(), String> {
+        let config = get_configuration(domain)?;
+        let subtask_id = subtask.get_id().ok_or_else(|| "Subtask has no ID".to_string())?;
+        let subtask_key = task_id_to_issue_key(project, &subtask_id);
+
+        RUNTIME.block_on(async {
+            let fields = HashMap::from([
+                ("summary".to_string(), serde_json::json!(subtask.get_name())),
+            ]);
+
+            let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
+                fields: Some(fields),
+                ..Default::default()
+            };
+
+            let result = match issues_api::edit_issue(
+                &config,
+                subtask_key.as_str(),
+                issue_details,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ).await {
+                Ok(_) => Ok(()),
+                Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => Ok(()),
+                Err(e) => Err(format!("Failed to update subtask: {}", e))
+            };
+
+            if result.is_ok() && !subtask.get_status().is_empty() {
+                if let Ok(transitions) = issues_api::get_transitions(
+                    &config,
+                    subtask_key.as_str(),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ).await {
+                    for transition in transitions.transitions.unwrap_or_default() {
+                        if let Some(target_status) = transition.to
+                            && target_status.name.as_deref() == Some(subtask.get_status()) {
+                                let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
+                                    transition: Some(IssueTransition {
+                                        id: Some(transition.id.unwrap()),
+                                        ..Default::default()
+                                    }),
+                                    ..Default::default()
+                                };
+
+                                let _ = issues_api::do_transition(
+                                    &config,
+                                    subtask_key.as_str(),
+                                    issue_details,
+                                ).await;
+
+                                break;
+                        }
+                    }
+                } else {
+                    error_message("Failed to get transitions for subtask.".to_string());
+                }
+            }
+
+            result
+        })
+    }
+
+    fn delete_remote_subtask(&self, domain: &String, project: &String, _task_id: &String, subtask_id: &String) -> Result<(), String> {
+        let config = get_configuration(domain)?;
+
+        RUNTIME.block_on(async {
+            match issues_api::delete_issue(
+                &config,
+                task_id_to_issue_key(project, subtask_id).as_str(),
+                Some("true"),
+            ).await {
+                Ok(_) => Ok(()),
+                Err(e) => Err(format!("Failed to delete subtask: {}", e))
             }
         })
     }

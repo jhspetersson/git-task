@@ -8,7 +8,7 @@ use redmine_api::api::{Endpoint, Redmine};
 use redmine_api::reqwest::Method;
 use serde::Serialize;
 
-use gittask::{Task, Comment, Label};
+use gittask::{Task, Comment, Label, Subtask};
 
 use crate::connectors::{RemoteConnector, RemoteTaskState};
 
@@ -333,6 +333,108 @@ impl RemoteConnector for RedmineRemoteConnector {
     #[allow(unused)]
     fn delete_remote_label(&self, domain: &String, project: &String, task_id: &String, name: &String) -> Result<(), String> {
         Err("Labels are not supported for Redmine".to_string())
+    }
+
+    fn supports_subtasks(&self) -> bool {
+        true
+    }
+
+    fn list_remote_subtasks(&self, domain: &String, _project: &String, task_id: &String) -> Result<Vec<Subtask>, String> {
+        let redmine = get_redmine_instance(domain)?;
+
+        let parent_id = task_id
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid task id '{}': {}", task_id, e))?;
+
+        let mut builder = ListIssues::builder();
+        builder.parent_id(vec![parent_id]);
+        builder.status_id(IssueStatusFilter::All);
+        let endpoint = builder.build().map_err(|e| e.to_string())?;
+
+        let issues = redmine
+            .json_response_body_all_pages::<_, Issue>(&endpoint)
+            .map_err(|e| e.to_string())?;
+
+        let mut result = vec![];
+        for issue in issues {
+            let name = issue.subject.clone().unwrap_or_default();
+            let status = issue.status.name.clone();
+            let mut props = HashMap::new();
+            props.insert("created".to_string(), issue.created_on.unix_timestamp().to_string());
+            props.insert("author".to_string(), issue.author.name.clone());
+            result.push(Subtask::new(Some(issue.id.to_string()), name, status, props));
+        }
+        Ok(result)
+    }
+
+    fn create_remote_subtask(&self, domain: &String, _project: &String, task_id: &String, subtask: &Subtask) -> Result<String, String> {
+        let redmine = get_redmine_instance(domain)?;
+
+        let parent_id = task_id
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid task id '{}': {}", task_id, e))?;
+
+        let mut get_builder = GetIssue::builder();
+        get_builder.id(parent_id);
+        let get_endpoint = get_builder.build().map_err(|e| e.to_string())?;
+        let IssueWrapper { issue: parent } = redmine
+            .json_response_body::<_, IssueWrapper<Issue>>(&get_endpoint)
+            .map_err(|e| e.to_string())?;
+
+        let project_id = parent.project.id;
+
+        let mut builder = CreateIssue::builder();
+        builder.project_id(project_id);
+        builder.subject(subtask.get_name().to_string());
+        builder.parent_issue_id(parent_id);
+
+        if !subtask.get_status().is_empty()
+            && let Ok(Some(status_id)) = get_status_id_by_name(&redmine, subtask.get_status()) {
+            builder.status_id(status_id);
+        }
+
+        let endpoint = builder.build().map_err(|e| e.to_string())?;
+        let IssueWrapper { issue } = redmine
+            .json_response_body::<_, IssueWrapper<Issue>>(&endpoint)
+            .map_err(|e| e.to_string())?;
+
+        Ok(issue.id.to_string())
+    }
+
+    fn update_remote_subtask(&self, domain: &String, _project: &String, _task_id: &String, subtask: &Subtask) -> Result<(), String> {
+        let redmine = get_redmine_instance(domain)?;
+
+        let id = subtask.get_id()
+            .ok_or_else(|| "Subtask has no ID".to_string())?
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid subtask id: {}", e))?;
+
+        let mut builder = UpdateIssue::builder();
+        builder.id(id);
+        builder.subject(subtask.get_name().to_string());
+
+        if !subtask.get_status().is_empty()
+            && let Ok(Some(status_id)) = get_status_id_by_name(&redmine, subtask.get_status()) {
+            builder.status_id(status_id);
+        }
+
+        let endpoint = builder.build().map_err(|e| e.to_string())?;
+        redmine.ignore_response_body(&endpoint).map_err(|e| e.to_string())
+    }
+
+    fn delete_remote_subtask(&self, domain: &String, _project: &String, _task_id: &String, subtask_id: &String) -> Result<(), String> {
+        let redmine = get_redmine_instance(domain)?;
+
+        let id = subtask_id
+            .parse::<u64>()
+            .map_err(|e| format!("Invalid subtask id '{}': {}", subtask_id, e))?;
+
+        let endpoint = DeleteIssue::builder()
+            .id(id)
+            .build()
+            .map_err(|e| e.to_string())?;
+
+        redmine.ignore_response_body(&endpoint).map_err(|e| e.to_string())
     }
 }
 

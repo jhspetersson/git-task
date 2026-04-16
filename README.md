@@ -50,6 +50,9 @@ However, for the sake of sync with GitHub or GitLab there are two config options
 
 Tasks can also have labels that are optionally synchronized with GitHub or GitLab.
 
+Tasks can be broken down into **subtasks** — lightweight items with an ID, name, status, and optional custom properties, stored inside the parent task.
+Subtasks are included in JSON import/export and can be synchronized with remotes that support them natively: GitHub sub-issues, Jira sub-tasks, and Redmine parent/child issues.
+
 ## Commands
 
 ### list
@@ -195,6 +198,47 @@ Add, set, edit or remove comments:
 You can sync comments with the remote source:
 
     git task comment edit 159 2334900009 --push
+
+### subtask
+
+Break a task into smaller pieces. Subtasks live inside the parent task and carry an ID, name, status, and any custom properties you want to set.
+
+Add a subtask:
+
+    git task subtask add 1 "Write unit tests"
+    git task sub add 1 "Deploy to staging" --status IN_PROGRESS
+
+List subtasks of a task:
+
+    git task subtask list 1
+
+Update a subtask's name, status or any custom property:
+
+    git task subtask set 1 2 status CLOSED
+    git task sub set 1 2 name "Deploy to production"
+    git task sub set 1 2 priority HIGH
+
+Edit a subtask in the default editor:
+
+    git task subtask edit 1 2
+    git task subtask edit 1 2 status
+
+Delete a subtask:
+
+    git task subtask del 1 2
+
+Subtasks are stored inside the parent task, so `git task export` and `git task import` carry them along automatically.
+
+When pushing or pulling, subtasks are synchronized with remotes that expose a native sub-issue / sub-task concept. GitHub sub-issues, Jira sub-tasks, and Redmine parent/child issues are supported out of the box:
+
+    git task subtask add 1 "Fix bug" --push
+    git task push 1
+    git task pull 1
+
+To skip subtask sync on push or pull:
+
+    git task push 1 --no-subtasks
+    git task pull 1 --no-subtasks
 
 ### import
 
@@ -391,6 +435,8 @@ Show available commands or their arguments:
 
 For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable for GitHub.
 
+Subtasks are synchronized using GitHub's sub-issues REST API. A local subtask without a remote ID is created as a fresh issue and then linked as a sub-issue of the parent.
+
 ## GitLab support
 
 For any operation you will need to set up `GITLAB_TOKEN` or `GITLAB_API_TOKEN` environment variable.
@@ -413,6 +459,8 @@ For any operation you will need to set up `JIRA_TOKEN` or `JIRA_API_TOKEN` envir
 
 We also recommend setting up statuses as they are organized in Jira.
 
+Subtasks are synchronized as Jira sub-tasks: a local subtask is created as an issue with `issuetype = "Sub-task"` and a `parent` pointing to the task's issue key.
+
 ## Redmine support
 
 Set up a Redmine URL:
@@ -430,6 +478,8 @@ Alternatively, you can set the `REDMINE_API_KEY` or `REDMINE_TOKEN` environment 
 Set default connector to use:
 
     git task config set task.default.connector redmine
+
+Subtasks are synchronized using Redmine's `parent_issue_id`: a local subtask is created as a regular issue whose parent is the task, and children are listed via the `parent_id` filter.
 
 ## License
 

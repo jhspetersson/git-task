@@ -3,7 +3,7 @@ mod gitlab;
 mod jira;
 mod redmine;
 
-use gittask::{Comment, Label, Task};
+use gittask::{Comment, Label, Subtask, Task};
 use crate::connectors::github::GithubRemoteConnector;
 use crate::connectors::gitlab::GitlabRemoteConnector;
 use crate::connectors::jira::JiraRemoteConnector;
@@ -32,6 +32,30 @@ pub trait RemoteConnector {
     fn delete_remote_task(&self, user: &String, repo: &String, task_id: &String) -> Result<(), String>;
     fn delete_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment_id: &String) -> Result<(), String>;
     fn delete_remote_label(&self, user: &String, repo: &String, task_id: &String, name: &String) -> Result<(), String>;
+
+    fn supports_subtasks(&self) -> bool {
+        false
+    }
+
+    #[allow(unused)]
+    fn list_remote_subtasks(&self, user: &String, repo: &String, task_id: &String) -> Result<Vec<Subtask>, String> {
+        Err(format!("Subtasks are not supported for {}", self.type_name()))
+    }
+
+    #[allow(unused)]
+    fn create_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask: &Subtask) -> Result<String, String> {
+        Err(format!("Subtasks are not supported for {}", self.type_name()))
+    }
+
+    #[allow(unused)]
+    fn update_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask: &Subtask) -> Result<(), String> {
+        Err(format!("Subtasks are not supported for {}", self.type_name()))
+    }
+
+    #[allow(unused)]
+    fn delete_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask_id: &String) -> Result<(), String> {
+        Err(format!("Subtasks are not supported for {}", self.type_name()))
+    }
 }
 
 const CONNECTORS: [&dyn RemoteConnector; 4] = [

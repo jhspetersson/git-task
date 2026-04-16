@@ -17,6 +17,8 @@ pub struct Task {
     props: HashMap<String, String>,
     comments: Option<Vec<Comment>>,
     labels: Option<Vec<Label>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    subtasks: Option<Vec<Subtask>>,
 }
 
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
@@ -31,6 +33,15 @@ pub struct Label {
     name: String,
     color: Option<String>,
     description: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Subtask {
+    id: Option<String>,
+    name: String,
+    status: String,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    props: HashMap<String, String>,
 }
 
 impl Task {
@@ -51,7 +62,7 @@ impl Task {
                 props.insert("created".to_string(), get_current_timestamp().to_string());
             }
 
-            Ok(Task{ id: Some(id), props, comments: None, labels: None })
+            Ok(Task{ id: Some(id), props, comments: None, labels: None, subtasks: None })
         } else {
             Err("Name or status is empty")
         }
@@ -74,6 +85,7 @@ impl Task {
             props,
             comments: None,
             labels: None,
+            subtasks: None,
         }
     }
 
@@ -215,6 +227,89 @@ impl Task {
             .as_ref()
             .and_then(|labels| labels.iter().find(|label| label.name == name))
     }
+
+    pub fn get_subtasks(&self) -> &Option<Vec<Subtask>> {
+        &self.subtasks
+    }
+
+    pub fn add_subtask(&mut self, id: Option<String>, name: String, status: String, mut props: HashMap<String, String>) -> Result<Subtask, String> {
+        if name.is_empty() || status.is_empty() {
+            return Err("Name or status is empty".to_string());
+        }
+
+        if self.subtasks.is_none() {
+            self.subtasks = Some(vec![]);
+        }
+
+        let id = Some(id.unwrap_or_else(|| {
+            let max_id = self.subtasks.as_ref().unwrap().iter()
+                .filter_map(|s| s.get_id().and_then(|id| id.parse::<u64>().ok()))
+                .max()
+                .unwrap_or(0);
+            (max_id + 1).to_string()
+        }));
+
+        if !props.contains_key("created") {
+            props.insert("created".to_string(), get_current_timestamp().to_string());
+        }
+
+        if !props.contains_key("author") {
+            if let Ok(Some(current_user)) = get_current_user() {
+                props.insert("author".to_string(), current_user);
+            }
+        }
+
+        let subtask = Subtask { id, name, status, props };
+
+        self.subtasks.as_mut().unwrap().push(subtask.clone());
+
+        Ok(subtask)
+    }
+
+    pub fn set_subtasks(&mut self, subtasks: Vec<Subtask>) {
+        self.subtasks = Some(subtasks);
+    }
+
+    pub fn delete_subtask(&mut self, id: &String) -> Result<(), String> {
+        if self.subtasks.is_none() {
+            return Err("Task has no subtasks".to_string());
+        }
+
+        let index = self.subtasks.as_ref().unwrap().iter()
+            .position(|subtask| subtask.get_id().map(|sid| sid.as_str() == id.as_str()).unwrap_or(false));
+
+        if index.is_none() {
+            return Err(format!("Subtask ID {id} not found"));
+        }
+
+        self.subtasks.as_mut().unwrap().remove(index.unwrap());
+
+        Ok(())
+    }
+
+    pub fn get_subtask(&self, id: &str) -> Option<&Subtask> {
+        self.subtasks
+            .as_ref()
+            .and_then(|subtasks| subtasks.iter().find(|s| s.get_id().map(|sid| sid == id).unwrap_or(false)))
+    }
+
+    pub fn update_subtask<F>(&mut self, id: &str, updater: F) -> Result<(), String>
+    where
+        F: FnOnce(&mut Subtask),
+    {
+        if self.subtasks.is_none() {
+            return Err("Task has no subtasks".to_string());
+        }
+
+        let subtasks = self.subtasks.as_mut().unwrap();
+        let subtask = subtasks.iter_mut()
+            .find(|s| s.get_id().map(|sid| sid == id).unwrap_or(false));
+
+        match subtask {
+            Some(s) => { updater(s); Ok(()) },
+            None => Err(format!("Subtask ID {id} not found")),
+        }
+    }
 }
 
 impl Comment {
@@ -247,6 +342,52 @@ impl Comment {
 
     pub fn set_text(&mut self, text: String) {
         self.text = text;
+    }
+}
+
+impl Subtask {
+    pub fn new(id: Option<String>, name: String, status: String, props: HashMap<String, String>) -> Subtask {
+        Subtask { id, name, status, props }
+    }
+
+    pub fn get_id(&self) -> Option<String> {
+        self.id.clone()
+    }
+
+    pub fn set_id(&mut self, id: String) {
+        self.id = Some(id);
+    }
+
+    pub fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn set_name(&mut self, name: String) {
+        self.name = name;
+    }
+
+    pub fn get_status(&self) -> &str {
+        &self.status
+    }
+
+    pub fn set_status(&mut self, status: String) {
+        self.status = status;
+    }
+
+    pub fn get_all_properties(&self) -> &HashMap<String, String> {
+        &self.props
+    }
+
+    pub fn get_property(&self, key: &str) -> Option<&String> {
+        self.props.get(key)
+    }
+
+    pub fn set_property(&mut self, key: &str, value: &str) {
+        self.props.insert(key.to_string(), value.to_string());
+    }
+
+    pub fn delete_property(&mut self, key: &str) -> bool {
+        self.props.remove(key).is_some()
     }
 }
 
@@ -457,6 +598,26 @@ pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
     create_task(task)?;
     if id != new_id {
         delete_tasks(&[&id])?;
+    }
+
+    Ok(())
+}
+
+pub fn update_subtask_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
+    let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?.clone();
+    let subtasks = task.get_subtasks();
+    if let Some(subtasks) = subtasks {
+        let updated_subtasks = subtasks.iter().map(|s| {
+            if s.get_id().map(|sid| sid == id).unwrap_or(false) {
+                let mut s = s.clone();
+                s.set_id(new_id.to_string());
+                s
+            } else {
+                s.clone()
+            }
+        }).collect::<Vec<_>>();
+        task.set_subtasks(updated_subtasks);
+        update_task(task)?;
     }
 
     Ok(())
@@ -839,6 +1000,126 @@ mod test {
         assert!(find_result.unwrap().is_some(), "Task should still exist after updating ID to the same value");
 
         let _ = delete_tasks(&[&id]);
+    }
+
+    #[test]
+    fn test_add_and_delete_subtask() {
+        let mut task = Task::construct_task(
+            "Parent task".to_string(),
+            "Description".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+
+        let added = task.add_subtask(None, "Subtask one".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        assert_eq!(added.get_id().unwrap(), "1");
+        assert_eq!(added.get_name(), "Subtask one");
+        assert_eq!(added.get_status(), "OPEN");
+        assert!(added.get_all_properties().contains_key("created"));
+
+        let second = task.add_subtask(None, "Subtask two".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        assert_eq!(second.get_id().unwrap(), "2");
+
+        assert_eq!(task.get_subtasks().as_ref().unwrap().len(), 2);
+
+        task.delete_subtask(&"1".to_string()).unwrap();
+        let subtasks = task.get_subtasks().as_ref().unwrap();
+        assert_eq!(subtasks.len(), 1);
+        assert_eq!(subtasks[0].get_id().unwrap(), "2");
+
+        let err = task.delete_subtask(&"99".to_string());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_subtask_empty_name_or_status() {
+        let mut task = Task::construct_task(
+            "Parent".to_string(),
+            "".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+        assert!(task.add_subtask(None, "".to_string(), "OPEN".to_string(), HashMap::new()).is_err());
+        assert!(task.add_subtask(None, "Name".to_string(), "".to_string(), HashMap::new()).is_err());
+    }
+
+    #[test]
+    fn test_subtask_id_no_collision_after_deletion() {
+        let mut task = Task::construct_task(
+            "Parent".to_string(),
+            "".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+        task.add_subtask(None, "A".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        task.add_subtask(None, "B".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        task.add_subtask(None, "C".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        task.delete_subtask(&"2".to_string()).unwrap();
+        task.add_subtask(None, "D".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+
+        let ids: Vec<String> = task.get_subtasks().as_ref().unwrap().iter()
+            .map(|s| s.get_id().unwrap())
+            .collect();
+        let unique: std::collections::HashSet<String> = ids.iter().cloned().collect();
+        assert_eq!(ids.len(), unique.len(), "Subtask IDs must be unique, got: {:?}", ids);
+    }
+
+    #[test]
+    fn test_update_subtask_in_place() {
+        let mut task = Task::construct_task(
+            "Parent".to_string(),
+            "".to_string(),
+            "OPEN".to_string(),
+            Some(get_current_timestamp()),
+        );
+        task.add_subtask(None, "A".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        task.update_subtask("1", |s| {
+            s.set_name("AA".to_string());
+            s.set_status("CLOSED".to_string());
+            s.set_property("priority", "HIGH");
+        }).unwrap();
+
+        let subtask = task.get_subtask("1").unwrap();
+        assert_eq!(subtask.get_name(), "AA");
+        assert_eq!(subtask.get_status(), "CLOSED");
+        assert_eq!(subtask.get_property("priority").unwrap(), "HIGH");
+    }
+
+    #[test]
+    fn test_subtask_roundtrip_serialization() {
+        let mut task = Task::construct_task(
+            "Parent".to_string(),
+            "Desc".to_string(),
+            "OPEN".to_string(),
+            Some(123),
+        );
+        task.add_subtask(
+            Some("GH-10".to_string()),
+            "Remote subtask".to_string(),
+            "IN_PROGRESS".to_string(),
+            HashMap::new(),
+        ).unwrap();
+
+        let json = serde_json::to_string(&task).unwrap();
+        let restored: Task = serde_json::from_str(&json).unwrap();
+        let subtasks = restored.get_subtasks().as_ref().unwrap();
+        assert_eq!(subtasks.len(), 1);
+        assert_eq!(subtasks[0].get_id().unwrap(), "GH-10");
+        assert_eq!(subtasks[0].get_name(), "Remote subtask");
+        assert_eq!(subtasks[0].get_status(), "IN_PROGRESS");
+    }
+
+    #[test]
+    fn test_task_without_subtasks_deserializes() {
+        let json = r#"{"id":"5","props":{"name":"x","status":"OPEN","description":"","created":"1"},"comments":null,"labels":null}"#;
+        let task: Task = serde_json::from_str(json).unwrap();
+        assert!(task.get_subtasks().is_none());
+    }
+
+    #[test]
+    fn test_update_subtask_id_nonexistent_task() {
+        let result = update_subtask_id("99999", "1", "2");
+        assert!(result.is_err());
     }
 
     #[test]
