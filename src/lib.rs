@@ -650,8 +650,9 @@ pub fn list_remotes(remote: &Option<String>) -> Result<Vec<String>, String> {
     let repo = map_err!(Repository::discover("."));
     let remotes = map_err!(repo.remotes());
     Ok(remotes.iter()
-        .filter(|s| remote.is_none() || remote.as_ref().unwrap().as_str() == s.unwrap())
-        .map(|s| repo.find_remote(s.unwrap()).unwrap().url().unwrap().to_owned())
+        .filter_map(|s| s.ok().flatten())
+        .filter(|name| remote.is_none() || remote.as_ref().unwrap().as_str() == *name)
+        .map(|name| repo.find_remote(name).unwrap().url().unwrap().to_owned())
         .collect())
 }
 
@@ -663,9 +664,9 @@ fn get_current_user() -> Result<Option<String>, String> {
     let repo = map_err!(Repository::discover("."));
     let me = &map_err!(repo.signature());
     match me.name() {
-        Some(name) => Ok(Some(String::from(name))),
+        Ok(name) => Ok(Some(String::from(name))),
         _ => match me.email() {
-            Some(email) => Ok(Some(String::from(email))),
+            Ok(email) => Ok(Some(String::from(email))),
             _ => Ok(None),
         }
     }
