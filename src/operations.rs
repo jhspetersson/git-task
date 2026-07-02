@@ -465,10 +465,11 @@ fn subtasks_are_equal(local: &Option<Vec<Subtask>>, remote: &Option<Vec<Subtask>
 }
 
 fn comments_are_equal(local_comments: &Option<Vec<Comment>>, remote_comments: &Option<Vec<Comment>>) -> bool {
-    (local_comments.is_none() && remote_comments.is_none())
-    || (local_comments.is_some() && remote_comments.is_some()
-        && local_comments.clone().unwrap() == remote_comments.clone().unwrap()
-    )
+    match (local_comments, remote_comments) {
+        (None, None) => true,
+        (Some(l), Some(r)) => l == r,
+        _ => false,
+    }
 }
 
 fn get_user_repo(remote: &Option<String>,

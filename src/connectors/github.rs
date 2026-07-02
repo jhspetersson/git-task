@@ -20,13 +20,24 @@ static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     Runtime::new().unwrap()
 });
 
+static REMOTE_URL_REGEX: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new("((https://)|(git@))github.com[/:](?P<user>[a-zA-Z0-9._-]+)/(?P<repo>[a-zA-Z0-9._-]+?)(\\.git)?/?$").unwrap()
+});
+
+static CRAB: LazyLock<Arc<Octocrab>> = LazyLock::new(|| {
+    match get_token_from_env() {
+        Some(token) => Arc::new(Octocrab::builder().personal_token(token).build().unwrap()),
+        None => octocrab::instance()
+    }
+});
+
 impl RemoteConnector for GithubRemoteConnector {
     fn type_name(&self) -> &str {
         "github"
     }
 
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
-        match Regex::new("((https://)|(git@))github.com[/:](?P<user>[a-zA-Z0-9._-]+)/(?P<repo>[a-zA-Z0-9._-]+?)(\\.git)?/?$").unwrap().captures(url) {
+        match REMOTE_URL_REGEX.captures(url) {
             Some(caps) if caps.len() >= 3 => {
                 let user = caps.name("user")?.as_str().to_string();
                 let repo = caps.name("repo")?.as_str().to_string();
@@ -604,10 +615,7 @@ async fn update_sub_issue(user: &String, repo: &String, n: u64, title: &str, sta
 }
 
 async fn get_octocrab_instance() -> Arc<Octocrab> {
-    match get_token_from_env() {
-        Some(token) => Arc::new(Octocrab::builder().personal_token(token).build().unwrap()),
-        None => octocrab::instance()
-    }
+    CRAB.clone()
 }
 
 fn get_token_from_env() -> Option<String> {

@@ -447,7 +447,13 @@ pub fn parse_bool(value: &str) -> Result<bool, String> {
 }
 
 pub fn parse_datetime_to_seconds(datetime: String) -> String {
-    DateTime::parse_from_rfc3339(&datetime).map(|dt| dt.with_timezone(&Utc).timestamp().to_string()).unwrap_or_default()
+    match DateTime::parse_from_rfc3339(&datetime) {
+        Ok(dt) => dt.with_timezone(&Utc).timestamp().to_string(),
+        Err(_) => {
+            eprintln!("WARNING: could not parse datetime '{datetime}'");
+            String::new()
+        }
+    }
 }
 
 pub fn read_from_pipe() -> Option<String> {
