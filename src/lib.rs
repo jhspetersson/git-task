@@ -434,11 +434,13 @@ pub fn list_tasks() -> Result<Vec<Task>, String> {
 
     let _ = map_err!(task_tree.walk(TreeWalkMode::PreOrder, |_, entry| {
         let oid = entry.id();
-        let blob = repo.find_blob(oid).unwrap();
-        let content = blob.content();
-
-        let task = serde_json::from_slice(content).unwrap();
-        result.push(task);
+        match repo.find_blob(oid) {
+            Ok(blob) => match serde_json::from_slice::<Task>(blob.content()) {
+                Ok(task) => result.push(task),
+                Err(_) => eprintln!("WARNING: skipping malformed task entry {}", entry.name().unwrap_or("?")),
+            },
+            Err(_) => eprintln!("WARNING: skipping non-blob task entry {}", entry.name().unwrap_or("?")),
+        }
 
         TreeWalkResult::Ok
     }));
@@ -457,7 +459,7 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
                     let oid = entry.id();
                     let blob = map_err!(repo.find_blob(oid));
                     let content = blob.content();
-                    let task = serde_json::from_slice(content).unwrap();
+                    let task = serde_json::from_slice(content).map_err(|e| format!("Malformed task {id}: {e}"))?;
 
                     Some(task)
                 },
@@ -825,6 +827,37 @@ mod test {
         // Clean up
         let delete_result = delete_tasks(&[&id]);
         assert!(delete_result.is_ok());
+    }
+
+    #[test]
+    fn test_list_tasks_skips_malformed_blob() {
+        let task = Task::construct_task("Good task".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let task = create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+
+        // inject a malformed blob into the tasks tree
+        let repo = Repository::discover(".").unwrap();
+        let task_ref = repo.find_reference(&get_ref_path()).unwrap();
+        let task_tree = task_ref.peel_to_tree().unwrap();
+        let oid = repo.blob(b"not json").unwrap();
+        let mut treebuilder = repo.treebuilder(Some(&task_tree)).unwrap();
+        treebuilder.insert("999999", oid, FileMode::Blob.into()).unwrap();
+        let tree_oid = treebuilder.write().unwrap();
+        let me = repo.signature().unwrap();
+        let parent = task_ref.peel_to_commit().unwrap();
+        repo.commit(Some(&get_ref_path()), &me, &me, "inject bad blob", &repo.find_tree(tree_oid).unwrap(), &[&parent]).unwrap();
+
+        let result = std::panic::catch_unwind(|| list_tasks());
+        assert!(result.is_ok(), "list_tasks must not panic on a malformed blob");
+        let tasks = result.unwrap().unwrap();
+        assert!(tasks.iter().any(|t| t.get_id() == Some(id.clone())), "valid tasks must still be listed");
+        assert!(!tasks.iter().any(|t| t.get_id() == Some("999999".to_string())));
+
+        let find_result = std::panic::catch_unwind(|| find_task("999999"));
+        assert!(find_result.is_ok(), "find_task must not panic on a malformed blob");
+        assert!(find_result.unwrap().is_err(), "find_task should report an error for a malformed blob");
+
+        let _ = delete_tasks(&[&id, "999999"]);
     }
 
     #[test]
