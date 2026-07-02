@@ -74,7 +74,7 @@ impl RemoteConnector for GithubRemoteConnector {
     ) -> Result<Task, String> {
         RUNTIME.block_on(
             get_issue(
-                &user, &repo, task_id.parse().unwrap(), with_comments, with_labels, task_statuses
+                &user, &repo, task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?, with_comments, with_labels, task_statuses
             )
         )
     }
@@ -99,7 +99,7 @@ impl RemoteConnector for GithubRemoteConnector {
                 add_label(
                     user,
                     repo,
-                    task_id.parse().unwrap(),
+                    task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?,
                     label
                 )),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
@@ -120,13 +120,15 @@ impl RemoteConnector for GithubRemoteConnector {
                     RemoteTaskState::Closed(_, _) => IssueState::Closed,
                     _ => IssueState::Open,
                 };
+                let task_id = task.get_id().ok_or_else(|| "Task has no ID".to_string())?;
+                let empty_string = String::new();
                 RUNTIME.block_on(
                     update_issue(
                         user,
                         repo,
-                        task.get_id().unwrap().parse().unwrap(),
-                        task.get_property("name").unwrap(),
-                        task.get_property("description").unwrap(),
+                        task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?,
+                        task.get_property("name").unwrap_or(&empty_string),
+                        task.get_property("description").unwrap_or(&empty_string),
                         labels,
                         state
                     ))
@@ -137,7 +139,7 @@ impl RemoteConnector for GithubRemoteConnector {
 
     fn update_remote_comment(&self, user: &String, repo: &String, _task_id: &String, comment_id: &String, text: &String) -> Result<(), String> {
         match get_token_from_env() {
-            Some(_) => RUNTIME.block_on(update_comment(user, repo, comment_id.parse().unwrap(), text)),
+            Some(_) => RUNTIME.block_on(update_comment(user, repo, comment_id.parse().map_err(|_| format!("Invalid comment ID: {comment_id}"))?, text)),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
         }
     }
@@ -145,7 +147,7 @@ impl RemoteConnector for GithubRemoteConnector {
     fn delete_remote_task(&self, user: &String, repo: &String, task_id: &String) -> Result<(), String> {
         match get_token_from_env() {
             Some(token) => {
-                let issue_id = RUNTIME.block_on(get_issue_id(user, repo, task_id.parse().unwrap()));
+                let issue_id = RUNTIME.block_on(get_issue_id(user, repo, task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?));
                 if issue_id.is_err() {
                     return Err("Could not match task ID with GitHub internal issue ID.".to_string());
                 }
@@ -159,12 +161,12 @@ impl RemoteConnector for GithubRemoteConnector {
                     .default_headers(
                         std::iter::once((
                             reqwest::header::AUTHORIZATION,
-                            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+                            reqwest::header::HeaderValue::from_str(&format!("Bearer {}", token)).map_err(|e| e.to_string())?,
                         )).collect(),
                     )
-                    .build().unwrap();
+                    .build().map_err(|e| e.to_string())?;
 
-                let response_body = post_graphql::<DeleteIssue, _>(&client, "https://api.github.com/graphql", variables).expect("Failed to make GraphQL request");
+                let response_body = post_graphql::<DeleteIssue, _>(&client, "https://api.github.com/graphql", variables).map_err(|e| e.to_string())?;
 
                 if let Some(errors) = response_body.errors {
                     if !errors.is_empty() {
@@ -189,14 +191,14 @@ impl RemoteConnector for GithubRemoteConnector {
 
     fn delete_remote_comment(&self, user: &String, repo: &String, _task_id: &String, comment_id: &String) -> Result<(), String> {
         match get_token_from_env() {
-            Some(_) => RUNTIME.block_on(delete_comment(user, repo, comment_id.parse().unwrap())),
+            Some(_) => RUNTIME.block_on(delete_comment(user, repo, comment_id.parse().map_err(|_| format!("Invalid comment ID: {comment_id}"))?)),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
         }
     }
 
     fn delete_remote_label(&self, user: &String, repo: &String, task_id: &String, name: &String) -> Result<(), String> {
         match get_token_from_env() {
-            Some(_) => RUNTIME.block_on(delete_label(user, repo, task_id.parse().unwrap(), name)),
+            Some(_) => RUNTIME.block_on(delete_label(user, repo, task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?, name)),
             None => Err("Could not find GITHUB_TOKEN environment variable.".to_string())
         }
     }
@@ -286,6 +288,9 @@ async fn list_issues(
     pin!(stream);
     let mut count = 0;
     while let Some(issue) = stream.try_next().await.map_err(|e| e.to_string())? {
+        if issue.pull_request.is_some() {
+            continue;
+        }
         if limit.is_some() && count >= limit.unwrap() {
             break;
         }
@@ -326,19 +331,33 @@ async fn list_issues(
 async fn list_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Comment> {
     let mut result = vec![];
     let crab = get_octocrab_instance().await;
-    let stream = crab.issues(user, repo)
+    let stream = match crab.issues(user, repo)
         .list_comments(n)
         .per_page(100)
         .send()
-        .await.unwrap()
-        .into_stream(&crab);
+        .await {
+        Ok(page) => page.into_stream(&crab),
+        Err(e) => {
+            eprintln!("ERROR fetching comments for issue {n}: {e}");
+            return result;
+        }
+    };
     pin!(stream);
-    while let Some(comment) = stream.try_next().await.unwrap() {
-        let comment = Comment::new(comment.id.to_string(), HashMap::from([
-            ("author".to_string(), comment.user.login),
-            ("created".to_string(), comment.created_at.timestamp().to_string()),
-        ]), comment.body.unwrap());
-        result.push(comment);
+    loop {
+        match stream.try_next().await {
+            Ok(Some(comment)) => {
+                let comment = Comment::new(comment.id.to_string(), HashMap::from([
+                    ("author".to_string(), comment.user.login),
+                    ("created".to_string(), comment.created_at.timestamp().to_string()),
+                ]), comment.body.unwrap_or_default());
+                result.push(comment);
+            },
+            Ok(None) => break,
+            Err(e) => {
+                eprintln!("ERROR fetching comments for issue {n}: {e}");
+                break;
+            }
+        }
     }
 
     result
@@ -408,7 +427,7 @@ async fn create_issue(user: &String, repo: &String, task: &Task) -> Result<Strin
 
 async fn create_comment(user: &String, repo: &String, task_id: &String, comment: &Comment) -> Result<String, String> {
     let crab = get_octocrab_instance().await;
-    match crab.issues(user, repo).create_comment(task_id.parse().unwrap(), comment.get_text()).await {
+    match crab.issues(user, repo).create_comment(task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?, comment.get_text()).await {
         Ok(comment) => Ok(comment.id.to_string()),
         Err(e) => Err(e.to_string())
     }
@@ -437,13 +456,18 @@ async fn prepare_labels(
     labels: &Vec<Label>,
     crab: &Arc<Octocrab>)
 {
-    let existing_labels_stream = crab
+    let existing_labels_stream = match crab
         .issues(user, repo)
         .list_labels_for_repo()
         .per_page(100)
         .send()
-        .await.unwrap()
-        .into_stream(&crab);
+        .await {
+        Ok(page) => page.into_stream(&crab),
+        Err(e) => {
+            eprintln!("ERROR fetching labels: {e}");
+            return;
+        }
+    };
     pin!(existing_labels_stream);
     let mut labels_to_create = labels.clone();
     while let Some(Ok(label)) = existing_labels_stream.next().await {
@@ -452,14 +476,16 @@ async fn prepare_labels(
         }
     }
     for l in labels_to_create.iter() {
-        let _ = crab
+        if let Err(e) = crab
             .issues(user, repo)
             .create_label(
                 l.get_name(),
                 color_str_to_rgb_str(&l.get_color()),
                 l.get_description().unwrap_or_else(|| "".to_string()),
             )
-            .await;
+            .await {
+            eprintln!("ERROR creating label {}: {e}", l.get_name());
+        }
     }
 }
 
@@ -539,10 +565,19 @@ async fn list_sub_issues(user: &String, repo: &String, n: u64) -> Result<Vec<Sub
     }).collect())
 }
 
+// The sub-issue endpoints take the issue's global database id, not its per-repo number.
+async fn get_issue_database_id(user: &String, repo: &String, n: u64) -> Result<octocrab::models::IssueId, String> {
+    let crab = get_octocrab_instance().await;
+    crab.issues(user, repo).get(n).await
+        .map(|issue| issue.id)
+        .map_err(|e| e.to_string())
+}
+
 async fn add_sub_issue(user: &String, repo: &String, parent: u64, sub: u64) -> Result<(), String> {
+    let sub_id = get_issue_database_id(user, repo, sub).await?;
     let crab = get_octocrab_instance().await;
     let url = format!("/repos/{user}/{repo}/issues/{parent}/sub_issues");
-    let body = serde_json::json!({ "sub_issue_id": sub });
+    let body = serde_json::json!({ "sub_issue_id": sub_id });
     crab.post::<_, serde_json::Value>(url, Some(&body))
         .await
         .map(|_| ())
@@ -550,9 +585,10 @@ async fn add_sub_issue(user: &String, repo: &String, parent: u64, sub: u64) -> R
 }
 
 async fn remove_sub_issue(user: &String, repo: &String, parent: u64, sub: u64) -> Result<(), String> {
+    let sub_id = get_issue_database_id(user, repo, sub).await?;
     let crab = get_octocrab_instance().await;
     let url = format!("/repos/{user}/{repo}/issues/{parent}/sub_issue");
-    let body = serde_json::json!({ "sub_issue_id": sub });
+    let body = serde_json::json!({ "sub_issue_id": sub_id });
     crab.delete::<serde_json::Value, _, _>(url, Some(&body))
         .await
         .map(|_| ())
