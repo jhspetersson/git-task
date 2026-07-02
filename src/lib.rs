@@ -610,10 +610,11 @@ pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
 
 pub fn update_subtask_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
     let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?.clone();
-    let subtasks = task.get_subtasks();
-    if let Some(subtasks) = subtasks {
+    let mut found = false;
+    if let Some(subtasks) = task.get_subtasks() {
         let updated_subtasks = subtasks.iter().map(|s| {
             if s.get_id().map(|sid| sid == id).unwrap_or(false) {
+                found = true;
                 let mut s = s.clone();
                 s.set_id(new_id.to_string());
                 s
@@ -621,34 +622,42 @@ pub fn update_subtask_id(task_id: &str, id: &str, new_id: &str) -> Result<(), St
                 s.clone()
             }
         }).collect::<Vec<_>>();
-        task.set_subtasks(updated_subtasks);
-        update_task(task)?;
+        if found {
+            task.set_subtasks(updated_subtasks);
+            update_task(task)?;
+        }
     }
 
-    Ok(())
+    match found {
+        true => Ok(()),
+        false => Err(format!("Subtask ID {id} not found")),
+    }
 }
 
 pub fn update_comment_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
     let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?.clone();
-    let comments = task.get_comments();
-    match comments {
-        Some(comments) => {
-            let updated_comments = comments.iter().map(|c| {
-                if c.get_id().map(|cid| cid == id).unwrap_or(false) {
-                    let mut c = c.clone();
-                    c.set_id(new_id.to_string());
-                    c
-                } else {
-                    c.clone()
-                }
-            }).collect::<Vec<_>>();
+    let mut found = false;
+    if let Some(comments) = task.get_comments() {
+        let updated_comments = comments.iter().map(|c| {
+            if c.get_id().map(|cid| cid == id).unwrap_or(false) {
+                found = true;
+                let mut c = c.clone();
+                c.set_id(new_id.to_string());
+                c
+            } else {
+                c.clone()
+            }
+        }).collect::<Vec<_>>();
+        if found {
             task.set_comments(updated_comments);
             update_task(task)?;
-        },
-        None => {}
+        }
     }
 
-    Ok(())
+    match found {
+        true => Ok(()),
+        false => Err(format!("Comment ID {id} not found")),
+    }
 }
 
 pub fn list_remotes(remote: &Option<String>) -> Result<Vec<String>, String> {
@@ -964,6 +973,32 @@ mod test {
 
         let delete_result = delete_tasks(&["GH-42"]);
         assert!(delete_result.is_ok());
+    }
+
+    #[test]
+    fn test_update_comment_id_nonexistent_comment() {
+        let mut task = Task::construct_task("Test task".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        task.add_comment(Some("1".to_string()), HashMap::new(), "a comment".to_string());
+        let task = create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+
+        let result = update_comment_id(&id, "99", "100");
+        assert!(result.is_err(), "updating a nonexistent comment id must fail");
+
+        let _ = delete_tasks(&[&id]);
+    }
+
+    #[test]
+    fn test_update_subtask_id_nonexistent_subtask() {
+        let mut task = Task::construct_task("Test task".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        task.add_subtask(None, "Sub".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        let task = create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+
+        let result = update_subtask_id(&id, "99", "100");
+        assert!(result.is_err(), "updating a nonexistent subtask id must fail");
+
+        let _ = delete_tasks(&[&id]);
     }
 
     #[test]
