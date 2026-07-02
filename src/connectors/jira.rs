@@ -75,56 +75,94 @@ impl RemoteConnector for JiraRemoteConnector {
         }
 
         RUNTIME.block_on(async {
-            let issues = issue_search_api::search_for_issues_using_jql(
-                &config,
-                Some(&jql),
-                None,
-                if let Some(limit) = limit { Some(limit as i32) } else { None },
-                None,
-                Some(field_list),
-                None,
-                None,
-                None,
-                None,
-            ).await;
-            match issues {
-                Ok(response) => {
-                    let mut tasks = vec![];
-                    for issue in response.issues.unwrap_or_default() {
-                        let mut props = HashMap::new();
-                        if let Some(fields) = issue.fields {
-                            props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
-                            props.insert("description".to_string(), parse_adf(fields.get("description").unwrap()));
-                            props.insert("status".to_string(), parse_status(fields.get("status").unwrap()));
-                            props.insert("created".to_string(), parse_to_unix_timestamp(fields.get("created").unwrap().as_str().unwrap()).unwrap());
-                            props.insert("author".to_string(), parse_creator(fields.get("creator").unwrap()));
+            let mut tasks: Vec<Task> = vec![];
+            let mut start_at: i32 = 0;
+            loop {
+                let max_results = match limit {
+                    Some(limit) => std::cmp::min(limit.saturating_sub(tasks.len()), 100) as i32,
+                    None => 100,
+                };
+                let response = issue_search_api::search_for_issues_using_jql(
+                    &config,
+                    Some(&jql),
+                    Some(start_at),
+                    Some(max_results),
+                    None,
+                    Some(field_list.clone()),
+                    None,
+                    None,
+                    None,
+                    None,
+                ).await.map_err(|e| e.to_string())?;
 
-                            let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props).unwrap();
+                let issues = response.issues.unwrap_or_default();
+                let batch_len = issues.len();
+                for issue in issues {
+                    let key = match issue.key {
+                        Some(key) => key,
+                        None => {
+                            eprintln!("WARNING: skipping Jira issue without a key");
+                            continue;
+                        }
+                    };
+                    let fields = match issue.fields {
+                        Some(fields) => fields,
+                        None => continue,
+                    };
+                    let summary = match fields.get("summary").and_then(|v| v.as_str()) {
+                        Some(summary) => summary,
+                        None => {
+                            eprintln!("WARNING: skipping Jira issue {key} without a summary");
+                            continue;
+                        }
+                    };
 
-                            if with_comments {
-                                if let Some(comments) = fields.get("comment") {
-                                    let task_comments = parse_comments(comments);
-                                    task.set_comments(task_comments);
-                                }
-                            }
+                    let mut props = HashMap::new();
+                    props.insert("name".to_string(), summary.to_string());
+                    props.insert("description".to_string(), fields.get("description").map(parse_adf).unwrap_or_default());
+                    props.insert("status".to_string(), fields.get("status").map(parse_status).unwrap_or_default());
+                    if let Some(created) = fields.get("created").and_then(|v| v.as_str()).and_then(|s| parse_to_unix_timestamp(s).ok()) {
+                        props.insert("created".to_string(), created);
+                    }
+                    if let Some(creator) = fields.get("creator") {
+                        props.insert("author".to_string(), parse_creator(creator));
+                    }
 
-                            if with_labels {
-                                if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
-                                    let task_labels = labels.iter().map(|v| {
-                                        Label::new(v.as_str().unwrap().to_string(), None, None)
-                                    }).collect();
-                                    task.set_labels(task_labels);
-                                }
-                            }
+                    let mut task = match Task::from_properties(issue_key_to_task_id(&key), props) {
+                        Ok(task) => task,
+                        Err(e) => {
+                            eprintln!("WARNING: skipping Jira issue {key}: {e}");
+                            continue;
+                        }
+                    };
 
-                            tasks.push(task);
+                    if with_comments {
+                        if let Some(comments) = fields.get("comment") {
+                            let task_comments = parse_comments(comments);
+                            task.set_comments(task_comments);
                         }
                     }
 
-                    Ok(tasks)
-                },
-                Err(e) => Err(e.to_string()),
+                    if with_labels {
+                        if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
+                            let task_labels = labels.iter().filter_map(|v| {
+                                v.as_str().map(|name| Label::new(name.to_string(), None, None))
+                            }).collect();
+                            task.set_labels(task_labels);
+                        }
+                    }
+
+                    tasks.push(task);
+                }
+
+                start_at += batch_len as i32;
+                let total = response.total.unwrap_or(0);
+                if batch_len == 0 || start_at >= total || limit.map_or(false, |l| tasks.len() >= l) {
+                    break;
+                }
             }
+
+            Ok(tasks)
         })
     }
 
@@ -401,21 +439,23 @@ impl RemoteConnector for JiraRemoteConnector {
                     ).await {
                         for transition in transitions.transitions.unwrap_or_else(|| vec![]) {
                             if let Some(target_status) = transition.to {
-                                if target_status.name.unwrap() == local_status {
+                                if target_status.name.as_deref() == Some(local_status.as_str()) {
                                     let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
                                         transition: Some(IssueTransition {
-                                            id: Some(transition.id.unwrap()),
-                                            ..Default::default()    
+                                            id: transition.id.clone(),
+                                            ..Default::default()
                                         }),
                                         ..Default::default()
                                     };
-                                    
-                                    let _ = issues_api::do_transition(
+
+                                    if let Err(e) = issues_api::do_transition(
                                         &config,
                                         task_id_to_issue_key(project, &task.get_id().unwrap()).as_str(),
                                         issue_details,
-                                    ).await;                                    
-                                    
+                                    ).await {
+                                        eprintln!("ERROR: failed to transition issue status: {e}");
+                                    }
+
                                     break;
                                 }
                             }
@@ -681,17 +721,19 @@ impl RemoteConnector for JiraRemoteConnector {
                             && target_status.name.as_deref() == Some(subtask.get_status()) {
                                 let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
                                     transition: Some(IssueTransition {
-                                        id: Some(transition.id.unwrap()),
+                                        id: transition.id.clone(),
                                         ..Default::default()
                                     }),
                                     ..Default::default()
                                 };
 
-                                let _ = issues_api::do_transition(
+                                if let Err(e) = issues_api::do_transition(
                                     &config,
                                     subtask_key.as_str(),
                                     issue_details,
-                                ).await;
+                                ).await {
+                                    eprintln!("ERROR: failed to transition subtask status: {e}");
+                                }
 
                                 break;
                         }
@@ -885,13 +927,18 @@ fn parse_comments(comments: &serde_json::Value) -> Vec<Comment> {
             return comments_array.iter().filter_map(|v| {
                 match v {
                     serde_json::Value::Object(comment) => {
+                        let id = comment.get("id").and_then(|v| v.as_str())?;
+                        let mut props = HashMap::new();
+                        if let Some(author) = comment.get("author") {
+                            props.insert("author".to_string(), parse_author(author));
+                        }
+                        if let Some(created) = comment.get("created").and_then(|v| v.as_str()).and_then(|s| parse_to_unix_timestamp(s).ok()) {
+                            props.insert("created".to_string(), created);
+                        }
                         Some(Comment::new(
-                            comment.get("id").unwrap().as_str().unwrap().to_string(),
-                            HashMap::from([
-                                ("author".to_string(), parse_author(comment.get("author").unwrap())),
-                                ("created".to_string(), parse_to_unix_timestamp(comment.get("created").unwrap().as_str().unwrap()).unwrap()),
-                            ]),
-                            parse_adf(comment.get("body").unwrap())
+                            id.to_string(),
+                            props,
+                            comment.get("body").map(parse_adf).unwrap_or_default()
                         ))
                     }
                     _ => { None }
