@@ -70,9 +70,12 @@ pub fn str_to_color(color: &str, style: &Option<String>) -> Style {
         "lightcyan" => LightCyan,
         "white" => White,
         "lightgray" | "lightgrey" => LightGray,
-        s => match s.parse::<u8>() {
-            Ok(n) => Fixed(n),
-            _ => {
+        s => match s.len() <= 3 {
+            true => match s.parse::<u8>() {
+                Ok(n) => Fixed(n),
+                _ => Default
+            },
+            false => {
                 match str_to_rgb(s) {
                     Some(rgb) => rgb,
                     _ => Default
@@ -136,9 +139,12 @@ pub fn color_str_to_rgb_str(color: &str) -> String {
         "lightcyan" => "00ffff",
         "white" | "default" => "c0c0c0",
         "lightgray" | "lightgrey" => "ffffff",
-        s => match s.parse::<u8>() {
-            Ok(n) => fixed_to_rgb_str(n),
-            _ => {
+        s => match s.len() <= 3 {
+            true => match s.parse::<u8>() {
+                Ok(n) => fixed_to_rgb_str(n),
+                _ => "000000"
+            },
+            false => {
                 match str_to_rgb(s) {
                     Some(_) => s,
                     _ => "000000"
@@ -642,6 +648,20 @@ mod tests {
         let expected = Style::new().fg(Default);
         let result = str_to_color(color_str, &None);
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_str_to_color_hex_with_leading_zeros() {
+        let result = str_to_color("#000123", &None);
+        assert_eq!(result, Style::new().fg(Color::Rgb(0, 1, 35)), "six-digit hex must parse as RGB even when the digits fit in a u8");
+        let result = str_to_color("000123", &None);
+        assert_eq!(result, Style::new().fg(Color::Rgb(0, 1, 35)), "bare six-digit hex must parse as RGB, not an ANSI fixed color");
+    }
+
+    #[test]
+    fn test_color_str_to_rgb_str_hex_with_leading_zeros() {
+        assert_eq!(color_str_to_rgb_str("#000123"), "000123");
+        assert_eq!(color_str_to_rgb_str("000200"), "000200");
     }
 
     #[test]
