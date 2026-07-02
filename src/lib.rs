@@ -691,17 +691,20 @@ pub fn set_config_value(key: &str, value: &str) -> Result<(), String> {
 
 pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
     let repo = map_err!(Repository::discover("."));
+    let same_path = get_ref_path() == ref_path;
 
     let current_reference = repo.find_reference(&get_ref_path());
-    if let Ok(current_reference) = &current_reference {
-        let commit = map_err!(current_reference.peel_to_commit());
-        map_err!(repo.reference(ref_path, commit.id(), true, "task.ref migrated"));
+    if !same_path {
+        if let Ok(current_reference) = &current_reference {
+            let commit = map_err!(current_reference.peel_to_commit());
+            map_err!(repo.reference(ref_path, commit.id(), true, "task.ref migrated"));
+        }
     }
 
     let mut config = map_err!(repo.config());
     map_err!(config.set_str("task.ref", ref_path));
 
-    if move_ref && current_reference.is_ok() {
+    if move_ref && !same_path && current_reference.is_ok() {
         map_err!(current_reference.unwrap().delete());
     }
 
@@ -720,6 +723,22 @@ mod test {
         assert_eq!(get_ref_path(), "refs/heads/test-git-task");
         assert!(set_ref_path(&ref_path, true).is_ok());
         assert_eq!(get_ref_path(), ref_path);
+    }
+
+    #[test]
+    fn test_set_ref_path_same_path_keeps_tasks() {
+        let ref_path = get_ref_path();
+        let task = Task::construct_task("Ref move".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let task = create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+
+        assert!(set_ref_path(&ref_path, true).is_ok());
+        assert_eq!(get_ref_path(), ref_path);
+        let found = find_task(&id);
+        assert!(found.is_ok());
+        assert!(found.unwrap().is_some(), "tasks must survive setting task.ref to its current value with move");
+
+        let _ = delete_tasks(&[&id]);
     }
 
     #[test]
