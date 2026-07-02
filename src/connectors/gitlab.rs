@@ -60,8 +60,8 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
-        match Regex::new(&(get_base_url() + "([a-zA-Z0-9._-]+)/([a-zA-Z0-9._-]+)\\.?")).unwrap().captures(url) {
-            Some(caps) if caps.len() == 3 => {
+        match Regex::new(&(get_base_url() + "([a-zA-Z0-9._-]+)/([a-zA-Z0-9._-]+?)(\\.git)?/?$")).unwrap().captures(url) {
+            Some(caps) if caps.len() >= 3 => {
                 let user = caps.get(1)?.as_str().to_string();
                 let repo = caps.get(2)?.as_str().to_string();
                 Some((user, repo))
@@ -449,7 +449,8 @@ mod test {
         let connector = GitlabRemoteConnector {};
 
         gittask::set_config_value("task.gitlab.url", "https://gitlab.com/").unwrap();
-        assert!(connector.supports_remote("https://gitlab.com/jhspetersson/fselect").is_some());
+        assert_eq!(connector.supports_remote("https://gitlab.com/jhspetersson/fselect"), Some(("jhspetersson".to_string(), "fselect".to_string())));
+        assert_eq!(connector.supports_remote("https://gitlab.com/jhspetersson/fselect.git"), Some(("jhspetersson".to_string(), "fselect".to_string())));
 
         let gitlab_url = get_base_url();
         gittask::set_config_value("task.gitlab.url", "gitlab.kitware.com").unwrap();
@@ -457,7 +458,7 @@ mod test {
         let current_url = get_base_url();
         assert_eq!(current_url, "https://gitlab.kitware.com/".to_string());
 
-        assert!(connector.supports_remote("https://gitlab.kitware.com/jhspetersson/rust-gitlab.git").is_some());
+        assert_eq!(connector.supports_remote("https://gitlab.kitware.com/jhspetersson/rust-gitlab.git"), Some(("jhspetersson".to_string(), "rust-gitlab".to_string())));
 
         gittask::set_config_value("task.gitlab.url", &gitlab_url).unwrap();
     }
@@ -468,6 +469,6 @@ mod test {
         gittask::set_config_value("task.gitlab.url", "https://gitlab.com/").unwrap();
         let result = connector.supports_remote("https://gitlab.com/UserName/my_repo");
         gittask::set_config_value("task.gitlab.url", "https://gitlab.com/").unwrap();
-        assert!(result.is_some());
+        assert_eq!(result, Some(("UserName".to_string(), "my_repo".to_string())));
     }
 }

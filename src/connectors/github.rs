@@ -26,7 +26,7 @@ impl RemoteConnector for GithubRemoteConnector {
     }
 
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
-        match Regex::new("((https://)|(git@))github.com[/:](?P<user>[a-zA-Z0-9._-]+)/(?P<repo>[a-zA-Z0-9._-]+)(\\.git)?").unwrap().captures(url) {
+        match Regex::new("((https://)|(git@))github.com[/:](?P<user>[a-zA-Z0-9._-]+)/(?P<repo>[a-zA-Z0-9._-]+?)(\\.git)?/?$").unwrap().captures(url) {
             Some(caps) if caps.len() >= 3 => {
                 let user = caps.name("user")?.as_str().to_string();
                 let repo = caps.name("repo")?.as_str().to_string();
@@ -586,14 +586,22 @@ mod test {
     fn test_remote_url() {
         let connector = GithubRemoteConnector {};
 
-        assert!(connector.supports_remote("git@github.com:VIK-777/java-telegram-meetup-bot.git").is_some());
-        assert!(connector.supports_remote("https://github.com/jhspetersson/fselect.git").is_some());
+        assert_eq!(connector.supports_remote("git@github.com:VIK-777/java-telegram-meetup-bot.git"), Some(("VIK-777".to_string(), "java-telegram-meetup-bot".to_string())));
+        assert_eq!(connector.supports_remote("https://github.com/jhspetersson/fselect.git"), Some(("jhspetersson".to_string(), "fselect".to_string())));
+        assert_eq!(connector.supports_remote("https://github.com/jhspetersson/fselect"), Some(("jhspetersson".to_string(), "fselect".to_string())));
     }
 
     #[test]
     fn test_remote_url_with_underscore() {
         let connector = GithubRemoteConnector {};
-        assert!(connector.supports_remote("https://github.com/some_user/my_repo.git").is_some());
+        assert_eq!(connector.supports_remote("https://github.com/some_user/my_repo.git"), Some(("some_user".to_string(), "my_repo".to_string())));
+    }
+
+    #[test]
+    fn test_remote_url_repo_with_dot() {
+        let connector = GithubRemoteConnector {};
+        assert_eq!(connector.supports_remote("https://github.com/vercel/next.js.git"), Some(("vercel".to_string(), "next.js".to_string())));
+        assert_eq!(connector.supports_remote("https://github.com/vercel/next.js"), Some(("vercel".to_string(), "next.js".to_string())));
     }
 
 }
