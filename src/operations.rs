@@ -212,6 +212,10 @@ pub(crate) fn task_replace(
 }
 
 pub(crate) fn task_unset(ids: String, prop_name: String) -> bool {
+    if prop_name == "name" || prop_name == "status" {
+        return error_message(format!("Property '{prop_name}' cannot be unset"));
+    }
+
     let ids = parse_ids(ids);
     let mut success = true;
     for id in ids {
@@ -423,9 +427,9 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool)
                 && subtasks_equal {
                 Ok(None)
             } else {
-                local_task.set_property("name", remote_task.get_property("name").unwrap());
-                local_task.set_property("description", remote_task.get_property("description").unwrap());
-                local_task.set_property("status", remote_task.get_property("status").unwrap());
+                local_task.set_property("name", remote_task.get_property("name").map(String::as_str).unwrap_or(""));
+                local_task.set_property("description", remote_task.get_property("description").map(String::as_str).unwrap_or(""));
+                local_task.set_property("status", remote_task.get_property("status").map(String::as_str).unwrap_or(""));
                 if !no_comments {
                     if let Some(comments) = remote_task.get_comments() {
                         local_task.set_comments(comments.to_vec());
@@ -516,9 +520,9 @@ pub(crate) fn task_export(ids: Option<String>, status: Option<Vec<String>>, limi
                 }
 
                 if let Some(ref statuses) = statuses {
-                    let task_status = task.get_property("status").unwrap();
-                    if !statuses.contains(&task_status) {
-                        continue;
+                    match task.get_property("status") {
+                        Some(task_status) if statuses.contains(task_status) => {},
+                        _ => continue,
                     }
                 }
 
@@ -568,6 +572,7 @@ pub(crate) fn task_push(
 
             let no_color = check_no_color(no_color);
             let sync_subtasks = !no_subtasks && connector.supports_subtasks();
+            let empty_string = String::new();
             for id in ids {
                 println!("Sync: task ID {id}");
                 if let Ok(Some(local_task)) = gittask::find_task(&id) {
@@ -576,13 +581,13 @@ pub(crate) fn task_push(
                     if let Ok(remote_task) = remote_task {
                         println!("Sync: REMOTE task ID {id} found");
 
-                        let local_status = local_task.get_property("status").unwrap();
-                        let local_name = local_task.get_property("name").unwrap();
-                        let local_text = local_task.get_property("description").unwrap();
+                        let local_status = local_task.get_property("status").unwrap_or(&empty_string);
+                        let local_name = local_task.get_property("name").unwrap_or(&empty_string);
+                        let local_text = local_task.get_property("description").unwrap_or(&empty_string);
 
-                        let remote_status = remote_task.get_property("status").unwrap();
-                        let remote_name = remote_task.get_property("name").unwrap();
-                        let remote_text = remote_task.get_property("description").unwrap();
+                        let remote_status = remote_task.get_property("status").unwrap_or(&empty_string);
+                        let remote_name = remote_task.get_property("name").unwrap_or(&empty_string);
+                        let remote_text = remote_task.get_property("description").unwrap_or(&empty_string);
 
                         if local_name != remote_name || local_text != remote_text || local_status != remote_status {
                             if local_status != remote_status {
@@ -757,7 +762,7 @@ pub(crate) fn task_delete(
                 Ok(tasks) => {
                     let status_manager = StatusManager::new();
                     let statuses = statuses.iter().map(|s| status_manager.get_full_status_name(s)).collect::<Vec<_>>();
-                    let ids = tasks.iter().filter(|task| statuses.contains(task.get_property("status").unwrap())).map(|task| task.get_id().unwrap()).collect::<Vec<_>>();
+                    let ids = tasks.iter().filter(|task| task.get_property("status").map_or(false, |s| statuses.contains(s))).map(|task| task.get_id().unwrap()).collect::<Vec<_>>();
                     Ok(ids)
                 },
                 Err(e) => Err(e)
@@ -844,7 +849,7 @@ fn print_task(task: Task, no_color: bool) {
     }
 
     let name_title = colorize_string("Name", DarkGray, no_color);
-    println!("{}: {}", name_title, prop_manager.format_value("name", task.get_property("name").unwrap(), &context, properties, no_color));
+    println!("{}: {}", name_title, prop_manager.format_value("name", task.get_property("name").unwrap_or(&empty_string), &context, properties, no_color));
 
     if let Some(labels) = task.get_labels() {
         if !labels.is_empty() {
@@ -861,7 +866,7 @@ fn print_task(task: Task, no_color: bool) {
 
     let status_manager = StatusManager::new();
     let status_title = colorize_string("Status", DarkGray, no_color);
-    println!("{}: {}", status_title, status_manager.format_status(task.get_property("status").unwrap(), no_color));
+    println!("{}: {}", status_title, status_manager.format_status(task.get_property("status").unwrap_or(&empty_string), no_color));
 
     task.get_all_properties().iter().filter(|entry| {
         entry.0 != "name" && entry.0 != "status" && entry.0 != "description" && entry.0 != "created" && entry.0 != "author"
@@ -1013,9 +1018,9 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
 
             let mut filtered_tasks: Vec<Task> = tasks.into_iter().filter(|task| {
                 if let Some(ref statuses) = statuses {
-                    let task_status = task.get_property("status").unwrap();
-                    if !statuses.contains(&task_status) {
-                        return false;
+                    match task.get_property("status") {
+                        Some(task_status) if statuses.contains(task_status) => {},
+                        _ => return false,
                     }
                 }
 
@@ -1198,7 +1203,7 @@ fn print_column(
     let empty_string = String::new();
     match column.as_str() {
         "status" => {
-            print!("{} ", status_manager.format_status(task.get_property(column).unwrap(), no_color))
+            print!("{} ", status_manager.format_status(task.get_property(column).unwrap_or(&empty_string), no_color))
         },
         "labels" => if let Some(labels) = task.get_labels() {
             for label in labels {
@@ -1308,6 +1313,43 @@ mod tests {
     fn test_task_unset_returns_false_on_nonexistent_task() {
         let result = task_unset("99999".to_string(), "name".to_string());
         assert!(!result, "task_unset should return false when task is not found");
+    }
+
+    #[test]
+    fn test_task_unset_protected_properties() {
+        let task = gittask::Task::new("T".to_string(), "d".to_string(), "OPEN".to_string()).unwrap();
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+
+        assert!(!task_unset(id.clone(), "status".to_string()), "unsetting status must be rejected");
+        assert!(!task_unset(id.clone(), "name".to_string()), "unsetting name must be rejected");
+        let task = gittask::find_task(&id).unwrap().unwrap();
+        assert!(task.has_property("status"));
+        assert!(task.has_property("name"));
+
+        let _ = gittask::delete_tasks(&[&id]);
+    }
+
+    #[test]
+    fn test_task_list_with_statusless_task() {
+        let json = r#"[{"id":"999888","props":{"name":"nostatus","description":"","created":"123"},"comments":null,"labels":null}]"#;
+        let tasks: Vec<gittask::Task> = serde_json::from_str(json).unwrap();
+        let _ = gittask::create_task(tasks.into_iter().next().unwrap());
+
+        let list_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            task_list(Some(vec!["OPEN".to_string()]), None, None, None, None, None, None, false, None, None, true)
+        }));
+        let export_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            task_export(None, Some(vec!["OPEN".to_string()]), None, None, false)
+        }));
+        let show_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            task_show("999888".to_string(), true)
+        }));
+
+        let _ = gittask::delete_tasks(&["999888"]);
+        assert!(list_result.is_ok(), "task_list must not panic on a task without status");
+        assert!(export_result.is_ok(), "task_export must not panic on a task without status");
+        assert!(show_result.is_ok(), "task_show must not panic on a task without status");
     }
 
     #[test]

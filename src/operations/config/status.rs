@@ -16,7 +16,7 @@ pub(crate) fn task_config_status_delete(name: String, force: bool) -> bool {
 
     if !force {
         if let Ok(tasks) = gittask::list_tasks() {
-            let task_exists = tasks.iter().any(|task| task.get_property("status").unwrap() == name.as_str());
+            let task_exists = tasks.iter().any(|task| task.get_property("status").map_or(false, |s| s == name.as_str()));
             if task_exists {
                 return error_message("Can't delete a status, some tasks still have it. Use --force option to override.".to_string());
             }
@@ -50,7 +50,7 @@ pub(crate) fn task_config_status_set(name: String, param: String, value: String)
                 match gittask::list_tasks() {
                     Ok(tasks) => {
                         for mut task in tasks {
-                            if task.get_property("status").unwrap() == prev_status.as_str() {
+                            if task.get_property("status").map_or(false, |s| s == prev_status.as_str()) {
                                 task.set_property("status", &value);
                                 if let Err(e) = gittask::update_task(task) {
                                     eprintln!("ERROR: {e}");
