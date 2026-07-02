@@ -74,7 +74,7 @@ impl RemoteConnector for RedmineRemoteConnector {
     fn list_remote_tasks(
         &self,
         domain: &String,
-        _project: &String,
+        project: &String,
         with_comments: bool,
         _with_labels: bool,
         limit: Option<usize>,
@@ -82,6 +82,7 @@ impl RemoteConnector for RedmineRemoteConnector {
         _task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
         let redmine = get_redmine_instance(domain)?;
+        let project_id = resolve_project_id(&redmine, project)?;
         let status_filter = match &state {
             RemoteTaskState::Open(status, _) | RemoteTaskState::Closed(status, _) => {
                 if let Ok(Some(status_id)) = get_status_id_by_name(&redmine, status) {
@@ -97,6 +98,7 @@ impl RemoteConnector for RedmineRemoteConnector {
             RemoteTaskState::All => None,
         };
         let mut builder = ListIssues::builder();
+        builder.project_id(vec![project_id]);
         if let Some(filter) = status_filter {
             builder.status_id(filter);
         }
@@ -146,7 +148,7 @@ impl RemoteConnector for RedmineRemoteConnector {
     ) -> Result<Task, String> {
         let redmine = get_redmine_instance(domain)?;
         let mut endpoint_builder = GetIssue::builder();
-        endpoint_builder.id(task_id.parse().unwrap());
+        endpoint_builder.id(task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?);
         if with_comments {
             endpoint_builder.include(vec![IssueInclude::Journals]);
         }
@@ -284,6 +286,9 @@ impl RemoteConnector for RedmineRemoteConnector {
                     .iter()
                     .find(|s| s.is_closed == want_closed)
                     .cloned();
+                if let Some(ref status) = target {
+                    eprintln!("WARNING: no Redmine status named '{local_status}', falling back to '{}'", status.name);
+                }
             }
 
             if let Some(status) = target {
@@ -462,7 +467,7 @@ fn get_redmine_instance(domain: &String) -> Result<Redmine, String> {
         .map_err(|e| e.to_string())?;
     let url = get_base_url(domain)?;
     let api_key = get_api_key()?;
-    Redmine::new(client, url.parse().unwrap(), &*api_key).map_err(|e| e.to_string())
+    Redmine::new(client, url.parse().map_err(|e| format!("Invalid Redmine URL '{url}': {e}"))?, &*api_key).map_err(|e| e.to_string())
 }
 
 fn get_status_id_by_name(redmine: &Redmine, name: &str) -> Result<Option<u64>, String> {
