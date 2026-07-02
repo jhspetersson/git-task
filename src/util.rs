@@ -462,12 +462,22 @@ pub fn read_from_pipe() -> Option<String> {
 }
 
 pub fn get_text_from_editor(text: Option<&String>) -> Option<String> {
-    let tmp_file = tempfile::Builder::new().prefix("git-task").suffix(".txt").disable_cleanup(true).tempfile().ok()?;
-    let mut file = File::create(tmp_file.path()).unwrap();
+    let tmp_file = match tempfile::Builder::new().prefix("git-task").suffix(".txt").disable_cleanup(true).tempfile() {
+        Ok(tmp_file) => tmp_file,
+        Err(_) => return None,
+    };
+    let result = edit_file(tmp_file.path(), text);
+    let _ = tmp_file.close();
+    result
+}
+
+fn edit_file(path: &std::path::Path, text: Option<&String>) -> Option<String> {
+    let mut file = File::create(path).ok()?;
 
     if let Some(text) = text {
         write!(file, "{}", text).ok()?;
     }
+    drop(file);
 
     let editor = std::env::var("GIT_EDITOR")
         .or_else(|_| gittask::get_config_value("core.editor"))
@@ -476,37 +486,67 @@ pub fn get_text_from_editor(text: Option<&String>) -> Option<String> {
         .or_else(|_| Ok::<String, VarError>("vi".to_string()))
         .unwrap();
 
-    let mut status = Command::new(editor)
-        .arg(tmp_file.path().to_str()?)
+    let (program, args) = split_command(&editor)?;
+
+    #[allow(unused_mut)]
+    let mut status = Command::new(program)
+        .args(args)
+        .arg(path.to_str()?)
         .status();
 
+    #[cfg(windows)]
     if status.is_err() {
+        eprintln!("Failed to launch editor '{editor}', falling back to notepad.");
         status = Command::new("notepad")
-            .arg(tmp_file.path().to_str()?)
+            .arg(path.to_str()?)
             .status();
     }
 
     match status {
         Ok(s) if !s.success() => {
-            let _ = tmp_file.close();
             eprintln!("Editor exited with a non-zero status. Changes might not be saved.");
             return None;
         },
         Err(_) => {
-            let _ = tmp_file.close();
             eprintln!("Failed to launch editor.");
             return None;
         },
         _ => {}
     }
 
-    let mut file = File::open(tmp_file.path()).unwrap();
+    let mut file = File::open(path).ok()?;
     let mut contents = String::new();
     file.read_to_string(&mut contents).ok()?;
 
-    let _ = tmp_file.close();
-
     Some(contents)
+}
+
+fn split_command(line: &str) -> Option<(String, Vec<String>)> {
+    let mut parts = vec![];
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    for c in line.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => current.push(c),
+            None => match c {
+                '"' | '\'' => quote = Some(c),
+                c if c.is_whitespace() => {
+                    if !current.is_empty() {
+                        parts.push(std::mem::take(&mut current));
+                    }
+                },
+                c => current.push(c),
+            }
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+
+    let mut parts = parts.into_iter();
+    let program = parts.next()?;
+    Some((program, parts.collect()))
 }
 
 pub fn success_message(message: String) -> bool {
@@ -790,6 +830,8 @@ mod tests {
         assert!(parse_bool("not_a_bool").is_err());
     }
 
+    // On Windows the notepad fallback would actually launch and block on user input.
+    #[cfg(not(windows))]
     #[test]
     fn test_get_text_from_editor_both_fail() {
         let prev_editor = std::env::var("EDITOR").ok();
@@ -809,6 +851,31 @@ mod tests {
             if let Some(v) = prev_git_editor { std::env::set_var("GIT_EDITOR", v); }
         }
         assert!(result.is_ok(), "get_text_from_editor should not panic when both editor and notepad fail");
+    }
+
+    #[test]
+    fn test_split_command_with_args() {
+        assert_eq!(split_command("code --wait"), Some(("code".to_string(), vec!["--wait".to_string()])));
+        assert_eq!(split_command("vim"), Some(("vim".to_string(), vec![])));
+        assert_eq!(split_command("subl -w -n"), Some(("subl".to_string(), vec!["-w".to_string(), "-n".to_string()])));
+    }
+
+    #[test]
+    fn test_split_command_quoted_program() {
+        assert_eq!(
+            split_command("\"C:\\Program Files\\Editor\\ed.exe\" -w"),
+            Some(("C:\\Program Files\\Editor\\ed.exe".to_string(), vec!["-w".to_string()]))
+        );
+        assert_eq!(
+            split_command("'/usr/local/bin/my editor' --flag"),
+            Some(("/usr/local/bin/my editor".to_string(), vec!["--flag".to_string()]))
+        );
+    }
+
+    #[test]
+    fn test_split_command_empty() {
+        assert_eq!(split_command(""), None);
+        assert_eq!(split_command("   "), None);
     }
 
     #[test]
