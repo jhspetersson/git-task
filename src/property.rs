@@ -212,7 +212,7 @@ impl PropertyManager {
     pub fn set_properties(&mut self, properties: Vec<Property>) -> Result<(), String> {
         let mut seen_names = std::collections::HashSet::new();
         for p in &properties {
-            if p.name.to_lowercase() == "id" || p.name.to_lowercase() == "labels" {
+            if p.name.to_lowercase() == "labels" {
                 return Err(format!("`{}` is a reserved property name", p.name));
             }
             if !seen_names.insert(&p.name) {
@@ -748,11 +748,28 @@ mod tests {
     }
 
     #[test]
+    fn test_set_defaults_succeeds() {
+        let mut manager = PropertyManager { properties: vec![] };
+        let result = manager.set_defaults();
+        assert!(result.is_ok(), "resetting to defaults must succeed, got: {:?}", result.err());
+    }
+
+    #[test]
+    fn test_export_import_roundtrip() {
+        let json = serde_json::to_string(&PropertyManager::get_defaults()).unwrap();
+        let parsed = PropertyManager::parse_properties(json).unwrap();
+        let mut manager = PropertyManager { properties: vec![] };
+        assert!(manager.set_properties(parsed).is_ok(), "importing exported properties must succeed");
+
+        let _ = manager.set_defaults();
+    }
+
+    #[test]
     fn test_set_properties_rejects_reserved_names() {
         let mut manager = PropertyManager {
             properties: vec![],
         };
-        let reserved = vec![
+        let builtin_id = vec![
             Property {
                 name: "id".to_string(),
                 value_type: PropertyValueType::Integer,
@@ -762,8 +779,8 @@ mod tests {
                 cond_format: None,
             },
         ];
-        let result = manager.set_properties(reserved);
-        assert!(result.is_err(), "set_properties should reject reserved property name 'id'");
+        let result = manager.set_properties(builtin_id);
+        assert!(result.is_ok(), "set_properties should accept the built-in 'id' property (it is part of defaults and exports)");
 
         let reserved = vec![
             Property {
