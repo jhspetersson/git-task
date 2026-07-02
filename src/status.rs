@@ -78,6 +78,10 @@ impl StatusManager {
     }
 
     pub fn set_statuses(&mut self, statuses: Vec<Status>) -> Result<(), String> {
+        if statuses.is_empty() {
+            return Err("Status list can't be empty".to_string());
+        }
+
         if statuses.iter().any(|s| s.name.contains(",") || s.shortcut.contains(",")) {
             return Err("Status name and shortcut can't contain comma".to_string());
         }
@@ -189,7 +193,7 @@ impl StatusManager {
             _ => {
                 self.statuses.iter().find_map(|saved_status| {
                     if saved_status.is_done { Some(saved_status.name.clone()) } else { None }
-                }).unwrap_or_else(|| self.statuses.last().unwrap().name.clone())
+                }).unwrap_or_else(|| self.statuses.last().map(|s| s.name.clone()).unwrap_or_default())
             }
         }
     }
@@ -388,6 +392,22 @@ mod tests {
             manager.get_final_status()
         }));
         assert!(result.is_ok(), "get_final_status should not panic when no status has is_done=true");
+    }
+
+    #[test]
+    fn test_get_final_status_empty_statuses() {
+        let manager = StatusManager { statuses: vec![] };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            manager.get_final_status()
+        }));
+        assert!(result.is_ok(), "get_final_status should not panic when statuses is empty");
+    }
+
+    #[test]
+    fn test_set_statuses_rejects_empty_list() {
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        let result = manager.set_statuses(vec![]);
+        assert!(result.is_err(), "set_statuses should reject an empty status list");
     }
 
     #[test]
