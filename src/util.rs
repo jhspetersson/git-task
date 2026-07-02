@@ -20,16 +20,15 @@ where
     fn expand_range(self) -> impl Iterator<Item = String> {
         self.flat_map(|s| {
             if let Some((start, end)) = s.split_once("..") {
-                let start_num = start.parse::<u64>().unwrap();
-                let end_num = end.parse::<u64>().unwrap();
-                if start_num <= end_num {
-                    (start_num..=end_num).map(|n| n.to_string()).collect::<Vec<_>>()
-                } else {
-                    (end_num..=start_num).rev().map(|n| n.to_string()).collect::<Vec<_>>()
+                if let (Ok(start_num), Ok(end_num)) = (start.parse::<u64>(), end.parse::<u64>()) {
+                    return if start_num <= end_num {
+                        (start_num..=end_num).map(|n| n.to_string()).collect::<Vec<_>>()
+                    } else {
+                        (end_num..=start_num).rev().map(|n| n.to_string()).collect::<Vec<_>>()
+                    };
                 }
-            } else {
-                vec![s]
             }
+            vec![s]
         })
     }
 }
@@ -545,10 +544,8 @@ mod tests {
     #[test]
     fn test_expand_range_invalid_range() {
         let input = vec!["1..x".to_string()];
-        let result: Result<Vec<String>, _> = std::panic::catch_unwind(|| {
-            input.into_iter().expand_range().collect::<Vec<String>>()
-        });
-        assert!(result.is_err());
+        let result: Vec<String> = input.into_iter().expand_range().collect();
+        assert_eq!(result, vec!["1..x".to_string()], "non-numeric range should pass through as a literal id, not panic");
     }
 
     #[test]
@@ -594,10 +591,8 @@ mod tests {
     #[test]
     fn test_parse_ids_invalid_range() {
         let input = "1..x".to_string();
-        let result: Result<Vec<String>, _> = std::panic::catch_unwind(|| {
-            parse_ids(input)
-        });
-        assert!(result.is_err());
+        let result = parse_ids(input);
+        assert_eq!(result, vec!["1..x".to_string()], "non-numeric range should pass through as a literal id, not panic");
     }
 
     #[test]
