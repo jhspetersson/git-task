@@ -594,6 +594,9 @@ fn get_next_id() -> Result<String, String> {
 
 pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
     let mut task = find_task(&id)?.ok_or_else(|| format!("Task ID {id} not found"))?;
+    if id != new_id && find_task(&new_id)?.is_some() {
+        return Err(format!("Task ID {new_id} already exists"));
+    }
     task.set_id(new_id.to_string());
     create_task(task)?;
     if id != new_id {
@@ -928,6 +931,23 @@ mod test {
 
         let delete_result = delete_tasks(&["GH-42"]);
         assert!(delete_result.is_ok());
+    }
+
+    #[test]
+    fn test_update_task_id_existing_target() {
+        let task_a = Task::construct_task("Task A".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let task_a = create_task(task_a).unwrap();
+        let id_a = task_a.get_id().unwrap();
+        let task_b = Task::construct_task("Task B".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let task_b = create_task(task_b).unwrap();
+        let id_b = task_b.get_id().unwrap();
+
+        let result = update_task_id(&id_b, &id_a);
+        assert!(result.is_err(), "renaming onto an existing task id must fail");
+        assert_eq!(find_task(&id_a).unwrap().unwrap().get_property("name").unwrap(), "Task A");
+        assert_eq!(find_task(&id_b).unwrap().unwrap().get_property("name").unwrap(), "Task B");
+
+        let _ = delete_tasks(&[&id_a, &id_b]);
     }
 
     #[test]
