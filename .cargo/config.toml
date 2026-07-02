@@ -1,0 +1,4 @@
+# Unoptimized builds overflow the default 1 MiB main-thread stack on Windows
+# while clap builds the command tree, so reserve 8 MiB.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "link-arg=/STACK:8388608"]
