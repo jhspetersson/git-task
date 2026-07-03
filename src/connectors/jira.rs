@@ -28,22 +28,18 @@ impl RemoteConnector for JiraRemoteConnector {
         Some(vec![
             "task.jira.url".to_string(),
             "task.jira.user".to_string(),
+            "task.jira.project".to_string(),
         ])
     }
 
     fn supports_remote(&self, _url: &str) -> Option<(String, String)> {
-        if let Some(url) = get_base_url() {
-            match Regex::new(r"https://([^/]+)\.atlassian\.net/jira/software/projects/([^/]+)").unwrap().captures(&url) {
-                Some(caps) if caps.len() >= 3 => {
-                    let domain = caps.get(1)?.as_str().to_string();
-                    let project = caps.get(2)?.as_str().to_string();
-                    Some((domain, project))
-                },
-                _ => None,
-            }
-        } else {
-            None
-        }
+        let url = get_base_url()?;
+        let origin = Regex::new(r"^(https?://[^/]+)").unwrap().captures(&url)?.get(1)?.as_str().to_string();
+        let project = match gittask::get_config_value("task.jira.project") {
+            Ok(project) if !project.is_empty() => project,
+            _ => Regex::new(r"/(?:projects|browse)/([A-Za-z][A-Za-z0-9_]*)").unwrap().captures(&url)?.get(1)?.as_str().to_string(),
+        };
+        Some((origin, project))
     }
 
     fn list_remote_tasks(
@@ -138,7 +134,13 @@ impl RemoteConnector for JiraRemoteConnector {
 
                     if with_comments {
                         if let Some(comments) = fields.get("comment") {
-                            let task_comments = parse_comments(comments);
+                            let mut task_comments = parse_comments(comments);
+                            if comments_are_truncated(comments) {
+                                match fetch_all_comments(&config, &key).await {
+                                    Ok(all_comments) => task_comments = all_comments,
+                                    Err(e) => eprintln!("WARNING: could not fetch all comments for {key}: {e}"),
+                                }
+                            }
                             task.set_comments(task_comments);
                         }
                     }
@@ -199,25 +201,38 @@ impl RemoteConnector for JiraRemoteConnector {
                 Ok(issue) => {
                     let mut props = HashMap::new();
                     if let Some(fields) = issue.fields {
-                        props.insert("name".to_string(), fields.get("summary").unwrap().as_str().unwrap().to_string());
-                        props.insert("description".to_string(), parse_adf(fields.get("description").unwrap()));
-                        props.insert("status".to_string(), parse_status(fields.get("status").unwrap()));
-                        props.insert("created".to_string(), parse_to_unix_timestamp(fields.get("created").unwrap().as_str().unwrap())?);
-                        props.insert("author".to_string(), parse_creator(fields.get("creator").unwrap()));
+                        let issue_key = issue.key.unwrap_or_else(|| task_id_to_issue_key(project, task_id));
+                        let summary = fields.get("summary").and_then(|v| v.as_str())
+                            .ok_or_else(|| format!("Issue {issue_key} has no summary"))?;
+                        props.insert("name".to_string(), summary.to_string());
+                        props.insert("description".to_string(), fields.get("description").map(parse_adf).unwrap_or_default());
+                        props.insert("status".to_string(), fields.get("status").map(parse_status).unwrap_or_default());
+                        if let Some(created) = fields.get("created").and_then(|v| v.as_str()).and_then(|s| parse_to_unix_timestamp(s).ok()) {
+                            props.insert("created".to_string(), created);
+                        }
+                        if let Some(creator) = fields.get("creator") {
+                            props.insert("author".to_string(), parse_creator(creator));
+                        }
 
-                        let mut task = Task::from_properties(issue_key_to_task_id(&issue.key.unwrap()), props)?;
+                        let mut task = Task::from_properties(issue_key_to_task_id(&issue_key), props)?;
 
                         if with_comments {
                             if let Some(comments) = fields.get("comment") {
-                                let task_comments = parse_comments(comments);
+                                let mut task_comments = parse_comments(comments);
+                                if comments_are_truncated(comments) {
+                                    match fetch_all_comments(&config, &issue_key).await {
+                                        Ok(all_comments) => task_comments = all_comments,
+                                        Err(e) => eprintln!("WARNING: could not fetch all comments for {issue_key}: {e}"),
+                                    }
+                                }
                                 task.set_comments(task_comments);
                             }
                         }
 
                         if with_labels {
                             if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
-                                let task_labels = labels.iter().map(|v| {
-                                    Label::new(v.as_str().unwrap().to_string(), None, None)
+                                let task_labels = labels.iter().filter_map(|v| {
+                                    v.as_str().map(|name| Label::new(name.to_string(), None, None))
                                 }).collect();
                                 task.set_labels(task_labels);
                             }
@@ -226,7 +241,7 @@ impl RemoteConnector for JiraRemoteConnector {
                         Ok(task)
                     } else {
                         Err("Failed to get issue: no fields returned.".to_string())
-                    }                    
+                    }
                 },
                 Err(e) => Err(e.to_string()),
             }
@@ -795,13 +810,13 @@ fn get_base_url() -> Option<String> {
     Some(result)
 }
 
-fn get_configuration(domain: &String) -> Result<Configuration, String> {
+fn get_configuration(base_url: &String) -> Result<Configuration, String> {
     let email = get_jira_user()?;
     let token = get_token_from_env()?;
 
     let mut config = Configuration::new();
     config.basic_auth = Some((email, Some(token)));
-    config.base_path = format!("https://{}.atlassian.net", domain);
+    config.base_path = base_url.trim_end_matches('/').to_string();
     Ok(config)
 }
 
@@ -890,6 +905,64 @@ mod tests {
         let result = parse_creator(&creator);
         assert_eq!(result, "John Doe", "parse_creator should use displayName, not emailAddress");
     }
+
+    #[test]
+    fn test_supports_remote_cloud_url() {
+        let connector = JiraRemoteConnector {};
+        gittask::set_config_value("task.jira.url", "https://mycompany.atlassian.net/jira/software/projects/GTPM").unwrap();
+        let result = connector.supports_remote("");
+        gittask::set_config_value("task.jira.url", "").unwrap();
+        assert_eq!(result, Some(("https://mycompany.atlassian.net".to_string(), "GTPM".to_string())));
+    }
+
+    #[test]
+    fn test_supports_remote_self_hosted_url() {
+        let connector = JiraRemoteConnector {};
+
+        gittask::set_config_value("task.jira.url", "https://jira.mycompany.com/projects/ABC").unwrap();
+        let result = connector.supports_remote("");
+        assert_eq!(result, Some(("https://jira.mycompany.com".to_string(), "ABC".to_string())), "self-hosted Jira projects URL must be supported");
+
+        gittask::set_config_value("task.jira.url", "https://jira.mycompany.com/browse/ABC").unwrap();
+        let result = connector.supports_remote("");
+        gittask::set_config_value("task.jira.url", "").unwrap();
+        assert_eq!(result, Some(("https://jira.mycompany.com".to_string(), "ABC".to_string())), "self-hosted Jira browse URL must be supported");
+    }
+
+    #[test]
+    fn test_supports_remote_project_from_config() {
+        let connector = JiraRemoteConnector {};
+        gittask::set_config_value("task.jira.url", "https://jira.mycompany.com").unwrap();
+        gittask::set_config_value("task.jira.project", "XYZ").unwrap();
+        let result = connector.supports_remote("");
+        gittask::set_config_value("task.jira.url", "").unwrap();
+        gittask::set_config_value("task.jira.project", "").unwrap();
+        assert_eq!(result, Some(("https://jira.mycompany.com".to_string(), "XYZ".to_string())), "task.jira.project config must supply the project when the URL has none");
+    }
+
+    #[test]
+    fn test_comments_are_truncated() {
+        let truncated = serde_json::json!({
+            "comments": [{"id": "1"}, {"id": "2"}],
+            "maxResults": 2,
+            "startAt": 0,
+            "total": 80
+        });
+        assert!(comments_are_truncated(&truncated), "container with total > returned comments is truncated");
+
+        let complete = serde_json::json!({
+            "comments": [{"id": "1"}, {"id": "2"}],
+            "maxResults": 50,
+            "startAt": 0,
+            "total": 2
+        });
+        assert!(!comments_are_truncated(&complete));
+
+        let no_total = serde_json::json!({
+            "comments": [{"id": "1"}]
+        });
+        assert!(!comments_are_truncated(&no_total));
+    }
 }
 
 fn parse_status(status: &serde_json::Value) -> String {
@@ -919,6 +992,49 @@ fn parse_to_unix_timestamp(date_str: &str) -> Result<String, String> {
     let timestamp = dt.timestamp();
 
     Ok(timestamp.to_string())
+}
+
+// The embedded "comment" field is a paginated container; Jira returns only the first page in it.
+fn comments_are_truncated(comments: &serde_json::Value) -> bool {
+    if let serde_json::Value::Object(container) = comments {
+        let total = container.get("total").and_then(|v| v.as_i64()).unwrap_or(0);
+        let returned = container.get("comments").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0);
+        return total > returned as i64;
+    }
+
+    false
+}
+
+async fn fetch_all_comments(config: &Configuration, issue_key: &str) -> Result<Vec<Comment>, String> {
+    let mut result = vec![];
+    let mut start_at: i64 = 0;
+    loop {
+        let page = issue_comments_api::get_comments(config, issue_key, Some(start_at), Some(100), None, None)
+            .await.map_err(|e| e.to_string())?;
+        let comments = page.comments.unwrap_or_default();
+        let batch_len = comments.len();
+        result.extend(comments.into_iter().filter_map(convert_comment));
+        start_at += batch_len as i64;
+        if batch_len == 0 || start_at >= page.total.unwrap_or(0) {
+            break;
+        }
+    }
+
+    Ok(result)
+}
+
+fn convert_comment(comment: jira_v3_openapi::models::Comment) -> Option<Comment> {
+    let id = comment.id?;
+    let mut props = HashMap::new();
+    if let Some(display_name) = comment.author.as_ref().and_then(|a| a.display_name.clone()) {
+        props.insert("author".to_string(), display_name);
+    }
+    if let Some(created) = comment.created.as_deref().and_then(|s| parse_to_unix_timestamp(s).ok()) {
+        props.insert("created".to_string(), created);
+    }
+    let text = comment.body.flatten().map(|body| parse_adf(&body)).unwrap_or_default();
+
+    Some(Comment::new(id, props, text))
 }
 
 fn parse_comments(comments: &serde_json::Value) -> Vec<Comment> {
