@@ -761,6 +761,7 @@ enum PropertiesCondFormatCommand {
 }
 
 fn main() -> ExitCode {
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let _ = enable_ansi_support::enable_ansi_support();
     let args = Args::parse();
     let success = match args.command {
