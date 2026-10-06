@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 
 use futures_util::{StreamExt, TryStreamExt};
-use graphql_client::{reqwest::post_graphql_blocking as post_graphql, GraphQLQuery};
+use graphql_client::{GraphQLQuery, Response};
 use octocrab::Octocrab;
 use octocrab::models::{CommentId, IssueState};
 use octocrab::params::State;
@@ -177,7 +177,11 @@ impl RemoteConnector for GithubRemoteConnector {
                     )
                     .build().map_err(|e| e.to_string())?;
 
-                let response_body = post_graphql::<DeleteIssue, _>(&client, "https://api.github.com/graphql", variables).map_err(|e| e.to_string())?;
+                let response_body: Response<delete_issue::ResponseData> = client
+                    .post("https://api.github.com/graphql")
+                    .json(&DeleteIssue::build_query(variables))
+                    .send().map_err(|e| e.to_string())?
+                    .json().map_err(|e| e.to_string())?;
 
                 if let Some(errors) = response_body.errors {
                     if !errors.is_empty() {
