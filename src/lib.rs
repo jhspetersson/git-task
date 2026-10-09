@@ -490,7 +490,7 @@ pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
     let me = &map_err!(repo.signature());
 
     let mut ids = ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
-    ids.sort_by(|a, b| a.parse::<u64>().unwrap_or(0).cmp(&b.parse::<u64>().unwrap_or(0)));
+    ids.sort_by(|a, b| compare_ids(a, b));
     let ids = ids.join(", ");
     map_err!(repo.commit(Some(&ref_path), me, me, format!("Delete task {}", ids).as_str(), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
@@ -668,6 +668,21 @@ pub fn update_comment_id(task_id: &str, id: &str, new_id: &str) -> Result<(), St
         true => Ok(()),
         false => Err(format!("Comment ID {id} not found")),
     }
+}
+
+/// Orders task IDs by project prefix (none first), then numerically: `7`, `42`, `ABC-7`, `ABC-42`, `XYZ-1`.
+/// Prefixed IDs are Jira issue keys kept as local IDs when several Jira projects are synced.
+pub fn compare_ids(a: &str, b: &str) -> std::cmp::Ordering {
+    fn split(id: &str) -> (&str, u64) {
+        match id.rsplit_once('-') {
+            Some((prefix, number)) if !number.is_empty() && number.chars().all(|c| c.is_ascii_digit()) => (prefix, number.parse().unwrap_or(0)),
+            _ => ("", id.parse().unwrap_or(0)),
+        }
+    }
+
+    let (prefix_a, number_a) = split(a);
+    let (prefix_b, number_b) = split(b);
+    prefix_a.cmp(prefix_b).then(number_a.cmp(&number_b)).then_with(|| a.cmp(b))
 }
 
 pub fn list_remotes(remote: &Option<String>) -> Result<Vec<String>, String> {
@@ -1201,6 +1216,13 @@ mod test {
         assert_eq!(subtask.get_name(), "AA");
         assert_eq!(subtask.get_status(), "CLOSED");
         assert_eq!(subtask.get_property("priority").unwrap(), "HIGH");
+    }
+
+    #[test]
+    fn test_compare_ids_orders_by_project_then_number() {
+        let mut ids = vec!["XYZ-1", "ABC-42", "10", "ABC-7", "2", "abc-1"];
+        ids.sort_by(|a, b| compare_ids(a, b));
+        assert_eq!(ids, vec!["2", "10", "ABC-7", "ABC-42", "XYZ-1", "abc-1"], "numeric IDs first, then issue keys by project and number");
     }
 
     #[test]

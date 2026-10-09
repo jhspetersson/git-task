@@ -273,12 +273,18 @@ Pull only open issues:
     git task pull -s o
     git task pull --status OPEN
 
+When the connector manages several projects (see [JIRA support](#jira-support)), pull one of them or all of them:
+
+    git task pull --project OPS
+    git task pull
+
 ### push
 
 Push the status of the selected tasks to the remote source.
 
     git task push 2,3,4,5,10,12
     git task push 2..5,10,12
+    git task push GTPM-42,OPS-7
 
 ### stats
 
@@ -451,6 +457,11 @@ Set up a Jira Cloud URL:
 
     git task config set task.jira.url https://someuser.atlassian.net/jira/software/projects/GTPM
 
+Self-hosted instances work too. The project key is taken from the URL, or can be set explicitly:
+
+    git task config set task.jira.url https://jira.example.com
+    git task config set task.jira.project GTPM
+
 Set up a Jira Cloud user:
 
     git task config set task.jira.user someuser@example.com
@@ -460,6 +471,27 @@ For any operation you will need to set up `JIRA_TOKEN` or `JIRA_API_TOKEN` envir
 We also recommend setting up statuses as they are organized in Jira.
 
 Subtasks are synchronized as Jira sub-tasks: a local subtask is created as an issue with `issuetype = "Sub-task"` and a `parent` pointing to the task's issue key.
+
+### Several Jira projects in one repository
+
+List every project you want to manage:
+
+    git task config set task.jira.projects GTPM,OPS,DOCS
+
+In this mode local task IDs are full Jira issue keys (`GTPM-42`), so tasks from different projects never collide. Commands that take task IDs derive the project from the key, and `--project` selects one explicitly:
+
+    git task pull                          # every configured project
+    git task pull --project OPS
+    git task pull GTPM-42,OPS-7
+    git task push GTPM-42,OPS-7
+    git task create "New task" --push --project DOCS
+    git task comment add OPS-7 "Looks good" --push
+
+Without `--project`, new tasks go to the default project: `task.jira.project`, then the project from `task.jira.url`, then the first entry of `task.jira.projects`.
+
+Tasks pulled before enabling this mode have numeric IDs that belong to the default project. Rename them in one go when switching:
+
+    git task config set task.jira.projects GTPM,OPS,DOCS --rename-tasks
 
 ## Redmine support
 

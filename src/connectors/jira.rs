@@ -29,17 +29,29 @@ impl RemoteConnector for JiraRemoteConnector {
             "task.jira.url".to_string(),
             "task.jira.user".to_string(),
             "task.jira.project".to_string(),
+            "task.jira.projects".to_string(),
         ])
     }
 
     fn supports_remote(&self, _url: &str) -> Option<(String, String)> {
-        let url = get_base_url()?;
-        let origin = Regex::new(r"^(https?://[^/]+)").unwrap().captures(&url)?.get(1)?.as_str().to_string();
-        let project = match gittask::get_config_value("task.jira.project") {
-            Ok(project) if !project.is_empty() => project,
-            _ => Regex::new(r"/(?:projects|browse)/([A-Za-z][A-Za-z0-9_]*)").unwrap().captures(&url)?.get(1)?.as_str().to_string(),
-        };
+        let origin = get_origin()?;
+        let project = get_default_project()?;
         Some((origin, project))
+    }
+
+    fn supports_remotes(&self, _url: &str) -> Vec<(String, String)> {
+        let Some(origin) = get_origin() else { return vec![] };
+        let mut projects: Vec<String> = get_default_project().into_iter().collect();
+        for project in get_configured_projects() {
+            if !projects.iter().any(|p| p.eq_ignore_ascii_case(&project)) {
+                projects.push(project);
+            }
+        }
+        projects.into_iter().map(|project| (origin.clone(), project)).collect()
+    }
+
+    fn supports_multiple_projects(&self) -> bool {
+        true
     }
 
     fn list_remote_tasks(
@@ -53,6 +65,7 @@ impl RemoteConnector for JiraRemoteConnector {
         task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
         let config = get_configuration(domain)?;
+        let prefixed = multi_project_mode();
 
         let done_status = "Done".to_string();
         let last_status = task_statuses.last().unwrap_or_else(|| &done_status);
@@ -124,7 +137,7 @@ impl RemoteConnector for JiraRemoteConnector {
                         props.insert("author".to_string(), parse_creator(creator));
                     }
 
-                    let mut task = match Task::from_properties(issue_key_to_task_id(&key), props) {
+                    let mut task = match Task::from_properties(issue_key_to_task_id(&key, prefixed), props) {
                         Ok(task) => task,
                         Err(e) => {
                             eprintln!("WARNING: skipping Jira issue {key}: {e}");
@@ -178,6 +191,7 @@ impl RemoteConnector for JiraRemoteConnector {
         _task_statuses: &Vec<String>
     ) -> Result<Task, String> {
         let config = get_configuration(domain)?;
+        let prefixed = multi_project_mode();
 
         let mut field_list = vec!["summary".to_string(), "description".to_string(), "status".to_string(), "created".to_string(), "creator".to_string()];
         if with_comments {
@@ -214,7 +228,7 @@ impl RemoteConnector for JiraRemoteConnector {
                             props.insert("author".to_string(), parse_creator(creator));
                         }
 
-                        let mut task = Task::from_properties(issue_key_to_task_id(&issue_key), props)?;
+                        let mut task = Task::from_properties(issue_key_to_task_id(&issue_key, prefixed), props)?;
 
                         if with_comments {
                             if let Some(comments) = fields.get("comment") {
@@ -255,6 +269,7 @@ impl RemoteConnector for JiraRemoteConnector {
         task: &Task
     ) -> Result<String, String> {
         let config = get_configuration(domain)?;
+        let prefixed = multi_project_mode();
 
         RUNTIME.block_on(async {
             let mut issue_details = jira_v3_openapi::models::IssueUpdateDetails {
@@ -285,7 +300,7 @@ impl RemoteConnector for JiraRemoteConnector {
                 Ok(response) => {
                     match response.key {
                         Some(key) => {
-                            let task_id = issue_key_to_task_id(&key);
+                            let task_id = issue_key_to_task_id(&key, prefixed);
                             Ok(task_id)
                         },
                         None => Err("Failed to create issue: no key returned.".to_string())
@@ -627,6 +642,7 @@ impl RemoteConnector for JiraRemoteConnector {
 
     fn list_remote_subtasks(&self, domain: &String, project: &String, task_id: &String) -> Result<Vec<Subtask>, String> {
         let config = get_configuration(domain)?;
+        let prefixed = multi_project_mode();
 
         RUNTIME.block_on(async {
             match issues_api::get_issue(
@@ -654,7 +670,7 @@ impl RemoteConnector for JiraRemoteConnector {
                                         }
                                         _ => (String::new(), String::new()),
                                     };
-                                    result.push(Subtask::new(Some(issue_key_to_task_id(&key)), name, status, HashMap::new()));
+                                    result.push(Subtask::new(Some(issue_key_to_task_id(&key, prefixed)), name, status, HashMap::new()));
                                 }
                             }
                         }
@@ -667,6 +683,7 @@ impl RemoteConnector for JiraRemoteConnector {
 
     fn create_remote_subtask(&self, domain: &String, project: &String, task_id: &String, subtask: &Subtask) -> Result<String, String> {
         let config = get_configuration(domain)?;
+        let prefixed = multi_project_mode();
 
         RUNTIME.block_on(async {
             let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
@@ -682,7 +699,7 @@ impl RemoteConnector for JiraRemoteConnector {
             match issues_api::create_issue(&config, issue_details, None).await {
                 Ok(response) => {
                     match response.key {
-                        Some(key) => Ok(issue_key_to_task_id(&key)),
+                        Some(key) => Ok(issue_key_to_task_id(&key, prefixed)),
                         None => Err("Failed to create subtask: no key returned.".to_string())
                     }
                 },
@@ -820,12 +837,70 @@ fn get_configuration(base_url: &String) -> Result<Configuration, String> {
     Ok(config)
 }
 
-fn issue_key_to_task_id(key: &String) -> String {
-    key.split('-').last().unwrap_or_default().to_string()
+fn get_origin() -> Option<String> {
+    let url = get_base_url()?;
+    Some(Regex::new(r"^(https?://[^/]+)").unwrap().captures(&url)?.get(1)?.as_str().to_string())
 }
 
+/// Project keys listed in `task.jira.projects` (comma separated).
+fn get_configured_projects() -> Vec<String> {
+    match gittask::get_config_value("task.jira.projects") {
+        Ok(projects) => projects
+            .split(',')
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
+            .collect(),
+        _ => vec![],
+    }
+}
+
+/// The project used when none is specified: `task.jira.project`, then the project
+/// from the `task.jira.url` path, then the first entry of `task.jira.projects`.
+pub(crate) fn get_default_project() -> Option<String> {
+    if let Ok(project) = gittask::get_config_value("task.jira.project") {
+        if !project.is_empty() {
+            return Some(project);
+        }
+    }
+
+    if let Some(url) = get_base_url() {
+        if let Some(project) = Regex::new(r"/(?:projects|browse)/([A-Za-z][A-Za-z0-9_]*)").unwrap().captures(&url).and_then(|c| c.get(1)) {
+            return Some(project.as_str().to_string());
+        }
+    }
+
+    get_configured_projects().into_iter().next()
+}
+
+/// Several projects can be synced into one repository only when local task IDs keep
+/// the full issue key (`ABC-42`), otherwise `ABC-42` and `XYZ-42` would collide as `42`.
+/// This mode is enabled by setting `task.jira.projects`.
+pub(crate) fn multi_project_mode() -> bool {
+    !get_configured_projects().is_empty()
+}
+
+/// Returns the full issue key when `prefixed`, otherwise only the numeric part.
+fn issue_key_to_task_id(key: &String, prefixed: bool) -> String {
+    if prefixed {
+        key.to_string()
+    } else {
+        key.split('-').last().unwrap_or_default().to_string()
+    }
+}
+
+/// Accepts both a bare number (`42`) and a full issue key (`ABC-42`).
 fn task_id_to_issue_key(project: &String, id: &String) -> String {
-    format!("{}-{}", project, id)
+    if is_issue_key(id) {
+        id.to_string()
+    } else {
+        format!("{}-{}", project, id)
+    }
+}
+
+static ISSUE_KEY_REGEX: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z][A-Za-z0-9_]*-\d+$").unwrap());
+
+pub(crate) fn is_issue_key(id: &str) -> bool {
+    ISSUE_KEY_REGEX.is_match(id)
 }
 
 fn parse_adf(description: &serde_json::Value) -> String {
@@ -938,6 +1013,51 @@ mod tests {
         gittask::set_config_value("task.jira.url", "").unwrap();
         gittask::set_config_value("task.jira.project", "").unwrap();
         assert_eq!(result, Some(("https://jira.mycompany.com".to_string(), "XYZ".to_string())), "task.jira.project config must supply the project when the URL has none");
+    }
+
+    #[test]
+    fn test_supports_remotes_lists_configured_projects() {
+        let connector = JiraRemoteConnector {};
+        gittask::set_config_value("task.jira.url", "https://jira.mycompany.com/browse/ABC").unwrap();
+        gittask::set_config_value("task.jira.projects", "XYZ, abc ,QRS").unwrap();
+        let all = connector.supports_remotes("");
+        let default = connector.supports_remote("");
+        let multi = multi_project_mode();
+        gittask::set_config_value("task.jira.url", "").unwrap();
+        gittask::set_config_value("task.jira.projects", "").unwrap();
+        let origin = "https://jira.mycompany.com".to_string();
+        assert_eq!(default, Some((origin.clone(), "ABC".to_string())), "URL project stays the default");
+        assert_eq!(all, vec![
+            (origin.clone(), "ABC".to_string()),
+            (origin.clone(), "XYZ".to_string()),
+            (origin.clone(), "QRS".to_string()),
+        ], "default first, then configured projects without duplicates");
+        assert!(multi, "task.jira.projects enables multi-project mode");
+    }
+
+    #[test]
+    fn test_default_project_falls_back_to_first_configured() {
+        let connector = JiraRemoteConnector {};
+        gittask::set_config_value("task.jira.url", "https://jira.mycompany.com").unwrap();
+        gittask::set_config_value("task.jira.projects", "XYZ,QRS").unwrap();
+        let default = connector.supports_remote("");
+        gittask::set_config_value("task.jira.url", "").unwrap();
+        gittask::set_config_value("task.jira.projects", "").unwrap();
+        assert_eq!(default, Some(("https://jira.mycompany.com".to_string(), "XYZ".to_string())));
+    }
+
+    #[test]
+    fn test_issue_key_task_id_conversion() {
+        let project = "ABC".to_string();
+        assert_eq!(issue_key_to_task_id(&"ABC-42".to_string(), false), "42");
+        assert_eq!(issue_key_to_task_id(&"ABC-42".to_string(), true), "ABC-42");
+        assert_eq!(task_id_to_issue_key(&project, &"42".to_string()), "ABC-42");
+        assert_eq!(task_id_to_issue_key(&project, &"XYZ-7".to_string()), "XYZ-7", "a full key is used as is");
+        assert!(is_issue_key("ABC-42"));
+        assert!(is_issue_key("A_1-7"));
+        assert!(!is_issue_key("42"));
+        assert!(!is_issue_key("1..5"));
+        assert!(!is_issue_key("ABC-"));
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use crate::operations::get_user_repo;
+use crate::operations::{get_user_repo, resolve_project};
 use crate::util::{error_message};
 
 pub(crate) fn task_label_add(
@@ -9,6 +9,7 @@ pub(crate) fn task_label_add(
     push: bool,
     remote: &Option<String>,
     connector_type: &Option<String>,
+    project: &Option<String>,
 ) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
@@ -19,7 +20,7 @@ pub(crate) fn task_label_add(
                     let mut success = true;
                     if push {
                         success = false;
-                        match get_user_repo(remote, connector_type) {
+                        match get_user_repo(remote, connector_type, &resolve_project(project, &task_id)) {
                             Ok((connector, user, repo)) => {
                                 match connector.create_remote_label(&user, &repo, &task_id, &label) {
                                     Ok(_) => {
@@ -48,6 +49,7 @@ pub(crate) fn task_label_delete(
     push: bool,
     remote: &Option<String>,
     connector_type: &Option<String>,
+    project: &Option<String>,
 ) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
@@ -59,7 +61,7 @@ pub(crate) fn task_label_delete(
                             let mut success = true;
                             if push {
                                 success = false;
-                                match get_user_repo(remote, connector_type) {
+                                match get_user_repo(remote, connector_type, &resolve_project(project, &task_id)) {
                                     Ok((connector, user, repo)) => {
                                         match connector.delete_remote_label(&user, &repo, &task_id, &name) {
                                             Ok(_) => {

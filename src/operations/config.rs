@@ -27,8 +27,26 @@ pub(crate) fn task_config_get(param: String) -> bool {
     }
 }
 
-pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> bool {
+pub(crate) fn task_config_set(param: String, value: String, move_ref: bool, rename_tasks: bool) -> bool {
+    if rename_tasks && param != "task.jira.projects" {
+        return error_message("--rename-tasks only applies to task.jira.projects".to_string());
+    }
+
     match param.as_str() {
+        "task.jira.projects" => {
+            match gittask::set_config_value(&param, &value) {
+                Ok(_) => {
+                    println!("{param} has been updated");
+                    if rename_tasks {
+                        rename_numeric_tasks_with_jira_project()
+                    } else {
+                        println!("NOTE: Jira tasks are now identified by their full issue key (e.g. ABC-42). Run with --rename-tasks to prefix existing numeric task IDs with the default project.");
+                        true
+                    }
+                },
+                Err(e) => error_message(format!("ERROR: {e}"))
+            }
+        },
         "task.list.columns" => {
             match gittask::set_config_value(&param, &value) {
                 Ok(_) => success_message(format!("{param} has been updated")),
@@ -96,6 +114,42 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool) -> b
     }
 }
 
+/// Migration to multi-project Jira mode: numeric task IDs belonged to the single
+/// (default) project, so they become `PROJECT-<id>` to match the IDs pulled from now on.
+fn rename_numeric_tasks_with_jira_project() -> bool {
+    let project = match crate::connectors::jira::get_default_project() {
+        Some(project) => project,
+        None => return error_message("No default Jira project found: set task.jira.project, a project URL in task.jira.url or task.jira.projects".to_string()),
+    };
+
+    match gittask::list_tasks() {
+        Ok(tasks) => {
+            let mut renamed = 0;
+            let mut success = true;
+            for task in tasks {
+                let id = match task.get_id() {
+                    Some(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) => id,
+                    _ => continue,
+                };
+                let new_id = format!("{project}-{id}");
+                match gittask::update_task_id(&id, &new_id) {
+                    Ok(_) => {
+                        println!("Task ID {id} -> {new_id} updated");
+                        renamed += 1;
+                    },
+                    Err(e) => {
+                        eprintln!("ERROR: {e}");
+                        success = false;
+                    }
+                }
+            }
+            println!("{renamed} task(s) renamed");
+            success
+        },
+        Err(e) => error_message(format!("ERROR: {e}")),
+    }
+}
+
 pub(crate) fn task_config_list() -> bool {
     let from_connectors = get_config_options_from_connectors().join("\n");
     success_message("task.list.columns\ntask.list.show.headers\ntask.list.sort\ntask.status.open\ntask.status.in_progress\ntask.status.closed\ntask.default.connector\ntask.ref\n".to_string() + &from_connectors)
@@ -104,7 +158,7 @@ pub(crate) fn task_config_list() -> bool {
 pub(crate) fn task_config_connectors_list(name: Option<String>) -> bool {
     match gittask::list_remotes(&name) {
         Ok(remotes) => {
-            let connectors = get_matching_remote_connectors(remotes, &None);
+            let connectors = get_matching_remote_connectors(remotes, &None, &None, true);
             let mut result = vec![];
             for (connector, user, repo) in connectors {
                 result.push(format!("{}: {}/{}", connector.type_name(), user, repo));

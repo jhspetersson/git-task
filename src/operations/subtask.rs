@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use nu_ansi_term::Color::DarkGray;
 
-use crate::operations::get_user_repo;
+use crate::operations::{get_user_repo, resolve_project};
 use crate::status::StatusManager;
 use crate::util::{colorize_string, error_message, get_text_from_editor, success_message};
 
@@ -13,6 +13,7 @@ pub(crate) fn task_subtask_add(
     push: bool,
     remote: &Option<String>,
     connector_type: &Option<String>,
+    project: &Option<String>,
 ) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
@@ -39,7 +40,7 @@ pub(crate) fn task_subtask_add(
                     let mut success = true;
                     if push {
                         success = false;
-                        match get_user_repo(remote, connector_type) {
+                        match get_user_repo(remote, connector_type, &resolve_project(project, &task_id)) {
                             Ok((connector, user, repo)) => {
                                 match connector.create_remote_subtask(&user, &repo, &task_id, &subtask) {
                                     Ok(remote_id) => {
@@ -76,6 +77,7 @@ pub(crate) fn task_subtask_set(
     push: bool,
     remote: &Option<String>,
     connector_type: &Option<String>,
+    project: &Option<String>,
 ) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
@@ -102,7 +104,7 @@ pub(crate) fn task_subtask_set(
                             let mut success = true;
                             if push {
                                 success = false;
-                                match get_user_repo(remote, connector_type) {
+                                match get_user_repo(remote, connector_type, &resolve_project(project, &task_id)) {
                                     Ok((connector, user, repo)) => {
                                         if let Ok(Some(task)) = gittask::find_task(&task_id) {
                                             if let Some(subtask) = task.get_subtask(&subtask_id) {
@@ -215,6 +217,7 @@ pub(crate) fn task_subtask_delete(
     push: bool,
     remote: &Option<String>,
     connector_type: &Option<String>,
+    project: &Option<String>,
 ) -> bool {
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
@@ -225,7 +228,7 @@ pub(crate) fn task_subtask_delete(
                         let mut success = true;
                         if push {
                             success = false;
-                            match get_user_repo(remote, connector_type) {
+                            match get_user_repo(remote, connector_type, &resolve_project(project, &task_id)) {
                                 Ok((connector, user, repo)) => {
                                     match connector.delete_remote_subtask(&user, &repo, &task_id, &subtask_id) {
                                         Ok(_) => {
