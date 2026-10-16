@@ -99,6 +99,17 @@ impl Redmine {
         self.put(&format!("/issues/{id}.json"), json!({ "issue": { "notes": text } }));
     }
 
+    fn change_status(&self, id: u64, status_name: &str) {
+        let status_id = self.get("/issue_statuses.json")["issue_statuses"]
+            .as_array()
+            .expect("statuses")
+            .iter()
+            .find(|s| s["name"] == status_name)
+            .and_then(|s| s["id"].as_u64())
+            .unwrap_or_else(|| panic!("status {status_name} not found"));
+        self.put(&format!("/issues/{id}.json"), json!({ "issue": { "status_id": status_id } }));
+    }
+
     fn notes(&self, id: u64) -> Vec<(u64, String)> {
         self.issue(id)["journals"]
             .as_array()
@@ -286,6 +297,24 @@ fn pull_imports_the_issue_with_its_status_and_comment() {
     let notes = redmine.notes(id);
     assert_eq!(notes.len(), 1);
     assert_eq!(local_comments(&repo, &id.to_string()), vec![(notes[0].0.to_string(), "A real comment".to_string())], "the comment must carry the journal id");
+}
+
+#[test]
+fn pull_skips_journals_that_carry_no_note() {
+    let redmine = redmine_or_skip!();
+    let project = redmine.create_project("journals");
+    let id = redmine.create_issue(project, "Journals from CI");
+    redmine.change_status(id, "In Progress");
+    redmine.add_note(id, "A real comment");
+    redmine.change_status(id, "Resolved");
+    let repo = local_repo(&redmine, project);
+
+    run(&repo, &["pull", &id.to_string()]);
+
+    let journals = redmine.issue(id)["journals"].as_array().cloned().unwrap_or_default();
+    assert_eq!(journals.len(), 3, "every change must have produced a journal");
+    let texts = local_comments(&repo, &id.to_string()).into_iter().map(|(_, text)| text).collect::<Vec<_>>();
+    assert_eq!(texts, vec!["A real comment".to_string()], "status changes must not be imported as blank comments");
 }
 
 #[test]

@@ -516,7 +516,7 @@ fn issue_to_task(issue: &Issue) -> Result<Task, String> {
 fn append_journals_as_comments(issue: &Issue, task: &mut Task) {
     if let Some(journals) = &issue.journals {
         for j in journals {
-            if let Some(text) = &j.notes {
+            if let Some(text) = j.notes.as_ref().filter(|text| !text.trim().is_empty()) {
                 let mut props = HashMap::new();
                 props.insert("author".to_string(), j.user.name.clone());
                 props.insert("created".to_string(), j.created_on.unix_timestamp().to_string());
@@ -526,5 +526,53 @@ fn append_journals_as_comments(issue: &Issue, task: &mut Task) {
                 task.add_comment(Some(j.id.to_string()), props, text.clone());
             }
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn issue_with_journals(journals: &str) -> Issue {
+        let json = format!(r#"{{
+            "id": 7,
+            "project": {{ "id": 1, "name": "CI" }},
+            "tracker": {{ "id": 1, "name": "Bug" }},
+            "status": {{ "id": 1, "name": "New", "is_closed": false }},
+            "priority": {{ "id": 2, "name": "Normal" }},
+            "author": {{ "id": 1, "name": "Admin" }},
+            "subject": "Journals",
+            "description": "",
+            "start_date": null,
+            "due_date": null,
+            "closed_on": null,
+            "done_ratio": 0,
+            "estimated_hours": null,
+            "created_on": "2026-10-16T10:00:00Z",
+            "updated_on": "2026-10-16T10:00:00Z",
+            "journals": {journals}
+        }}"#);
+        serde_json::from_str(&json).expect("issue JSON")
+    }
+
+    #[test]
+    fn journals_without_notes_do_not_become_comments() {
+        let issue = issue_with_journals(r#"[
+            { "id": 11, "user": { "id": 1, "name": "Admin" }, "notes": "", "private_notes": false,
+              "created_on": "2026-10-16T10:01:00Z", "updated_on": "2026-10-16T10:01:00Z",
+              "details": [ { "property": "attr", "name": "status_id", "old_value": "1", "new_value": "2" } ] },
+            { "id": 12, "user": { "id": 1, "name": "Admin" }, "notes": null, "private_notes": false,
+              "created_on": "2026-10-16T10:02:00Z", "updated_on": "2026-10-16T10:02:00Z", "details": [] },
+            { "id": 13, "user": { "id": 1, "name": "Admin" }, "notes": "A real comment", "private_notes": false,
+              "created_on": "2026-10-16T10:03:00Z", "updated_on": "2026-10-16T10:03:00Z", "details": [] }
+        ]"#);
+        let mut task = issue_to_task(&issue).unwrap();
+
+        append_journals_as_comments(&issue, &mut task);
+
+        let comments = task.get_comments().clone().unwrap_or_default();
+        let texts = comments.iter().map(|c| c.get_text().clone()).collect::<Vec<_>>();
+        assert_eq!(comments.len(), 1, "only the journal with notes must become a comment, got {texts:?}");
+        assert_eq!(comments[0].get_id(), Some("13".to_string()));
+        assert_eq!(comments[0].get_text(), "A real comment");
     }
 }
