@@ -267,32 +267,9 @@ impl RemoteConnector for RedmineRemoteConnector {
         };
 
         if !local_status.is_empty() && !remote_status.is_empty() && local_status != remote_status {
-            let endpoint = ListIssueStatuses::builder().build().map_err(|e| e.to_string())?;
-            let IssueStatusesWrapper { issue_statuses } =
-                redmine
-                    .json_response_body::<_, IssueStatusesWrapper<IssueStatus>>(&endpoint)
-                    .map_err(|e| e.to_string())?;
-
-            let local_lower = local_status.to_lowercase();
-
-            let mut target = issue_statuses
-                .iter()
-                .find(|s| s.name.to_lowercase() == local_lower)
-                .cloned();
-
-            if target.is_none() {
-                let want_closed = local_lower == "closed" || local_lower == "resolved";
-                target = issue_statuses
-                    .iter()
-                    .find(|s| s.is_closed == want_closed)
-                    .cloned();
-                if let Some(ref status) = target {
-                    eprintln!("WARNING: no Redmine status named '{local_status}', falling back to '{}'", status.name);
-                }
-            }
-
-            if let Some(status) = target {
-                builder.status_id(status.id);
+            match get_status_id_by_name(&redmine, &local_status)? {
+                Some(status_id) => { builder.status_id(status_id); },
+                None => eprintln!("WARNING: no Redmine status matches '{local_status}', remote status left as '{remote_status}'"),
             }
         }
 
@@ -477,11 +454,30 @@ fn get_status_id_by_name(redmine: &Redmine, name: &str) -> Result<Option<u64>, S
             .json_response_body::<_, IssueStatusesWrapper<IssueStatus>>(&endpoint)
             .map_err(|e| e.to_string())?;
 
-    let name_lower = name.to_lowercase();
+    let wanted = normalize_status_name(name);
     Ok(issue_statuses
         .iter()
-        .find(|s| s.name.to_lowercase() == name_lower)
+        .find(|s| normalize_status_name(&s.name) == wanted)
         .map(|s| s.id))
+}
+
+fn normalize_status_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !matches!(c, ' ' | '_' | '-'))
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_status_name;
+
+    #[test]
+    fn normalize_ignores_case_and_separators() {
+        assert_eq!(normalize_status_name("IN_PROGRESS"), normalize_status_name("In Progress"));
+        assert_eq!(normalize_status_name("in-progress"), "inprogress");
+        assert_ne!(normalize_status_name("OPEN"), normalize_status_name("New"));
+    }
 }
 
 fn get_base_url(domain: &String) -> Result<String, String> {
