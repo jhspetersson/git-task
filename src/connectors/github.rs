@@ -424,7 +424,8 @@ async fn get_issue(
 async fn create_issue(user: &String, repo: &String, task: &Task) -> Result<String, String> {
     let crab = get_octocrab_instance().await;
     let crab_issues = crab.issues(user, repo);
-    let mut create_builder = crab_issues.create(task.get_property("name").unwrap());
+    let name = task.get_property("name").ok_or_else(|| "Task has no name".to_string())?;
+    let mut create_builder = crab_issues.create(name);
     if let Some(description) = task.get_property("description") {
         create_builder = create_builder.body(description);
     }

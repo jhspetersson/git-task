@@ -270,6 +270,8 @@ impl RemoteConnector for JiraRemoteConnector {
     ) -> Result<String, String> {
         let config = get_configuration(domain)?;
         let prefixed = multi_project_mode();
+        let name = task.get_property("name").ok_or_else(|| "Task has no name".to_string())?;
+        let description = task.get_property("description").map(String::as_str).unwrap_or("");
 
         RUNTIME.block_on(async {
             let mut issue_details = jira_v3_openapi::models::IssueUpdateDetails {
@@ -277,12 +279,8 @@ impl RemoteConnector for JiraRemoteConnector {
                     ("project".to_string(), serde_json::json!({
                         "key": project
                     })),
-                    ("summary".to_string(), serde_json::json!(
-                        task.get_property("name").unwrap()
-                    )),
-                    ("description".to_string(),
-                        format_adf(task.get_property("description").unwrap())
-                    ),
+                    ("summary".to_string(), serde_json::json!(name)),
+                    ("description".to_string(), format_adf(description)),
                     ("issuetype".to_string(), serde_json::json!({
                         "name": "Task"
                     })),
@@ -419,11 +417,13 @@ impl RemoteConnector for JiraRemoteConnector {
         state: RemoteTaskState
     ) -> Result<(), String> {
         let config = get_configuration(domain)?;
+        let name = task.get_property("name").ok_or_else(|| "Task has no name".to_string())?;
+        let description = task.get_property("description").map(String::as_str).unwrap_or("");
 
         RUNTIME.block_on(async {
             let mut fields = HashMap::new();
-            fields.insert("summary".to_string(), serde_json::json!(task.get_property("name").unwrap()));
-            fields.insert("description".to_string(), format_adf(task.get_property("description").unwrap()));
+            fields.insert("summary".to_string(), serde_json::json!(name));
+            fields.insert("description".to_string(), format_adf(description));
             
             if let Some(labels) = labels {
                 fields.insert("labels".to_string(), serde_json::json!(
@@ -939,7 +939,7 @@ fn parse_adf(description: &serde_json::Value) -> String {
     "".to_string()
 }
 
-fn format_adf(text: &String) -> serde_json::Value {
+fn format_adf(text: &str) -> serde_json::Value {
     serde_json::json!({
         "type": "doc",
         "version": 1,
