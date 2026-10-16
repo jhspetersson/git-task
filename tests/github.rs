@@ -1,15 +1,3 @@
-//! Integration tests against the real GitHub API.
-//!
-//! They run only when `GIT_TASK_GITHUB_TOKEN` is set. The token needs write
-//! access to the issues of the test repository, which defaults to
-//! `jhspetersson/git-task-ci` and can be overridden with `GIT_TASK_GITHUB_REPO`
-//! in the `owner/name` form. Without the token the tests are skipped and report
-//! success.
-//!
-//! GitHub cannot be spun up per run, so every test shares one repository. Each
-//! test tags its issue titles with a unique suffix, asserts only on issues that
-//! carry its suffix, and closes them afterwards.
-
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -100,7 +88,6 @@ impl GitHub {
     }
 
     fn add_label(&self, number: u64, name: &str) {
-        // The label is repository-wide and survives between runs, so creating it may fail with 422.
         let response = self.send(reqwest::Method::POST, "/labels", Some(json!({ "name": name, "color": "ff6633" })));
         assert!(
             response.status().is_success() || response.status() == reqwest::StatusCode::UNPROCESSABLE_ENTITY,
@@ -114,7 +101,6 @@ impl GitHub {
         self.patch(&format!("/issues/{number}"), json!({ "state": "closed" }));
     }
 
-    /// Issues whose title contains `marker`, newest first. Pull requests are excluded.
     fn issues_with(&self, marker: &str) -> Vec<Issue> {
         self.get("/issues?state=all&per_page=100&sort=created&direction=desc")
             .as_array()
@@ -199,7 +185,6 @@ fn push_creates_the_issue_once_and_adopts_its_number() {
 
     let (ok, out) = git_task(&github, &repo, &["create", &title]);
     assert!(ok, "create failed: {out}");
-    // Rename the local task to a number no issue in the shared repository will ever have.
     let (ok, out) = git_task(&github, &repo, &["set", "1", "id", "999999999"]);
     assert!(ok, "renaming the local task failed: {out}");
 
