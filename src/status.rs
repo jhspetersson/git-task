@@ -208,6 +208,9 @@ impl StatusManager {
     }
 
     pub fn get_full_status_name(&self, status: &String) -> String {
+        if self.statuses.iter().any(|saved_status| saved_status.name == *status) {
+            return status.clone();
+        }
         self.statuses.iter().find_map(|saved_status| {
             if status == saved_status.shortcut.as_str() { Some(saved_status.name.clone()) } else { None }
         }).unwrap_or(status.clone())
@@ -390,6 +393,24 @@ mod tests {
                 is_done: true,
             },
         ]
+    }
+
+    #[test]
+    fn test_exact_name_wins_over_another_status_shortcut() {
+        let mut statuses = make_test_statuses();
+        statuses.push(Status {
+            name: String::from("c"),
+            shortcut: String::from("x"),
+            color: String::from("Blue"),
+            style: None,
+            is_done: false,
+        });
+        let manager = StatusManager { statuses };
+
+        assert_eq!(manager.get_full_status_name(&"c".to_string()), "c", "a status addressed by its exact name must not be hijacked by a shortcut");
+        assert_eq!(manager.resolve_status("c"), Ok("c".to_string()));
+        assert_eq!(manager.resolve_status("x"), Ok("c".to_string()), "its own shortcut still works");
+        assert_eq!(manager.resolve_status("CLOSED"), Ok("CLOSED".to_string()), "the other status is still reachable by name");
     }
 
     #[test]
