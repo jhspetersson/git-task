@@ -42,7 +42,8 @@ pub(crate) fn task_subtask_add(
                         success = false;
                         match get_user_repo(remote, connector_type, &resolve_project(project, &task_id)) {
                             Ok((connector, user, repo)) => {
-                                match connector.create_remote_subtask(&user, &repo, &task_id, &subtask) {
+                                let is_done = status_manager.is_done(subtask.get_status());
+                                match connector.create_remote_subtask(&user, &repo, &task_id, &subtask, is_done) {
                                     Ok(remote_id) => {
                                         println!("Created REMOTE subtask ID {remote_id}");
                                         match gittask::update_subtask_id(&task_id, &subtask.get_id().unwrap(), &remote_id) {
@@ -108,7 +109,8 @@ pub(crate) fn task_subtask_set(
                                     Ok((connector, user, repo)) => {
                                         if let Ok(Some(task)) = gittask::find_task(&task_id) {
                                             if let Some(subtask) = task.get_subtask(&subtask_id) {
-                                                match connector.update_remote_subtask(&user, &repo, &task_id, subtask) {
+                                                let is_done = status_manager.is_done(subtask.get_status());
+                                                match connector.update_remote_subtask(&user, &repo, &task_id, subtask, is_done) {
                                                     Ok(_) => {
                                                         println!("Sync: REMOTE subtask ID {subtask_id} has been updated");
                                                         success = true;

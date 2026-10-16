@@ -344,7 +344,7 @@ impl RemoteConnector for RedmineRemoteConnector {
         true
     }
 
-    fn list_remote_subtasks(&self, domain: &String, _project: &String, task_id: &String) -> Result<Vec<Subtask>, String> {
+    fn list_remote_subtasks(&self, domain: &String, _project: &String, task_id: &String, _task_statuses: &Vec<String>) -> Result<Vec<Subtask>, String> {
         let redmine = get_redmine_instance(domain)?;
 
         let parent_id = task_id
@@ -372,7 +372,7 @@ impl RemoteConnector for RedmineRemoteConnector {
         Ok(result)
     }
 
-    fn create_remote_subtask(&self, domain: &String, _project: &String, task_id: &String, subtask: &Subtask) -> Result<String, String> {
+    fn create_remote_subtask(&self, domain: &String, _project: &String, task_id: &String, subtask: &Subtask, _is_done: bool) -> Result<String, String> {
         let redmine = get_redmine_instance(domain)?;
 
         let parent_id = task_id
@@ -406,7 +406,7 @@ impl RemoteConnector for RedmineRemoteConnector {
         Ok(issue.id.to_string())
     }
 
-    fn update_remote_subtask(&self, domain: &String, _project: &String, _task_id: &String, subtask: &Subtask) -> Result<(), String> {
+    fn update_remote_subtask(&self, domain: &String, _project: &String, _task_id: &String, subtask: &Subtask, _is_done: bool) -> Result<(), String> {
         let redmine = get_redmine_instance(domain)?;
 
         let id = subtask.get_id()

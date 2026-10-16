@@ -48,17 +48,17 @@ pub trait RemoteConnector {
     }
 
     #[allow(unused)]
-    fn list_remote_subtasks(&self, user: &String, repo: &String, task_id: &String) -> Result<Vec<Subtask>, String> {
+    fn list_remote_subtasks(&self, user: &String, repo: &String, task_id: &String, task_statuses: &Vec<String>) -> Result<Vec<Subtask>, String> {
         Err(format!("Subtasks are not supported for {}", self.type_name()))
     }
 
     #[allow(unused)]
-    fn create_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask: &Subtask) -> Result<String, String> {
+    fn create_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask: &Subtask, is_done: bool) -> Result<String, String> {
         Err(format!("Subtasks are not supported for {}", self.type_name()))
     }
 
     #[allow(unused)]
-    fn update_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask: &Subtask) -> Result<(), String> {
+    fn update_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask: &Subtask, is_done: bool) -> Result<(), String> {
         Err(format!("Subtasks are not supported for {}", self.type_name()))
     }
 

@@ -367,7 +367,7 @@ pub(crate) fn task_pull(
             match connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses) {
                 Ok(mut task) => {
                     if fetch_subtasks {
-                        if let Ok(subtasks) = connector.list_remote_subtasks(&user, &repo, &id) {
+                        if let Ok(subtasks) = connector.list_remote_subtasks(&user, &repo, &id, &task_statuses) {
                             task.set_subtasks(subtasks);
                         }
                     }
@@ -411,7 +411,7 @@ pub(crate) fn task_pull(
                     for mut task in tasks {
                         let task_id = task.get_id().unwrap();
                         if fetch_subtasks {
-                            if let Ok(subtasks) = connector.list_remote_subtasks(&user, &repo, &task_id) {
+                            if let Ok(subtasks) = connector.list_remote_subtasks(&user, &repo, &task_id, &task_statuses) {
                                 task.set_subtasks(subtasks);
                             }
                         }
@@ -703,7 +703,7 @@ pub(crate) fn task_push(
                         }
                     }
                     if sync_subtasks {
-                        anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task);
+                        anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses);
                     }
                     if !anything_synced {
                         println!("Nothing to sync");
@@ -742,7 +742,7 @@ pub(crate) fn task_push(
                         }
 
                         if sync_subtasks {
-                            sync_local_subtasks(&connector, &user, &repo, &id, &local_task);
+                            sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses);
                         }
                     },
                     Err(e) => eprintln!("ERROR: {e}")
@@ -761,6 +761,8 @@ fn sync_local_subtasks(
     repo: &String,
     task_id: &String,
     local_task: &Task,
+    status_manager: &StatusManager,
+    task_statuses: &Vec<String>,
 ) -> bool {
     let local_subtasks = match local_task.get_subtasks() {
         Some(subtasks) if !subtasks.is_empty() => subtasks.clone(),
@@ -768,7 +770,7 @@ fn sync_local_subtasks(
     };
 
     let remote_subtasks = connector
-        .list_remote_subtasks(user, repo, task_id)
+        .list_remote_subtasks(user, repo, task_id, task_statuses)
         .unwrap_or_default();
 
     let remote_ids: Vec<String> = remote_subtasks.iter().filter_map(|s| s.get_id()).collect();
@@ -778,15 +780,16 @@ fn sync_local_subtasks(
             Some(id) => id,
             None => continue,
         };
+        let is_done = status_manager.is_done(subtask.get_status());
         if remote_ids.contains(&local_id) {
-            if let Err(e) = connector.update_remote_subtask(user, repo, task_id, subtask) {
+            if let Err(e) = connector.update_remote_subtask(user, repo, task_id, subtask, is_done) {
                 eprintln!("ERROR syncing REMOTE subtask {local_id}: {e}");
             } else {
                 println!("Sync: REMOTE subtask ID {local_id} updated");
                 synced = true;
             }
         } else {
-            match connector.create_remote_subtask(user, repo, task_id, subtask) {
+            match connector.create_remote_subtask(user, repo, task_id, subtask, is_done) {
                 Ok(remote_id) => {
                     println!("Created REMOTE subtask ID {remote_id}");
                     if local_id != remote_id {

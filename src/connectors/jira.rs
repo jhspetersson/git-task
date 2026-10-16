@@ -640,7 +640,7 @@ impl RemoteConnector for JiraRemoteConnector {
         true
     }
 
-    fn list_remote_subtasks(&self, domain: &String, project: &String, task_id: &String) -> Result<Vec<Subtask>, String> {
+    fn list_remote_subtasks(&self, domain: &String, project: &String, task_id: &String, _task_statuses: &Vec<String>) -> Result<Vec<Subtask>, String> {
         let config = get_configuration(domain)?;
         let prefixed = multi_project_mode();
 
@@ -681,7 +681,7 @@ impl RemoteConnector for JiraRemoteConnector {
         })
     }
 
-    fn create_remote_subtask(&self, domain: &String, project: &String, task_id: &String, subtask: &Subtask) -> Result<String, String> {
+    fn create_remote_subtask(&self, domain: &String, project: &String, task_id: &String, subtask: &Subtask, _is_done: bool) -> Result<String, String> {
         let config = get_configuration(domain)?;
         let prefixed = multi_project_mode();
 
@@ -708,7 +708,7 @@ impl RemoteConnector for JiraRemoteConnector {
         })
     }
 
-    fn update_remote_subtask(&self, domain: &String, project: &String, _task_id: &String, subtask: &Subtask) -> Result<(), String> {
+    fn update_remote_subtask(&self, domain: &String, project: &String, _task_id: &String, subtask: &Subtask, _is_done: bool) -> Result<(), String> {
         let config = get_configuration(domain)?;
         let subtask_id = subtask.get_id().ok_or_else(|| "Subtask has no ID".to_string())?;
         let subtask_key = task_id_to_issue_key(project, &subtask_id);
