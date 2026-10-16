@@ -146,7 +146,7 @@ pub(crate) fn task_set(
                         println!("Task ID {id} -> {value} updated");
 
                         if push {
-                            task_push(value.clone(), remote, connector_type, project, false, false, false, no_color);
+                            success &= task_push(value.clone(), remote, connector_type, project, false, false, false, no_color);
                         }
                     },
                     Err(e) => {
@@ -167,7 +167,7 @@ pub(crate) fn task_set(
                                 println!("Task ID {id} updated");
 
                                 if push {
-                                    task_push(id.to_string(), remote, connector_type, project, false, false, false, no_color);
+                                    success &= task_push(id.to_string(), remote, connector_type, project, false, false, false, no_color);
                                 }
                             },
                             Err(e) => {
@@ -233,7 +233,7 @@ pub(crate) fn task_replace(
                         Ok(_) => {
                             println!("Task ID {id} updated");
                             if push {
-                                task_push(id.to_string(), remote, connector_type, project, false, false, false, no_color);
+                                success &= task_push(id.to_string(), remote, connector_type, project, false, false, false, no_color);
                             }
                         },
                         Err(e) => { eprintln!("ERROR: {e}"); success = false; }
@@ -424,17 +424,27 @@ pub(crate) fn task_pull(
             match connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses) {
                 Ok(mut task) => {
                     if fetch_subtasks {
-                        if let Ok(subtasks) = connector.list_remote_subtasks(&user, &repo, &id, &task_statuses) {
-                            task.set_subtasks(subtasks);
+                        match connector.list_remote_subtasks(&user, &repo, &id, &task_statuses) {
+                            Ok(subtasks) => task.set_subtasks(subtasks),
+                            Err(e) => {
+                                eprintln!("Task ID {id}: {e}");
+                                success = false;
+                            }
                         }
                     }
                     match import_remote_task(task, no_comments, fetch_subtasks) {
                         Ok(Some(id)) => println!("Task ID {id} updated"),
                         Ok(None) => println!("Task ID {id} skipped, nothing to update"),
-                        Err(e) => eprintln!("ERROR: {e}"),
+                        Err(e) => {
+                            eprintln!("ERROR: {e}");
+                            success = false;
+                        }
                     }
                 },
-                Err(e) => eprintln!("Task ID {id}: {e}")
+                Err(e) => {
+                    eprintln!("Task ID {id}: {e}");
+                    success = false;
+                }
             }
         }
         return success;
@@ -468,14 +478,21 @@ pub(crate) fn task_pull(
                     for mut task in tasks {
                         let task_id = task.get_id().unwrap();
                         if fetch_subtasks {
-                            if let Ok(subtasks) = connector.list_remote_subtasks(&user, &repo, &task_id, &task_statuses) {
-                                task.set_subtasks(subtasks);
+                            match connector.list_remote_subtasks(&user, &repo, &task_id, &task_statuses) {
+                                Ok(subtasks) => task.set_subtasks(subtasks),
+                                Err(e) => {
+                                    eprintln!("Task ID {task_id}: {e}");
+                                    success = false;
+                                }
                             }
                         }
                         match import_remote_task(task, no_comments, fetch_subtasks) {
                             Ok(Some(id)) => println!("Task ID {id} updated"),
                             Ok(None) => println!("Task ID {task_id} skipped, nothing to update"),
-                            Err(e) => eprintln!("ERROR: {e}"),
+                            Err(e) => {
+                                eprintln!("ERROR: {e}");
+                                success = false;
+                            }
                         }
                     }
                 }
@@ -708,105 +725,123 @@ pub(crate) fn task_push(
             }
         };
         let sync_subtasks = !no_subtasks && connector.supports_subtasks();
-        if let Ok(Some(local_task)) = gittask::find_task(&id) {
-            println!("Sync: LOCAL task ID {id} found");
-            let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses);
-            if let Ok(remote_task) = remote_task {
-                println!("Sync: REMOTE task ID {id} found");
+        let local_task = match gittask::find_task(&id) {
+            Ok(Some(local_task)) => local_task,
+            Ok(None) => {
+                eprintln!("Sync: LOCAL task ID {id} NOT found");
+                success = false;
+                continue;
+            }
+            Err(e) => {
+                eprintln!("ERROR: {e}");
+                success = false;
+                continue;
+            }
+        };
+        println!("Sync: LOCAL task ID {id} found");
+        let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses);
+        if let Ok(remote_task) = remote_task {
+            println!("Sync: REMOTE task ID {id} found");
 
-                let local_status = local_task.get_property("status").unwrap_or(&empty_string);
-                let local_name = local_task.get_property("name").unwrap_or(&empty_string);
-                let local_text = local_task.get_property("description").unwrap_or(&empty_string);
+            let local_status = local_task.get_property("status").unwrap_or(&empty_string);
+            let local_name = local_task.get_property("name").unwrap_or(&empty_string);
+            let local_text = local_task.get_property("description").unwrap_or(&empty_string);
 
-                let remote_status = remote_task.get_property("status").unwrap_or(&empty_string);
-                let remote_name = remote_task.get_property("name").unwrap_or(&empty_string);
-                let remote_text = remote_task.get_property("description").unwrap_or(&empty_string);
+            let remote_status = remote_task.get_property("status").unwrap_or(&empty_string);
+            let remote_name = remote_task.get_property("name").unwrap_or(&empty_string);
+            let remote_text = remote_task.get_property("description").unwrap_or(&empty_string);
 
-                if local_name != remote_name || local_text != remote_text || local_status != remote_status {
-                    if local_status != remote_status {
-                        println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
-                    }
-                    let state = if status_manager.is_done(local_status) { 
-                        RemoteTaskState::Closed(local_status.to_string(), remote_status.to_string()) 
-                    } else { 
-                        RemoteTaskState::Open(local_status.to_string(), remote_status.to_string()) 
-                    };
+            if local_name != remote_name || local_text != remote_text || local_status != remote_status {
+                if local_status != remote_status {
+                    println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
+                }
+                let state = if status_manager.is_done(local_status) { 
+                    RemoteTaskState::Closed(local_status.to_string(), remote_status.to_string()) 
+                } else { 
+                    RemoteTaskState::Open(local_status.to_string(), remote_status.to_string()) 
+                };
 
-                    match connector.update_remote_task(
-                        &user,
-                        &repo,
-                        &local_task,
-                        if !no_labels { local_task.get_labels().into() } else { None },
-                        state
-                    ) {
-                        Ok(_) => {
-                            println!("Sync: REMOTE task ID {id} has been updated");
-                        },
-                        Err(e) => eprintln!("ERROR: {e}")
-                    }
-                } else {
-                    let mut anything_synced = false;
-                    if !no_comments {
-                        let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
-                        for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
-                            let local_comment_id = match comment.get_id() {
-                                Some(id) => id,
-                                None => continue,
-                            };
-                            if !remote_comment_ids.contains(&local_comment_id) {
-                                create_remote_comment(&connector, &user, &repo, &id, &comment);
-                                anything_synced = true;
-                            }
-                        }
-                    }
-                    if sync_subtasks {
-                        anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses);
-                    }
-                    if !anything_synced {
-                        println!("Nothing to sync");
+                match connector.update_remote_task(
+                    &user,
+                    &repo,
+                    &local_task,
+                    if !no_labels { local_task.get_labels().into() } else { None },
+                    state
+                ) {
+                    Ok(_) => {
+                        println!("Sync: REMOTE task ID {id} has been updated");
+                    },
+                    Err(e) => {
+                        eprintln!("ERROR: {e}");
+                        success = false;
                     }
                 }
             } else {
-                eprintln!("Sync: REMOTE task ID {id} NOT found");
-
-                let local_task = match no_labels {
-                    true => {
-                        let mut local_task = local_task;
-                        local_task.set_labels(vec![]);
-                        local_task
-                    },
-                    false => local_task
-                };
-
-                match connector.create_remote_task(&user, &repo, &local_task) {
-                    Ok(id) => {
-                        println!("Sync: Created REMOTE task ID {id}");
-                        if local_task.get_id().unwrap() != id {
-                            match gittask::update_task_id(&local_task.get_id().unwrap(), &id) {
-                                Ok(_) => println!("Task ID {} -> {} updated", local_task.get_id().unwrap(), id),
-                                Err(e) => eprintln!("ERROR: {e}"),
-                            }
+                let mut anything_synced = false;
+                if !no_comments {
+                    let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
+                    for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
+                        let local_comment_id = match comment.get_id() {
+                            Some(id) => id,
+                            None => continue,
+                        };
+                        if !remote_comment_ids.contains(&local_comment_id) {
+                            success &= create_remote_comment(&connector, &user, &repo, &id, &comment);
+                            anything_synced = true;
                         }
-
-                        if !no_comments {
-                            if let Some(comments) = local_task.get_comments() {
-                                if !comments.is_empty() {
-                                    for comment in comments {
-                                        create_remote_comment(&connector, &user, &repo, &id, &comment);
-                                    }
-                                }
-                            }
-                        }
-
-                        if sync_subtasks {
-                            sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses);
-                        }
-                    },
-                    Err(e) => eprintln!("ERROR: {e}")
+                    }
+                }
+                if sync_subtasks {
+                    anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
+                }
+                if !anything_synced {
+                    println!("Nothing to sync");
                 }
             }
         } else {
-            eprintln!("Sync: LOCAL task ID {id} NOT found")
+            eprintln!("Sync: REMOTE task ID {id} NOT found");
+
+            let local_task = match no_labels {
+                true => {
+                    let mut local_task = local_task;
+                    local_task.set_labels(vec![]);
+                    local_task
+                },
+                false => local_task
+            };
+
+            match connector.create_remote_task(&user, &repo, &local_task) {
+                Ok(id) => {
+                    println!("Sync: Created REMOTE task ID {id}");
+                    if local_task.get_id().unwrap() != id {
+                        match gittask::update_task_id(&local_task.get_id().unwrap(), &id) {
+                            Ok(_) => println!("Task ID {} -> {} updated", local_task.get_id().unwrap(), id),
+                            Err(e) => {
+                                eprintln!("ERROR: {e}");
+                                success = false;
+                            }
+                        }
+                    }
+
+                    if !no_comments {
+                        if let Some(comments) = local_task.get_comments() {
+                            if !comments.is_empty() {
+                                for comment in comments {
+                                    success &= create_remote_comment(&connector, &user, &repo, &id, &comment);
+                                }
+                            }
+                        }
+                    }
+
+                    if sync_subtasks {
+                        sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
+                    }
+                },
+                Err(e) => {
+                    eprintln!("ERROR: {e}");
+                    success = false;
+                }
+            }
         }
     }
     success
@@ -820,15 +855,21 @@ fn sync_local_subtasks(
     local_task: &Task,
     status_manager: &StatusManager,
     task_statuses: &Vec<String>,
+    success: &mut bool,
 ) -> bool {
     let local_subtasks = match local_task.get_subtasks() {
         Some(subtasks) if !subtasks.is_empty() => subtasks.clone(),
         _ => return false,
     };
 
-    let remote_subtasks = connector
-        .list_remote_subtasks(user, repo, task_id, task_statuses)
-        .unwrap_or_default();
+    let remote_subtasks = match connector.list_remote_subtasks(user, repo, task_id, task_statuses) {
+        Ok(subtasks) => subtasks,
+        Err(e) => {
+            eprintln!("ERROR listing REMOTE subtasks of task ID {task_id}: {e}");
+            *success = false;
+            return false;
+        }
+    };
 
     let remote_ids: Vec<String> = remote_subtasks.iter().filter_map(|s| s.get_id()).collect();
     let mut synced = false;
@@ -841,6 +882,7 @@ fn sync_local_subtasks(
         if remote_ids.contains(&local_id) {
             if let Err(e) = connector.update_remote_subtask(user, repo, task_id, subtask, is_done) {
                 eprintln!("ERROR syncing REMOTE subtask {local_id}: {e}");
+                *success = false;
             } else {
                 println!("Sync: REMOTE subtask ID {local_id} updated");
                 synced = true;
@@ -852,33 +894,37 @@ fn sync_local_subtasks(
                     if local_id != remote_id {
                         if let Err(e) = gittask::update_subtask_id(task_id, &local_id, &remote_id) {
                             eprintln!("ERROR: {e}");
+                            *success = false;
                         } else {
                             println!("Subtask ID {local_id} -> {remote_id} updated");
                         }
                     }
                     synced = true;
                 },
-                Err(e) => eprintln!("ERROR creating REMOTE subtask: {e}"),
+                Err(e) => {
+                    eprintln!("ERROR creating REMOTE subtask: {e}");
+                    *success = false;
+                }
             }
         }
     }
     synced
 }
 
-fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &String, repo: &String, id: &String, comment: &Comment) {
+fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &String, repo: &String, id: &String, comment: &Comment) -> bool {
     let local_comment_id = match comment.get_id() {
         Some(id) => id,
-        None => { eprintln!("ERROR: comment has no ID, skipping"); return; }
+        None => { eprintln!("ERROR: comment has no ID, skipping"); return false; }
     };
     match connector.create_remote_comment(user, repo, id, comment) {
         Ok(remote_comment_id) => {
             println!("Created REMOTE comment ID {}", remote_comment_id);
             match gittask::update_comment_id(&id, &local_comment_id, &remote_comment_id) {
-                Ok(_) => println!("Comment ID {} -> {} updated", local_comment_id, remote_comment_id),
-                Err(e) => eprintln!("ERROR: {e}"),
+                Ok(_) => { println!("Comment ID {} -> {} updated", local_comment_id, remote_comment_id); true },
+                Err(e) => { eprintln!("ERROR: {e}"); false }
             }
         },
-        Err(e) => eprintln!("ERROR creating REMOTE comment: {}", e)
+        Err(e) => { eprintln!("ERROR creating REMOTE comment: {}", e); false }
     }
 }
 
@@ -925,7 +971,10 @@ pub(crate) fn task_delete(
                         Ok((connector, user, repo)) => {
                             match connector.delete_remote_task(&user, &repo, &id.to_string()) {
                                 Ok(_) => println!("Sync: REMOTE task ID {id} has been deleted"),
-                                Err(e) => eprintln!("ERROR: {e}")
+                                Err(e) => {
+                                    eprintln!("ERROR: {e}");
+                                    success = false;
+                                }
                             }
                         },
                         Err(e) => {
