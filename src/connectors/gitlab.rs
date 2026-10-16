@@ -85,7 +85,7 @@ impl RemoteConnector for GitlabRemoteConnector {
             RemoteTaskState::Closed(_, _) => Some(IssueState::Closed),
             RemoteTaskState::All => None,
         };
-        let client = get_client(get_token()?.as_str());
+        let client = get_client(get_token()?.as_str())?;
 
         let labels = match with_labels {
             true => {
@@ -129,7 +129,7 @@ impl RemoteConnector for GitlabRemoteConnector {
             let mut task = Task::from_properties(issue.iid.to_string(), props).unwrap();
 
             if with_comments {
-                let comments = list_issue_comments(&client, &user, &repo, &issue.iid.to_string());
+                let comments = list_issue_comments(&client, &user, &repo, issue.iid);
                 task.set_comments(comments);
             }
 
@@ -158,10 +158,11 @@ impl RemoteConnector for GitlabRemoteConnector {
         with_labels: bool,
         task_statuses: &Vec<String>
     ) -> Result<Task, String> {
-        let client = get_client(get_token()?.as_str());
+        let iid = parse_task_id(task_id)?;
+        let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::Issue::builder();
         let mut endpoint = endpoint.project(user.to_string() + "/" + repo);
-        endpoint = endpoint.issue(task_id.parse().unwrap());
+        endpoint = endpoint.issue(iid);
         let endpoint = endpoint.build().unwrap();
         match endpoint.query(&client) {
             Ok(issue) => {
@@ -176,7 +177,7 @@ impl RemoteConnector for GitlabRemoteConnector {
                 let mut task = Task::from_properties(task_id.to_string(), props).unwrap();
 
                 if with_comments {
-                    let comments = list_issue_comments(&client, &user, &repo, task_id);
+                    let comments = list_issue_comments(&client, &user, &repo, iid);
                     task.set_comments(comments);
                 }
 
@@ -199,7 +200,7 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn create_remote_task(&self, user: &String, repo: &String, task: &Task) -> Result<String, String> {
-        let client = get_client(get_token()?.as_str());
+        let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::CreateIssue::builder();
         let endpoint = endpoint.project(user.to_string() + "/" + repo);
         endpoint.title(task.get_property("name").map(String::as_str).unwrap_or(""));
@@ -216,9 +217,10 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn create_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment: &Comment) -> Result<String, String> {
-        let client = get_client(get_token()?.as_str());
+        let iid = parse_task_id(task_id)?;
+        let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::notes::CreateIssueNote::builder();
-        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(iid);
         endpoint.body(comment.get_text().clone());
         let endpoint = endpoint.build().unwrap();
         let comment: GitlabComment = endpoint.query(&client).map_err(|e| e.to_string())?;
@@ -233,10 +235,11 @@ impl RemoteConnector for GitlabRemoteConnector {
         task_id: &String,
         label: &Label,
     ) -> Result<(), String> {
-        let client = get_client(get_token()?.as_str());
+        let iid = parse_task_id(task_id)?;
+        let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::Issue::builder();
         let mut endpoint = endpoint.project(user.to_string() + "/" + repo);
-        endpoint = endpoint.issue(task_id.parse().unwrap());
+        endpoint = endpoint.issue(iid);
         let endpoint = endpoint.build().unwrap();
         match endpoint.query(&client) {
             Ok(issue) => {
@@ -245,7 +248,7 @@ impl RemoteConnector for GitlabRemoteConnector {
                 if !issue.labels.contains(&label_name) {
                     prepare_labels(&client, &user, &repo, &vec![label.clone()]);
                     let mut endpoint = gitlab::api::projects::issues::EditIssue::builder();
-                    let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+                    let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(iid);
                     endpoint.add_label(label_name);
                     let endpoint = endpoint.build().unwrap();
                     match endpoint.query(&client) {
@@ -271,9 +274,11 @@ impl RemoteConnector for GitlabRemoteConnector {
         labels: Option<&Vec<Label>>,
         state: RemoteTaskState
     ) -> Result<(), String> {
-        let client = get_client(get_token()?.as_str());
+        let task_id = task.get_id().ok_or_else(|| "Task has no ID".to_string())?;
+        let iid = parse_task_id(&task_id)?;
+        let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::EditIssue::builder();
-        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task.get_id().unwrap().parse().unwrap());
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(iid);
         endpoint.title(task.get_property("name").map(String::as_str).unwrap_or(""));
         endpoint.description(task.get_property("description").map(String::as_str).unwrap_or(""));
         if let Some(labels) = labels {
@@ -293,10 +298,12 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn update_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment_id: &String, text: &String) -> Result<(), String> {
-        let client = get_client(get_token()?.as_str());
+        let iid = parse_task_id(task_id)?;
+        let note_id = parse_comment_id(comment_id)?;
+        let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::notes::EditIssueNote::builder();
-        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
-        endpoint.note(comment_id.parse().unwrap());
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(iid);
+        endpoint.note(note_id);
         endpoint.body(text.as_str());
         let endpoint = endpoint.build().unwrap();
         match endpoint.query(&client) {
@@ -309,9 +316,10 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn delete_remote_task(&self, user: &String, repo: &String, task_id: &String) -> Result<(), String> {
-        let client = get_client(get_token()?.as_str());
+        let iid = parse_task_id(task_id)?;
+        let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::DeleteIssue::builder();
-        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(iid);
         let endpoint = endpoint.build().unwrap();
         match endpoint.query(&client) {
             Ok(result) => {
@@ -323,10 +331,12 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn delete_remote_comment(&self, user: &String, repo: &String, task_id: &String, comment_id: &String) -> Result<(), String> {
-        let client = get_client(get_token()?.as_str());
+        let iid = parse_task_id(task_id)?;
+        let note_id = parse_comment_id(comment_id)?;
+        let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::notes::DeleteIssueNote::builder();
-        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
-        endpoint.note(comment_id.parse().unwrap());
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(iid);
+        endpoint.note(note_id);
         let endpoint = endpoint.build().unwrap();
         match endpoint.query(&client) {
             Ok(result) => {
@@ -344,9 +354,10 @@ impl RemoteConnector for GitlabRemoteConnector {
         task_id: &String,
         label_name: &String,
     ) -> Result<(), String> {
-        let client = get_client(get_token()?.as_str());
+        let iid = parse_task_id(task_id)?;
+        let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::EditIssue::builder();
-        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+        let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(iid);
         endpoint.remove_label(label_name);
         let endpoint = endpoint.build().unwrap();
         match endpoint.query(&client) {
@@ -359,9 +370,9 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 }
 
-fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, task_id: &String) -> Vec<Comment> {
+fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, iid: u64) -> Vec<Comment> {
     let mut endpoint = gitlab::api::projects::issues::notes::IssueNotes::builder();
-    let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(task_id.parse().unwrap());
+    let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(iid);
     let endpoint = endpoint.build().unwrap();
     match gitlab::api::paged(endpoint, Pagination::All).query(client) {
         Ok(comments) => {
@@ -415,13 +426,21 @@ fn prepare_labels(client: &Gitlab, user: &String, repo: &String, labels: &Vec<La
     }
 }
 
-fn get_client(token: &str) -> Gitlab {
+fn get_client(token: &str) -> Result<Gitlab, String> {
     let base_url = get_base_url();
     let gitlab_domain = match Regex::new("(https://)?(?P<domain>[^/]+)").unwrap().captures(&base_url) {
         Some(caps) if caps.name("domain").is_some() => caps.name("domain").unwrap().as_str().to_string(),
         _ => "gitlab.com".to_string(),
     };
-    Gitlab::new(gitlab_domain, token).unwrap()
+    Gitlab::new(&gitlab_domain, token).map_err(|e| format!("Could not connect to GitLab at {gitlab_domain}: {e}"))
+}
+
+fn parse_task_id(task_id: &str) -> Result<u64, String> {
+    task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))
+}
+
+fn parse_comment_id(comment_id: &str) -> Result<u64, String> {
+    comment_id.parse().map_err(|_| format!("Invalid comment ID: {comment_id}"))
 }
 
 fn get_token_from_env() -> Option<String> {
@@ -473,6 +492,15 @@ mod test {
         assert_eq!(connector.supports_remote("https://gitlab.kitware.com/jhspetersson/rust-gitlab.git"), Some(("jhspetersson".to_string(), "rust-gitlab".to_string())));
 
         gittask::set_config_value("task.gitlab.url", &gitlab_url).unwrap();
+    }
+
+    #[test]
+    fn test_parse_ids_reject_non_numeric() {
+        assert_eq!(parse_task_id("42"), Ok(42));
+        assert_eq!(parse_task_id("1x"), Err("Invalid task ID: 1x".to_string()));
+        assert_eq!(parse_task_id("ABC-7"), Err("Invalid task ID: ABC-7".to_string()));
+        assert_eq!(parse_comment_id("7"), Ok(7));
+        assert_eq!(parse_comment_id("abc"), Err("Invalid comment ID: abc".to_string()));
     }
 
     #[test]
