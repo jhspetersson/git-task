@@ -257,6 +257,10 @@ pub(crate) fn task_edit(id: String, prop_name: String) -> bool {
                 "id" => {
                     match get_text_from_editor(Some(&task.get_id().unwrap())) {
                         Some(text) => {
+                            let text = text.trim().to_string();
+                            if text.is_empty() {
+                                return error_message("Task ID cannot be empty".to_string());
+                            }
                             task.set_id(text.clone());
                             match gittask::update_task(task) {
                                 Ok(_) => {
@@ -279,6 +283,16 @@ pub(crate) fn task_edit(id: String, prop_name: String) -> bool {
                         Some(value) => {
                             match get_text_from_editor(Some(value)) {
                                 Some(text) => {
+                                    let text = match prop_name.as_str() {
+                                        "name" | "status" => {
+                                            let trimmed = text.trim();
+                                            if trimmed.is_empty() {
+                                                return error_message(format!("Property '{prop_name}' cannot be empty"));
+                                            }
+                                            trimmed.to_string()
+                                        },
+                                        _ => text,
+                                    };
                                     task.set_property(&prop_name, &text);
                                     match gittask::update_task(task) {
                                         Ok(_) => success_message(format!("Task ID {id} updated")),

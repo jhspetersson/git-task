@@ -524,7 +524,13 @@ fn edit_file(path: &std::path::Path, text: Option<&String>) -> Option<String> {
     let mut contents = String::new();
     file.read_to_string(&mut contents).ok()?;
 
-    Some(contents)
+    Some(strip_trailing_newlines(contents))
+}
+
+fn strip_trailing_newlines(mut text: String) -> String {
+    let trimmed_len = text.trim_end_matches(['\r', '\n']).len();
+    text.truncate(trimmed_len);
+    text
 }
 
 fn split_command(line: &str) -> Option<(String, Vec<String>)> {
@@ -857,6 +863,16 @@ mod tests {
             if let Some(v) = prev_git_editor { std::env::set_var("GIT_EDITOR", v); }
         }
         assert!(result.is_ok(), "get_text_from_editor should not panic when both editor and notepad fail");
+    }
+
+    #[test]
+    fn test_strip_trailing_newlines() {
+        assert_eq!(strip_trailing_newlines("CLOSED\n".to_string()), "CLOSED");
+        assert_eq!(strip_trailing_newlines("CLOSED\r\n".to_string()), "CLOSED");
+        assert_eq!(strip_trailing_newlines("line one\nline two\n\n".to_string()), "line one\nline two");
+        assert_eq!(strip_trailing_newlines("no newline".to_string()), "no newline");
+        assert_eq!(strip_trailing_newlines("\n".to_string()), "");
+        assert_eq!(strip_trailing_newlines("".to_string()), "");
     }
 
     #[test]
