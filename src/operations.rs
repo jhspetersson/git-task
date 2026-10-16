@@ -13,7 +13,7 @@ use regex::Regex;
 use evalexpr::{ContextWithMutableVariables, HashMapContext};
 use gittask::{Comment, Label, Subtask, Task};
 
-use crate::connectors::{get_matching_remote_connectors, RemoteConnector, RemoteTarget, RemoteTaskState};
+use crate::connectors::{get_matching_remote_connectors, status_names_match, RemoteConnector, RemoteTarget, RemoteTaskState};
 use crate::property::{PropertyManager, PropertyValueType};
 use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_bool, parse_date, parse_ids, read_from_pipe, str_to_color, success_message};
@@ -755,9 +755,10 @@ pub(crate) fn task_push(
             let remote_text = remote_task.get_property("description").unwrap_or(&empty_string);
 
             let mut anything_synced = false;
-            if local_name != remote_name || local_text != remote_text || local_status != remote_status {
+            let status_changed = !status_names_match(local_status, remote_status);
+            if local_name != remote_name || local_text != remote_text || status_changed {
                 anything_synced = true;
-                if local_status != remote_status {
+                if status_changed {
                     println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
                 }
                 let state = if status_manager.is_done(local_status) {

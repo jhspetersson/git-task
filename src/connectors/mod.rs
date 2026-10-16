@@ -131,3 +131,27 @@ pub(crate) fn get_config_options_from_connectors() -> Vec<String> {
         .flatten()
         .collect()
 }
+
+pub(crate) fn normalize_status_name(name: &str) -> String {
+    name.chars()
+        .filter(|c| !matches!(c, ' ' | '_' | '-'))
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+pub(crate) fn status_names_match(a: &str, b: &str) -> bool {
+    normalize_status_name(a) == normalize_status_name(b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_status_name, status_names_match};
+
+    #[test]
+    fn status_names_match_ignores_case_and_separators() {
+        assert!(status_names_match("IN_PROGRESS", "In Progress"));
+        assert!(status_names_match("in-progress", "InProgress"));
+        assert_eq!(normalize_status_name("in-progress"), "inprogress");
+        assert!(!status_names_match("OPEN", "New"));
+    }
+}

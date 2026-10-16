@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use gittask::{Task, Comment, Label, Subtask};
 
-use crate::connectors::{RemoteConnector, RemoteTaskState};
+use crate::connectors::{status_names_match, RemoteConnector, RemoteTaskState};
 
 #[derive(Debug, Clone, Serialize)]
 struct UpdateJournalInner {
@@ -454,30 +454,10 @@ fn get_status_id_by_name(redmine: &Redmine, name: &str) -> Result<Option<u64>, S
             .json_response_body::<_, IssueStatusesWrapper<IssueStatus>>(&endpoint)
             .map_err(|e| e.to_string())?;
 
-    let wanted = normalize_status_name(name);
     Ok(issue_statuses
         .iter()
-        .find(|s| normalize_status_name(&s.name) == wanted)
+        .find(|s| status_names_match(&s.name, name))
         .map(|s| s.id))
-}
-
-fn normalize_status_name(name: &str) -> String {
-    name.chars()
-        .filter(|c| !matches!(c, ' ' | '_' | '-'))
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::normalize_status_name;
-
-    #[test]
-    fn normalize_ignores_case_and_separators() {
-        assert_eq!(normalize_status_name("IN_PROGRESS"), normalize_status_name("In Progress"));
-        assert_eq!(normalize_status_name("in-progress"), "inprogress");
-        assert_ne!(normalize_status_name("OPEN"), normalize_status_name("New"));
-    }
 }
 
 fn get_base_url(domain: &String) -> Result<String, String> {

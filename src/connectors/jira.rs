@@ -10,7 +10,7 @@ use tokio::runtime::Runtime;
 
 use gittask::{Task, Comment, Label, Subtask};
 
-use crate::connectors::{RemoteConnector, RemoteTaskState};
+use crate::connectors::{status_names_match, RemoteConnector, RemoteTaskState};
 use crate::util::error_message;
 
 pub struct JiraRemoteConnector;
@@ -469,7 +469,7 @@ impl RemoteConnector for JiraRemoteConnector {
                     ).await {
                         for transition in transitions.transitions.unwrap_or_else(|| vec![]) {
                             if let Some(target_status) = transition.to {
-                                if target_status.name.as_deref() == Some(local_status.as_str()) {
+                                if target_status.name.as_deref().is_some_and(|name| status_names_match(name, &local_status)) {
                                     let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
                                         transition: Some(IssueTransition {
                                             id: transition.id.clone(),
@@ -750,7 +750,7 @@ impl RemoteConnector for JiraRemoteConnector {
                 ).await {
                     for transition in transitions.transitions.unwrap_or_default() {
                         if let Some(target_status) = transition.to
-                            && target_status.name.as_deref() == Some(subtask.get_status()) {
+                            && target_status.name.as_deref().is_some_and(|name| status_names_match(name, subtask.get_status())) {
                                 let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
                                     transition: Some(IssueTransition {
                                         id: transition.id.clone(),
