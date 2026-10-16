@@ -83,6 +83,10 @@ pub(crate) fn task_subtask_set(
     connector_type: &Option<String>,
     project: &Option<String>,
 ) -> bool {
+    if (prop_name == "name" || prop_name == "status") && value.trim().is_empty() {
+        return error_message(format!("Property '{prop_name}' cannot be empty"));
+    }
+
     match gittask::find_task(&task_id) {
         Ok(Some(mut task)) => {
             let status_manager = StatusManager::new();
@@ -290,5 +294,26 @@ pub(crate) fn task_subtask_list(task_id: String, no_color: bool) -> bool {
         },
         Ok(None) => error_message(format!("Task ID {task_id} not found")),
         Err(e) => error_message(format!("ERROR: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_subtask_set_rejects_a_blank_name() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut task = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        let subtask = task.add_subtask(None, "Sub name".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+        let subtask_id = subtask.get_id().unwrap();
+
+        let result = task_subtask_set(id.clone(), subtask_id.clone(), "name".to_string(), "  ".to_string(), false, &None, &None, &None);
+
+        assert!(!result, "task_subtask_set must fail when the name is blank");
+        let task = gittask::find_task(&id).unwrap().unwrap();
+        assert_eq!(task.get_subtask(&subtask_id).unwrap().get_name(), "Sub name", "the name must stay untouched");
     }
 }

@@ -224,6 +224,11 @@ pub(crate) fn task_replace(
                         Some(ref regex) => regex.replace_all(value.as_str(), replace.as_str()).to_string(),
                         None => value.replace(&search, &replace)
                     };
+                    if (prop_name == "name" || prop_name == "status") && new_value.trim().is_empty() {
+                        eprintln!("Task ID {id}: property '{prop_name}' cannot be empty");
+                        success = false;
+                        continue;
+                    }
                     if prop_name == "status" {
                         if let Err(e) = StatusManager::new().resolve_status(&new_value) {
                             eprintln!("Task ID {id}: {e}");
@@ -1644,6 +1649,19 @@ mod tests {
         let result = evalexpr::eval_boolean_with_context("created > 100", &eval_context);
         assert!(result.is_ok(), "datetime filter should evaluate without error, got: {:?}", result);
         assert!(result.unwrap(), "created (1000000) should be > 100 numerically");
+    }
+
+    #[test]
+    fn test_task_replace_rejects_a_blank_name() {
+        let _repo = gittask::testing::TestRepo::new();
+        let task = gittask::create_task(gittask::Task::new("Old name".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap();
+        let id = task.get_id().unwrap();
+
+        let result = task_replace(id.clone(), "name".to_string(), "Old name".to_string(), "  ".to_string(), false, false, &None, &None, &None, true);
+
+        assert!(!result, "task_replace must fail when the replacement blanks out the name");
+        let task = gittask::find_task(&id).unwrap().unwrap();
+        assert_eq!(task.get_property("name").unwrap(), "Old name", "the name must stay untouched");
     }
 
     #[test]
