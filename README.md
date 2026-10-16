@@ -349,6 +349,10 @@ Remove the old ref after setting a new one:
 
     git task config set task.ref refs/heads/tasks --move
 
+If the new ref already exists and points elsewhere, the command refuses to touch it. Overwrite it anyway:
+
+    git task config set task.ref refs/heads/tasks --force
+
 Configure task statuses:
 
     git task config status list

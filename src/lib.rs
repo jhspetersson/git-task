@@ -728,7 +728,7 @@ pub fn set_config_value(key: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
+pub fn set_ref_path(ref_path: &str, move_ref: bool, force: bool) -> Result<(), String> {
     let repo = map_err!(Repository::discover("."));
     let same_path = get_ref_path() == ref_path;
 
@@ -736,7 +736,11 @@ pub fn set_ref_path(ref_path: &str, move_ref: bool) -> Result<(), String> {
     if !same_path {
         if let Ok(current_reference) = &current_reference {
             let commit = map_err!(current_reference.peel_to_commit());
-            map_err!(repo.reference(ref_path, commit.id(), true, "task.ref migrated"));
+            match repo.find_reference(ref_path) {
+                Ok(existing) if existing.target() == Some(commit.id()) => {},
+                Ok(_) if !force => return Err(format!("Reference {ref_path} already exists and points to a different commit, use --force to overwrite it")),
+                _ => { map_err!(repo.reference(ref_path, commit.id(), force, "task.ref migrated")); },
+            }
         }
     }
 
@@ -758,10 +762,80 @@ mod test {
     #[test]
     fn test_ref_path() {
         let ref_path = get_ref_path();
-        assert!(set_ref_path("refs/heads/test-git-task", true).is_ok());
+        assert!(set_ref_path("refs/heads/test-git-task", true, false).is_ok());
         assert_eq!(get_ref_path(), "refs/heads/test-git-task");
-        assert!(set_ref_path(&ref_path, true).is_ok());
+        assert!(set_ref_path(&ref_path, true, false).is_ok());
         assert_eq!(get_ref_path(), ref_path);
+    }
+
+    #[test]
+    fn test_set_ref_path_refuses_to_overwrite_existing_ref() {
+        let ref_path = get_ref_path();
+        let task = Task::construct_task("Ref clash".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let task = create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+
+        let repo = Repository::discover(".").unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let other_path = "refs/heads/test-git-task-existing";
+        repo.reference(other_path, head.id(), true, "test").unwrap();
+
+        let result = set_ref_path(other_path, true, false);
+        let other_target = repo.find_reference(other_path).unwrap().target();
+        let _ = repo.find_reference(other_path).unwrap().delete();
+        let _ = delete_tasks(&[&id]);
+
+        assert!(result.is_err(), "setting task.ref to an existing, unrelated ref must fail");
+        assert_eq!(other_target, Some(head.id()), "the existing ref must not be moved");
+        assert_eq!(get_ref_path(), ref_path, "task.ref must stay unchanged after a refused move");
+        assert!(find_task(&id).is_ok(), "tasks must still be reachable under the original ref");
+    }
+
+    #[test]
+    fn test_set_ref_path_force_overwrites_existing_ref() {
+        let ref_path = get_ref_path();
+        let task = Task::construct_task("Ref force".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let task = create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+
+        let repo = Repository::discover(".").unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let tasks_commit = repo.find_reference(&ref_path).unwrap().peel_to_commit().unwrap();
+        let other_path = "refs/heads/test-git-task-forced";
+        repo.reference(other_path, head.id(), true, "test").unwrap();
+
+        let result = set_ref_path(other_path, false, true);
+        let other_target = repo.find_reference(other_path).unwrap().target();
+        let found = find_task(&id);
+        let _ = set_ref_path(&ref_path, false, false);
+        let _ = repo.find_reference(other_path).unwrap().delete();
+        let _ = delete_tasks(&[&id]);
+
+        assert!(result.is_ok(), "--force must overwrite an existing ref: {:?}", result.err());
+        assert_eq!(other_target, Some(tasks_commit.id()), "the existing ref must now point at the tasks commit");
+        assert!(found.unwrap().is_some(), "tasks must be visible under the forced ref");
+    }
+
+    #[test]
+    fn test_set_ref_path_accepts_existing_ref_at_same_commit() {
+        let ref_path = get_ref_path();
+        let task = Task::construct_task("Ref copy".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let task = create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+
+        let repo = Repository::discover(".").unwrap();
+        let tasks_commit = repo.find_reference(&ref_path).unwrap().peel_to_commit().unwrap();
+        let other_path = "refs/heads/test-git-task-copy";
+        repo.reference(other_path, tasks_commit.id(), true, "test").unwrap();
+
+        let result = set_ref_path(other_path, false, false);
+        let found = find_task(&id);
+        let _ = set_ref_path(&ref_path, false, false);
+        let _ = repo.find_reference(other_path).unwrap().delete();
+        let _ = delete_tasks(&[&id]);
+
+        assert!(result.is_ok(), "a ref that already points at the tasks commit is fine: {:?}", result.err());
+        assert!(found.unwrap().is_some(), "tasks must be visible under the adopted ref");
     }
 
     #[test]
@@ -771,7 +845,7 @@ mod test {
         let task = create_task(task).unwrap();
         let id = task.get_id().unwrap();
 
-        assert!(set_ref_path(&ref_path, true).is_ok());
+        assert!(set_ref_path(&ref_path, true, false).is_ok());
         assert_eq!(get_ref_path(), ref_path);
         let found = find_task(&id);
         assert!(found.is_ok());

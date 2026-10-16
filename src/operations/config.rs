@@ -27,9 +27,13 @@ pub(crate) fn task_config_get(param: String) -> bool {
     }
 }
 
-pub(crate) fn task_config_set(param: String, value: String, move_ref: bool, rename_tasks: bool) -> bool {
+pub(crate) fn task_config_set(param: String, value: String, move_ref: bool, force: bool, rename_tasks: bool) -> bool {
     if rename_tasks && param != "task.jira.projects" {
         return error_message("--rename-tasks only applies to task.jira.projects".to_string());
+    }
+
+    if (move_ref || force) && param != "task.ref" {
+        return error_message("--move and --force only apply to task.ref".to_string());
     }
 
     match param.as_str() {
@@ -96,7 +100,7 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool, rena
                 value => value,
             };
 
-            match gittask::set_ref_path(&value, move_ref) {
+            match gittask::set_ref_path(&value, move_ref, force) {
                 Ok(_) => success_message(format!("{param} has been updated")),
                 Err(e) => error_message(format!("ERROR: {e}"))
             }

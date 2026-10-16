@@ -577,6 +577,9 @@ enum ConfigCommand {
         /// Remove old tasks ref after update
         #[arg(long = "move")]
         move_ref: bool,
+        /// Overwrite the target ref if it already exists (when setting task.ref)
+        #[arg(long)]
+        force: bool,
         /// Prefix numeric task IDs with the default Jira project (when setting task.jira.projects)
         #[arg(long)]
         rename_tasks: bool,
@@ -877,7 +880,7 @@ fn task_label(subcommand: LabelCommand) -> bool {
 fn task_config(subcommand: ConfigCommand) -> bool {
     match subcommand {
         ConfigCommand::Get { param } => task_config_get(param),
-        ConfigCommand::Set { param, value, move_ref, rename_tasks } => task_config_set(param, value, move_ref, rename_tasks),
+        ConfigCommand::Set { param, value, move_ref, force, rename_tasks } => task_config_set(param, value, move_ref, force, rename_tasks),
         ConfigCommand::List => task_config_list(),
         ConfigCommand::Status { subcommand } => task_config_status(subcommand),
         ConfigCommand::Properties { subcommand } => task_config_properties(subcommand),
