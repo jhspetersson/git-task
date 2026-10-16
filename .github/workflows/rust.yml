@@ -24,3 +24,27 @@ jobs:
       run: git config user.name Tester && git config user.email tester@example.com
     - name: Run tests
       run: cargo test --verbose -- --test-threads 1
+
+  redmine-integration:
+    runs-on: ubuntu-latest
+    services:
+      redmine:
+        image: redmine:6
+        ports:
+          - 3000:3000
+    steps:
+    - uses: actions/checkout@v4
+    - name: Wait for Redmine
+      run: curl --silent --output /dev/null --retry 60 --retry-delay 5 --retry-all-errors http://localhost:3000/
+    - name: Prepare Redmine (default data, REST API, admin key)
+      run: |
+        docker exec -e REDMINE_LANG=en ${{ job.services.redmine.id }} rake redmine:load_default_data
+        KEY=$(docker exec ${{ job.services.redmine.id }} rails runner 'Setting.rest_api_enabled = "1"; u = User.find_by_login("admin"); u.must_change_passwd = false; u.save!; print u.api_key' 2>/dev/null | tail -n 1)
+        test -n "$KEY"
+        echo "::add-mask::$KEY"
+        echo "GIT_TASK_REDMINE_URL=http://localhost:3000" >> "$GITHUB_ENV"
+        echo "GIT_TASK_REDMINE_API_KEY=$KEY" >> "$GITHUB_ENV"
+    - name: Set up git
+      run: git config --global user.name Tester && git config --global user.email tester@example.com
+    - name: Run Redmine integration tests
+      run: cargo test --verbose --test redmine

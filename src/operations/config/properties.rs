@@ -207,8 +207,6 @@ pub(crate) fn task_config_properties_cond_format_clear(name: String) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_rename_property_to_same_name_preserves_task_data() {
         let _repo = gittask::testing::TestRepo::new();

@@ -511,7 +511,7 @@ Alternatively, you can set the `REDMINE_URL` environment variable.
 
 Set up a Redmine API key:
 
-    git task config set task.redmine.api_key your_api_key_here
+    git task config set task.redmine.api.key your_api_key_here
 
 Alternatively, you can set the `REDMINE_API_KEY` or `REDMINE_TOKEN` environment variable.
 

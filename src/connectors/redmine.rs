@@ -140,22 +140,16 @@ impl RemoteConnector for RedmineRemoteConnector {
     fn get_remote_task(
         &self,
         domain: &String,
-        _project: &String,
+        project: &String,
         task_id: &String,
         with_comments: bool,
         _with_labels: bool,
         _task_statuses: &Vec<String>
     ) -> Result<Task, String> {
         let redmine = get_redmine_instance(domain)?;
-        let mut endpoint_builder = GetIssue::builder();
-        endpoint_builder.id(task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?);
-        if with_comments {
-            endpoint_builder.include(vec![IssueInclude::Journals]);
-        }
-        let endpoint = endpoint_builder.build().map_err(|e| e.to_string())?;
-        let IssueWrapper { issue } =
-            redmine.json_response_body::<_, IssueWrapper<Issue>>(&endpoint)
-                .map_err(|e| e.to_string())?;
+        let issue_id = task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?;
+        let include = if with_comments { Some(vec![IssueInclude::Journals]) } else { None };
+        let issue = get_issue_in_project(&redmine, project, issue_id, include)?;
 
         let mut task = issue_to_task(&issue)?;
 
@@ -184,8 +178,8 @@ impl RemoteConnector for RedmineRemoteConnector {
         }
 
         let endpoint = builder.build().map_err(|e| e.to_string())?;
-        let issue: Issue = redmine
-            .json_response_body::<_, Issue>(&endpoint)
+        let IssueWrapper { issue } = redmine
+            .json_response_body::<_, IssueWrapper<Issue>>(&endpoint)
             .map_err(|e| e.to_string())?;
 
         Ok(issue.id.to_string())
@@ -237,7 +231,7 @@ impl RemoteConnector for RedmineRemoteConnector {
     fn update_remote_task(
         &self,
         domain: &String,
-        _project: &String,
+        project: &String,
         task: &Task,
         _labels: Option<&Vec<Label>>,
         state: RemoteTaskState
@@ -248,6 +242,8 @@ impl RemoteConnector for RedmineRemoteConnector {
             .ok_or_else(|| "Task id is required for update".to_string())?
             .parse::<u64>()
             .map_err(|e| format!("Invalid task id '{}': {}", task.get_id().unwrap(), e))?;
+
+        get_issue_in_project(&redmine, project, id, None)?;
 
         let mut builder = UpdateIssue::builder();
         builder.id(id);
@@ -418,6 +414,26 @@ impl RemoteConnector for RedmineRemoteConnector {
 
         redmine.ignore_response_body(&endpoint).map_err(|e| e.to_string())
     }
+}
+
+fn get_issue_in_project(redmine: &Redmine, project: &String, issue_id: u64, include: Option<Vec<IssueInclude>>) -> Result<Issue, String> {
+    let project_id = resolve_project_id(redmine, project)?;
+
+    let mut builder = GetIssue::builder();
+    builder.id(issue_id);
+    if let Some(include) = include {
+        builder.include(include);
+    }
+    let endpoint = builder.build().map_err(|e| e.to_string())?;
+    let IssueWrapper { issue } = redmine
+        .json_response_body::<_, IssueWrapper<Issue>>(&endpoint)
+        .map_err(|e| e.to_string())?;
+
+    if issue.project.id != project_id {
+        return Err(format!("Issue #{issue_id} belongs to project '{}' (id {}), not to project '{project}'", issue.project.name, issue.project.id));
+    }
+
+    Ok(issue)
 }
 
 fn resolve_project_id(redmine: &Redmine, project: &String) -> Result<u64, String> {
