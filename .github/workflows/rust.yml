@@ -78,3 +78,22 @@ jobs:
       run: git config --global user.name Tester && git config --global user.email tester@example.com
     - name: Run GitLab integration tests
       run: cargo test --verbose --test gitlab
+
+  github-integration:
+    # Runs against the real github.com repository jhspetersson/git-task-ci, so it needs the
+    # GIT_TASK_GITHUB_TOKEN secret, which pull requests from forks do not get.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    # The test repository is shared between runs, so they must not overlap.
+    concurrency:
+      group: github-integration
+      cancel-in-progress: false
+    env:
+      GIT_TASK_GITHUB_TOKEN: ${{ secrets.GIT_TASK_GITHUB_TOKEN }}
+      GIT_TASK_GITHUB_REPO: jhspetersson/git-task-ci
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up git
+      run: git config --global user.name Tester && git config --global user.email tester@example.com
+    - name: Run GitHub integration tests
+      run: cargo test --verbose --test github -- --test-threads 1
