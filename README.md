@@ -141,6 +141,10 @@ Updates task status.
     git task status 1 i
     git task status 2..5,10,12 c
 
+The status must be one of the configured statuses (see `git task config status list`), given by name or shortcut. Unknown statuses are rejected. Pass `--create` to add a missing status on the fly; it gets a free shortcut and the `Default` color, which you can adjust later with `git task config status set`:
+
+    git task status 1 BLOCKED --create
+
 ### get
 
 Prints task property.
@@ -445,7 +449,7 @@ Show available commands or their arguments:
 
 For private repositories you have to set up `GITHUB_TOKEN` or `GITHUB_API_TOKEN` environment variable for GitHub.
 
-Subtasks are synchronized using GitHub's sub-issues REST API. A local subtask without a remote ID is created as a fresh issue and then linked as a sub-issue of the parent.
+Subtasks are synchronized using GitHub's sub-issues REST API. A local subtask that is not on GitHub yet is created as a fresh issue and then linked as a sub-issue of the parent. The local subtask ID is replaced with the new issue number. Sub-issues only know open and closed, so on pull they get your starting or final status, and on push a subtask is closed when its status is marked as done.
 
 ## GitLab support
 
