@@ -35,6 +35,8 @@ struct GitlabComment {
     body: String,
     author: Author,
     created_at: String,
+    #[serde(default)]
+    system: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -379,6 +381,9 @@ fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, iid: u64) 
             let comments: Vec<GitlabComment> = comments;
             let mut result: Vec<Comment> = vec![];
             for comment in comments {
+                if comment.system {
+                    continue;
+                }
                 let comment = Comment::new(comment.id.to_string(), HashMap::from([
                     ("author".to_string(), comment.author.username),
                     ("created".to_string(), parse_datetime_to_seconds(comment.created_at)),
@@ -428,11 +433,16 @@ fn prepare_labels(client: &Gitlab, user: &String, repo: &String, labels: &Vec<La
 
 fn get_client(token: &str) -> Result<Gitlab, String> {
     let base_url = get_base_url();
-    let gitlab_domain = match Regex::new("(https://)?(?P<domain>[^/]+)").unwrap().captures(&base_url) {
-        Some(caps) if caps.name("domain").is_some() => caps.name("domain").unwrap().as_str().to_string(),
-        _ => "gitlab.com".to_string(),
+    let (insecure, rest) = match base_url.strip_prefix("http://") {
+        Some(rest) => (true, rest),
+        None => (false, base_url.strip_prefix("https://").unwrap_or(&base_url)),
     };
-    Gitlab::new(&gitlab_domain, token).map_err(|e| format!("Could not connect to GitLab at {gitlab_domain}: {e}"))
+    let host = match rest.split('/').next().unwrap_or("") {
+        "" => "gitlab.com".to_string(),
+        host => host.to_string(),
+    };
+    let client = if insecure { Gitlab::new_insecure(&host, token) } else { Gitlab::new(&host, token) };
+    client.map_err(|e| format!("Could not connect to GitLab at {host}: {e}"))
 }
 
 fn parse_task_id(task_id: &str) -> Result<u64, String> {

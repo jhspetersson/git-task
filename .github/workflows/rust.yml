@@ -48,3 +48,33 @@ jobs:
       run: git config --global user.name Tester && git config --global user.email tester@example.com
     - name: Run Redmine integration tests
       run: cargo test --verbose --test redmine
+
+  gitlab-integration:
+    # GitLab CE takes several minutes to boot, so this job stays off the pull request path.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      gitlab:
+        image: gitlab/gitlab-ce:latest
+        ports:
+          - 8080:80
+        env:
+          GITLAB_ROOT_PASSWORD: GitTaskCiPassw0rd!
+          GITLAB_OMNIBUS_CONFIG: "external_url 'http://localhost'; puma['worker_processes'] = 0; sidekiq['concurrency'] = 5; prometheus_monitoring['enable'] = false"
+        options: --shm-size 256m
+    steps:
+    - uses: actions/checkout@v4
+    - name: Wait for GitLab
+      run: curl --silent --fail --output /dev/null --retry 120 --retry-delay 10 --retry-all-errors http://localhost:8080/users/sign_in
+    - name: Create an API token
+      run: |
+        TOKEN=$(docker exec ${{ job.services.gitlab.id }} gitlab-rails runner 'u = User.find_by_username("root"); t = u.personal_access_tokens.create(scopes: ["api"], name: "git-task-ci", expires_at: 7.days.from_now); t.set_token("glpat-" + SecureRandom.alphanumeric(20)); t.save!; print t.token' 2>/dev/null | tail -n 1)
+        test -n "$TOKEN"
+        echo "::add-mask::$TOKEN"
+        echo "GIT_TASK_GITLAB_URL=http://localhost:8080" >> "$GITHUB_ENV"
+        echo "GIT_TASK_GITLAB_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+    - name: Set up git
+      run: git config --global user.name Tester && git config --global user.email tester@example.com
+    - name: Run GitLab integration tests
+      run: cargo test --verbose --test gitlab
