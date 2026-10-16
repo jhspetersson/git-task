@@ -46,11 +46,13 @@ pub struct Subtask {
 
 impl Task {
     pub fn new(name: String, description: String, status: String) -> Result<Task, &'static str> {
-        if !name.is_empty() && !status.is_empty() {
-            Ok(Self::construct_task(name, description, status, None))
-        } else {
-            Err("Name or status is empty")
+        if name.trim().is_empty() {
+            return Err("Task name is empty");
         }
+        if status.trim().is_empty() {
+            return Err("Task status is empty");
+        }
+        Ok(Self::construct_task(name, description, status, None))
     }
 
     pub fn from_properties(id: String, mut props: HashMap<String, String>) -> Result<Task, &'static str> {
@@ -1334,6 +1336,15 @@ mod test {
     fn test_update_subtask_id_nonexistent_task() {
         let result = update_subtask_id("99999", "1", "2");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_new_task_rejects_blank_name_or_status() {
+        assert!(Task::new("".to_string(), "".to_string(), "OPEN".to_string()).is_err());
+        assert!(Task::new("   ".to_string(), "".to_string(), "OPEN".to_string()).is_err(), "whitespace-only name must be rejected");
+        assert!(Task::new("Name".to_string(), "".to_string(), "".to_string()).is_err());
+        assert!(Task::new("Name".to_string(), "".to_string(), " \t".to_string()).is_err(), "whitespace-only status must be rejected");
+        assert!(Task::new("Name".to_string(), "".to_string(), "OPEN".to_string()).is_ok());
     }
 
     #[test]

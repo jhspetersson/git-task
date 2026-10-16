@@ -36,9 +36,12 @@ pub(crate) fn task_create(
     };
 
     let status_manager = StatusManager::new();
-    let task = Task::new(name, description, status_manager.get_starting_status());
+    let task = match Task::new(name, description, status_manager.get_starting_status()) {
+        Ok(task) => task,
+        Err(e) => return error_message(format!("ERROR: {e}")),
+    };
 
-    match gittask::create_task(task.unwrap()) {
+    match gittask::create_task(task) {
         Ok(task) => {
             println!("Task ID {} created", task.get_id().unwrap());
             let mut success = true;
@@ -107,6 +110,10 @@ pub(crate) fn task_set(
     project: &Option<String>,
     no_color: bool
 ) -> bool {
+    if (prop_name == "name" || prop_name == "status") && value.trim().is_empty() {
+        return error_message(format!("Property '{prop_name}' cannot be empty"));
+    }
+
     let ids = parse_ids(ids);
     let mut success = true;
     match prop_name.as_str() {
@@ -1387,6 +1394,33 @@ mod tests {
         assert_eq!(resolve_project(&Some("XYZ".to_string()), "ABC-42"), Some("XYZ".to_string()));
         assert_eq!(resolve_project(&None, "ABC-42"), Some("ABC".to_string()));
         assert_eq!(resolve_project(&None, "42"), None);
+    }
+
+    #[test]
+    fn test_task_create_rejects_blank_name_without_panic() {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            task_create("".to_string(), None, true, false, &None, &None, &None)
+        }));
+        assert!(result.is_ok(), "task_create must not panic on an empty name");
+        assert!(!result.unwrap(), "task_create must fail on an empty name");
+
+        let result = task_create("   ".to_string(), None, true, false, &None, &None, &None);
+        assert!(!result, "task_create must fail on a whitespace-only name");
+    }
+
+    #[test]
+    fn test_task_set_rejects_blank_name_and_status() {
+        let task = gittask::Task::new("Keep me".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+
+        assert!(!task_set(id.clone(), "name".to_string(), "  ".to_string(), false, &None, &None, &None, true));
+        assert!(!task_set(id.clone(), "status".to_string(), "".to_string(), false, &None, &None, &None, true));
+        let task = gittask::find_task(&id).unwrap().unwrap();
+        assert_eq!(task.get_property("name").unwrap(), "Keep me");
+        assert_eq!(task.get_property("status").unwrap(), "OPEN");
+
+        let _ = gittask::delete_tasks(&[&id]);
     }
 
     #[test]

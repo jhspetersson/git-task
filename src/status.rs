@@ -159,14 +159,14 @@ impl StatusManager {
 
     pub fn get_starting_status(&self) -> String {
         match gittask::get_config_value("task.status.open") {
-            Ok(s) => s,
+            Ok(s) if !s.trim().is_empty() => s,
             _ => self.statuses.first().map(|s| s.name.clone()).unwrap_or_default()
         }
     }
 
     pub fn get_in_progress_status(&self) -> Option<String> {
         match gittask::get_config_value("task.status.in_progress") {
-            Ok(s) => Some(s),
+            Ok(s) if !s.trim().is_empty() => Some(s),
             _ => {
                 if self.statuses.len() == 3 {
                     let starting_and_final_statuses= vec![
@@ -189,7 +189,7 @@ impl StatusManager {
 
     pub fn get_final_status(&self) -> String {
         match gittask::get_config_value("task.status.closed") {
-            Ok(s) => s,
+            Ok(s) if !s.trim().is_empty() => s,
             _ => {
                 self.statuses.iter().find_map(|saved_status| {
                     if saved_status.is_done { Some(saved_status.name.clone()) } else { None }
