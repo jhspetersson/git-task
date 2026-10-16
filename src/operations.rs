@@ -18,6 +18,9 @@ use crate::property::{PropertyManager, PropertyValueType};
 use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_bool, parse_date, parse_ids, read_from_pipe, str_to_color, success_message};
 
+/// Default value of the `task.list.columns` setting, shared by `task list` and `task config get`.
+pub(crate) const DEFAULT_LIST_COLUMNS: &str = "id, created, status, name, labels";
+
 pub(crate) fn task_create(
     name: String,
     description: Option<String>,
@@ -1322,17 +1325,9 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
             if !filtered_tasks.is_empty() {
                 let no_color = check_no_color(no_color);
 
-                let columns = columns.unwrap_or_else(|| match gittask::get_config_value("task.list.columns") {
-                    Ok(list_columns) => {
-                        list_columns.split(",").map(|s| s.trim().to_string()).collect()
-                    },
-                    _ => vec![
-                        String::from("id"),
-                        String::from("created"),
-                        String::from("status"),
-                        String::from("name"),
-                        String::from("labels"),
-                    ]
+                let columns = columns.unwrap_or_else(|| {
+                    let list_columns = gittask::get_config_value("task.list.columns").unwrap_or_else(|_| String::from(DEFAULT_LIST_COLUMNS));
+                    list_columns.split(",").map(|s| s.trim().to_string()).collect()
                 });
 
                 let show_headers = headers || match gittask::get_config_value("task.list.show.headers") {

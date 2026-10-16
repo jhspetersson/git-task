@@ -1,4 +1,5 @@
 use crate::connectors::{get_config_options_from_connectors, get_matching_remote_connectors};
+use crate::operations::DEFAULT_LIST_COLUMNS;
 use crate::status::StatusManager;
 use crate::util::{error_message, success_message};
 
@@ -7,7 +8,7 @@ pub(crate) mod properties;
 
 pub(crate) fn task_config_get(param: String) -> bool {
     match param.as_str() {
-        "task.list.columns" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("id, created, status, name")))),
+        "task.list.columns" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from(DEFAULT_LIST_COLUMNS)))),
         "task.list.show.headers" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("false")))),
         "task.list.sort" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("id desc")))),
         "task.status.open" => success_message(format!("{}", gittask::get_config_value(&param).unwrap_or_else(|_| String::from("OPEN")))),
