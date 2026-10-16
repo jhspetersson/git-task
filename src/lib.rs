@@ -430,7 +430,11 @@ macro_rules! map_err {
 pub fn list_tasks() -> Result<Vec<Task>, String> {
     let repo = map_err!(Repository::discover("."));
     let ref_path = get_ref_path();
-    let task_ref = map_err!(repo.find_reference(&ref_path));
+    let task_ref = match repo.find_reference(&ref_path) {
+        Ok(task_ref) => task_ref,
+        Err(e) if e.code() == git2::ErrorCode::NotFound => return Ok(vec![]),
+        Err(e) => return Err(e.to_string()),
+    };
     let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut result = vec![];
@@ -728,6 +732,16 @@ pub fn set_config_value(key: &str, value: &str) -> Result<(), String> {
     let mut config = map_err!(repo.config());
     map_err!(config.set_str(key, value));
     Ok(())
+}
+
+pub fn unset_config_value(key: &str) -> Result<(), String> {
+    let repo = map_err!(Repository::discover("."));
+    let mut config = map_err!(repo.config());
+    match config.remove(key) {
+        Ok(_) => Ok(()),
+        Err(e) if e.code() == git2::ErrorCode::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 pub fn set_ref_path(ref_path: &str, move_ref: bool, force: bool) -> Result<(), String> {

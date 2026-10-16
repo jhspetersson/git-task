@@ -1,4 +1,5 @@
 use crate::connectors::{get_config_options_from_connectors, get_matching_remote_connectors};
+use crate::status::StatusManager;
 use crate::util::{error_message, success_message};
 
 pub(crate) mod status;
@@ -69,20 +70,12 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool, forc
                 Err(e) => error_message(format!("ERROR: {e}"))
             }
         },
-        "task.status.open" => {
-            match gittask::set_config_value(&param, &value) {
-                Ok(_) => success_message(format!("{param} has been updated")),
-                Err(e) => error_message(format!("ERROR: {e}"))
-            }
-        },
-        "task.status.in_progress" => {
-            match gittask::set_config_value(&param, &value) {
-                Ok(_) => success_message(format!("{param} has been updated")),
-                Err(e) => error_message(format!("ERROR: {e}"))
-            }
-        },
-        "task.status.closed" => {
-            match gittask::set_config_value(&param, &value) {
+        "task.status.open" | "task.status.in_progress" | "task.status.closed" => {
+            let status = match StatusManager::new().resolve_status(value.trim()) {
+                Ok(status) => status,
+                Err(e) => return error_message(format!("ERROR: {e}")),
+            };
+            match gittask::set_config_value(&param, &status) {
                 Ok(_) => success_message(format!("{param} has been updated")),
                 Err(e) => error_message(format!("ERROR: {e}"))
             }

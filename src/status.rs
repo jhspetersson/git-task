@@ -38,6 +38,8 @@ pub struct StatusManager {
     statuses: Vec<Status>,
 }
 
+pub const ROLE_CONFIG_KEYS: [&str; 3] = ["task.status.open", "task.status.in_progress", "task.status.closed"];
+
 impl StatusManager {
     pub fn new() -> StatusManager {
         let statuses = read_config().unwrap_or_else(|_| Self::get_defaults());
@@ -157,8 +159,39 @@ impl StatusManager {
         self.statuses.retain(|s| s.name != name);
         match prev_status_count == self.statuses.len() {
             true => Err("Status not found".to_string()),
-            false => save_config(&self.statuses),
+            false => {
+                save_config(&self.statuses)?;
+                self.clear_role_references(&name)
+            }
         }
+    }
+
+    fn rename_role_references(&self, old_name: &str, new_name: &str) -> Result<(), String> {
+        for key in ROLE_CONFIG_KEYS {
+            if gittask::get_config_value(key).map_or(false, |v| v.trim() == old_name) {
+                gittask::set_config_value(key, new_name)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn clear_role_references(&self, name: &str) -> Result<(), String> {
+        for key in ROLE_CONFIG_KEYS {
+            if gittask::get_config_value(key).map_or(false, |v| v.trim() == name) {
+                gittask::unset_config_value(key)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn configured_role(&self, key: &str) -> Option<String> {
+        self.known_status(gittask::get_config_value(key).ok())
+    }
+
+    fn known_status(&self, value: Option<String>) -> Option<String> {
+        let value = value?;
+        let value = value.trim();
+        self.statuses.iter().find(|s| s.name == value).map(|s| s.name.clone())
     }
 
     pub fn format_status<'a>(&self, status: &'a str, no_color: bool) -> AnsiString<'a> {
@@ -191,16 +224,16 @@ impl StatusManager {
     }
 
     pub fn get_starting_status(&self) -> String {
-        match gittask::get_config_value("task.status.open") {
-            Ok(s) if !s.trim().is_empty() => s,
-            _ => self.statuses.first().map(|s| s.name.clone()).unwrap_or_default()
+        match self.configured_role("task.status.open") {
+            Some(s) => s,
+            None => self.statuses.first().map(|s| s.name.clone()).unwrap_or_default()
         }
     }
 
     pub fn get_in_progress_status(&self) -> Option<String> {
-        match gittask::get_config_value("task.status.in_progress") {
-            Ok(s) if !s.trim().is_empty() => Some(s),
-            _ => {
+        match self.configured_role("task.status.in_progress") {
+            Some(s) => Some(s),
+            None => {
                 if self.statuses.len() == 3 {
                     let starting_and_final_statuses= vec![
                         self.get_starting_status(),
@@ -221,9 +254,9 @@ impl StatusManager {
     }
 
     pub fn get_final_status(&self) -> String {
-        match gittask::get_config_value("task.status.closed") {
-            Ok(s) if !s.trim().is_empty() => s,
-            _ => {
+        match self.configured_role("task.status.closed") {
+            Some(s) => s,
+            None => {
                 self.statuses.iter().find_map(|saved_status| {
                     if saved_status.is_done { Some(saved_status.name.clone()) } else { None }
                 }).unwrap_or_else(|| self.statuses.last().map(|s| s.name.clone()).unwrap_or_default())
@@ -300,10 +333,13 @@ impl StatusManager {
                 };
                 match set_result {
                     Ok(prev_value) => {
-                        match save_config(&self.statuses) {
-                            Ok(_) => Ok(prev_value),
-                            Err(e) => Err(e)
+                        save_config(&self.statuses)?;
+                        if let Some(prev_name) = &prev_value {
+                            if prev_name != value {
+                                self.rename_role_references(prev_name, value)?;
+                            }
                         }
+                        Ok(prev_value)
                     },
                     Err(e) => Err(e)
                 }
@@ -354,6 +390,16 @@ mod tests {
                 is_done: true,
             },
         ]
+    }
+
+    #[test]
+    fn test_known_status_ignores_blank_and_unknown_names() {
+        let manager = StatusManager { statuses: make_test_statuses() };
+        assert_eq!(manager.known_status(None), None);
+        assert_eq!(manager.known_status(Some(String::new())), None);
+        assert_eq!(manager.known_status(Some("  ".to_string())), None);
+        assert_eq!(manager.known_status(Some("GONE".to_string())), None);
+        assert_eq!(manager.known_status(Some(" OPEN ".to_string())), Some("OPEN".to_string()));
     }
 
     #[test]
