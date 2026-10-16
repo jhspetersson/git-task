@@ -567,11 +567,20 @@ async fn get_issue_id(user: &String, repo: &String, n: u64) -> Result<String, St
 
 async fn list_sub_issues(user: &String, repo: &String, n: u64, task_statuses: &Vec<String>) -> Result<Vec<Subtask>, String> {
     let crab = get_octocrab_instance().await;
-    let url = format!("/repos/{user}/{repo}/issues/{n}/sub_issues");
-    let issues: Vec<octocrab::models::issues::Issue> = crab
-        .get::<Vec<octocrab::models::issues::Issue>, _, ()>(url, None)
-        .await
-        .map_err(|e| e.to_string())?;
+    let per_page = 100;
+    let mut issues: Vec<octocrab::models::issues::Issue> = vec![];
+    for page in 1.. {
+        let url = format!("/repos/{user}/{repo}/issues/{n}/sub_issues?per_page={per_page}&page={page}");
+        let batch: Vec<octocrab::models::issues::Issue> = crab
+            .get::<Vec<octocrab::models::issues::Issue>, _, ()>(url, None)
+            .await
+            .map_err(|e| e.to_string())?;
+        let last_page = batch.len() < per_page;
+        issues.extend(batch);
+        if last_page {
+            break;
+        }
+    }
 
     let empty_string = String::new();
     let open_status = task_statuses.first().unwrap_or(&empty_string);

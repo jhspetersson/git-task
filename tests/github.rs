@@ -55,11 +55,27 @@ impl GitHub {
     }
 
     fn json(&self, method: reqwest::Method, path: &str, body: Option<Value>) -> Value {
-        let response = self.send(method.clone(), path, body);
-        let status = response.status();
-        let text = response.text().expect("response body");
-        assert!(status.is_success(), "{method} {path} failed with {status}: {text}");
-        serde_json::from_str(&text).expect("response is not JSON")
+        for attempt in 0..5 {
+            let response = self.send(method.clone(), path, body.clone());
+            let status = response.status();
+            let retry_after = response
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(60);
+            let text = response.text().expect("response body");
+            let rate_limited = (status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::TOO_MANY_REQUESTS)
+                && text.contains("rate limit");
+            if rate_limited && attempt < 4 {
+                eprintln!("{method} {path} hit a rate limit, retrying in {retry_after}s");
+                std::thread::sleep(Duration::from_secs(retry_after));
+                continue;
+            }
+            assert!(status.is_success(), "{method} {path} failed with {status}: {text}");
+            return serde_json::from_str(&text).expect("response is not JSON");
+        }
+        unreachable!()
     }
 
     fn get(&self, path: &str) -> Value {
@@ -127,17 +143,28 @@ impl GitHub {
         self.post(&format!("/issues/{number}/labels"), json!({ "labels": [name] }));
     }
 
+    fn create_sub_issue(&self, parent: u64, title: &str) -> u64 {
+        let issue = self.post("/issues", json!({ "title": title }));
+        let database_id = issue["id"].as_u64().expect("issue id");
+        self.post(&format!("/issues/{parent}/sub_issues"), json!({ "sub_issue_id": database_id }));
+        issue["number"].as_u64().expect("issue number")
+    }
+
     fn sub_issues(&self, number: u64) -> Vec<Issue> {
-        self.get(&format!("/issues/{number}/sub_issues"))
-            .as_array()
-            .expect("sub issues")
-            .iter()
-            .map(|i| Issue {
+        let mut result = vec![];
+        for page in 1.. {
+            let batch = self.get(&format!("/issues/{number}/sub_issues?per_page=100&page={page}"));
+            let batch = batch.as_array().expect("sub issues");
+            result.extend(batch.iter().map(|i| Issue {
                 number: i["number"].as_u64().expect("issue number"),
                 title: i["title"].as_str().unwrap_or("").to_string(),
                 state: i["state"].as_str().unwrap_or("").to_string(),
-            })
-            .collect()
+            }));
+            if batch.len() < 100 {
+                break;
+            }
+        }
+        result
     }
 
     fn close_issue(&self, number: u64) {
@@ -484,6 +511,41 @@ fn subtask_commands_push_to_the_remote() {
     assert!(github.sub_issues(number).is_empty(), "the sub-issue must be unlinked from the parent");
     assert!(local_subtasks(&repo, &id).is_empty());
 
+    github.close_issue(number);
+}
+
+#[test]
+fn pull_and_push_handle_more_than_one_page_of_sub_issues() {
+    let github = github_or_skip!();
+    let suffix = unique_suffix();
+    let title = format!("Big parent from CI {suffix}");
+    let number = github.create_issue(&title, "With many sub-issues");
+    let repo = local_repo(&github);
+    let id = number.to_string();
+    let count = 31;
+
+    let mut children = vec![];
+    for i in 1..=count {
+        children.push(github.create_sub_issue(number, &format!("Child {i} from CI {suffix}")));
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    assert_eq!(github.sub_issues(number).len(), count);
+
+    run(&github, &repo, &["pull", &id]);
+    let mut local_ids = local_subtasks(&repo, &id).into_iter().map(|(id, _, _)| id).collect::<Vec<_>>();
+    local_ids.sort();
+    let mut expected = children.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+    expected.sort();
+    assert_eq!(local_ids, expected, "pull must import every sub-issue, not only the first page");
+
+    let out = run(&github, &repo, &["push", &id]);
+    assert!(!out.contains("Created REMOTE subtask"), "push must not duplicate sub-issues beyond the first page: {out}");
+    assert_eq!(github.sub_issues(number).len(), count, "push must not create new sub-issues");
+
+    for child in children {
+        github.close_issue(child);
+        std::thread::sleep(Duration::from_millis(500));
+    }
     github.close_issue(number);
 }
 
