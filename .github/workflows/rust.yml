@@ -27,6 +27,7 @@ jobs:
 
   redmine-integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       redmine:
         image: redmine:6
@@ -84,6 +85,7 @@ jobs:
     # GIT_TASK_GITHUB_TOKEN secret, which pull requests from forks do not get.
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     # The test repository is shared between runs, so they must not overlap.
     concurrency:
       group: github-integration
