@@ -20,7 +20,7 @@ where
     fn expand_range(self) -> impl Iterator<Item = String> {
         self.flat_map(|s| {
             if let Some((start, end)) = s.split_once("..") {
-                if let (Ok(start_num), Ok(end_num)) = (start.parse::<u64>(), end.parse::<u64>()) {
+                if let (Ok(start_num), Ok(end_num)) = (start.trim().parse::<u64>(), end.trim().parse::<u64>()) {
                     return if start_num <= end_num {
                         (start_num..=end_num).map(|n| n.to_string()).collect::<Vec<_>>()
                     } else {
@@ -36,6 +36,7 @@ where
 pub fn parse_ids(ids: String) -> Vec<String> {
     ids
         .split(",")
+        .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .expand_range()
@@ -644,6 +645,12 @@ mod tests {
         let expected: Vec<String> = vec![];
         let result = parse_ids(input);
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_parse_ids_trims_whitespace() {
+        let result = parse_ids(" 1, 2 ,3 .. 5, ,ABC-7 ".to_string());
+        assert_eq!(result, vec!["1", "2", "3", "4", "5", "ABC-7"].into_iter().map(String::from).collect::<Vec<_>>());
     }
 
     #[test]
