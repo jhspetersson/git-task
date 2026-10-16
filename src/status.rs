@@ -428,6 +428,7 @@ mod tests {
 
     #[test]
     fn test_set_property_is_done_invalid_value() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             manager.set_property(&"OPEN".to_string(), &"is_done".to_string(), &"not_a_bool".to_string())
@@ -438,6 +439,7 @@ mod tests {
 
     #[test]
     fn test_set_property_is_done_shorthand_values() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = StatusManager { statuses: make_test_statuses() };
         assert!(manager.set_property(&"OPEN".to_string(), &"is_done".to_string(), &"y".to_string()).is_ok());
         assert_eq!(*manager.statuses[0].is_done(), true);
@@ -451,6 +453,7 @@ mod tests {
 
     #[test]
     fn test_set_property_name_to_same_value() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let result = manager.set_property(&"OPEN".to_string(), &"name".to_string(), &"OPEN".to_string());
         assert!(result.is_ok(), "Setting name to same value should succeed, not error with 'Name already exists'");
@@ -458,6 +461,7 @@ mod tests {
 
     #[test]
     fn test_set_property_shortcut_to_same_value() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let result = manager.set_property(&"OPEN".to_string(), &"shortcut".to_string(), &"o".to_string());
         assert!(result.is_ok(), "Setting shortcut to same value should succeed, not error with 'Shortcut already exists'");
@@ -465,6 +469,7 @@ mod tests {
 
     #[test]
     fn test_get_starting_status_empty_statuses() {
+        let _repo = gittask::testing::TestRepo::new();
         let manager = StatusManager { statuses: vec![] };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             manager.get_starting_status()
@@ -474,6 +479,7 @@ mod tests {
 
     #[test]
     fn test_get_final_status_no_done_status() {
+        let _repo = gittask::testing::TestRepo::new();
         let statuses = vec![
             Status {
                 name: String::from("TODO"),
@@ -499,6 +505,7 @@ mod tests {
 
     #[test]
     fn test_get_final_status_empty_statuses() {
+        let _repo = gittask::testing::TestRepo::new();
         let manager = StatusManager { statuses: vec![] };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             manager.get_final_status()
@@ -508,6 +515,7 @@ mod tests {
 
     #[test]
     fn test_set_statuses_rejects_empty_list() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let result = manager.set_statuses(vec![]);
         assert!(result.is_err(), "set_statuses should reject an empty status list");
@@ -515,6 +523,7 @@ mod tests {
 
     #[test]
     fn test_set_statuses_rejects_duplicate_names() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let dupes = vec![
             Status { name: "TODO".into(), shortcut: "t".into(), color: "Red".into(), style: None, is_done: false },
@@ -526,6 +535,7 @@ mod tests {
 
     #[test]
     fn test_set_statuses_rejects_duplicate_shortcuts() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let dupes = vec![
             Status { name: "TODO".into(), shortcut: "x".into(), color: "Red".into(), style: None, is_done: false },
@@ -537,6 +547,7 @@ mod tests {
 
     #[test]
     fn test_add_status_duplicate_shortcut() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let result = manager.add_status("NEW".to_string(), "o".to_string(), "Blue".to_string(), false);
         assert!(result.is_err(), "add_status should reject duplicate shortcut");
@@ -544,6 +555,7 @@ mod tests {
 
     #[test]
     fn test_add_status_duplicate_name() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let result = manager.add_status("OPEN".to_string(), "x".to_string(), "Blue".to_string(), false);
         assert!(result.is_err(), "add_status should reject duplicate status name");

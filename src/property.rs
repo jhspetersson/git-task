@@ -571,6 +571,7 @@ mod tests {
 
     #[test]
     fn test_set_parameter_name_to_same_value() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = PropertyManager {
             properties: vec![
                 Property {
@@ -593,8 +594,6 @@ mod tests {
         };
         let result = manager.set_parameter(&"priority".to_string(), &"name".to_string(), &"priority".to_string());
         assert!(result.is_ok(), "Setting property name to same value should succeed, not error with 'Name already exists'");
-
-        let _ = manager.set_defaults();
     }
 
     #[test]
@@ -646,6 +645,7 @@ mod tests {
 
     #[test]
     fn test_add_enum_property_duplicate_name() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = PropertyManager {
             properties: vec![
                 Property {
@@ -666,12 +666,11 @@ mod tests {
         };
         let result = manager.add_enum_property("priority".to_string(), "HIGH".to_string(), "Blue".to_string(), None);
         assert!(result.is_err(), "add_enum_property should reject duplicate enum value name");
-
-        let _ = manager.set_defaults();
     }
 
     #[test]
     fn test_set_parameter_rejects_reserved_name() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = PropertyManager {
             properties: vec![
                 Property {
@@ -688,12 +687,11 @@ mod tests {
         assert!(result.is_err(), "set_parameter should reject renaming to reserved name 'id'");
         let result = manager.set_parameter(&"priority".to_string(), &"name".to_string(), &"labels".to_string());
         assert!(result.is_err(), "set_parameter should reject renaming to reserved name 'labels'");
-
-        let _ = manager.set_defaults();
     }
 
     #[test]
     fn test_set_properties_rejects_duplicate_names() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = PropertyManager {
             properties: vec![],
         };
@@ -717,12 +715,11 @@ mod tests {
         ];
         let result = manager.set_properties(dupes);
         assert!(result.is_err(), "set_properties should reject duplicate property names");
-
-        let _ = manager.set_defaults();
     }
 
     #[test]
     fn test_delete_last_enum_sets_none() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = PropertyManager {
             properties: vec![
                 Property {
@@ -743,12 +740,11 @@ mod tests {
         };
         let _ = manager.delete_enum_property("priority".to_string(), "HIGH".to_string());
         assert!(manager.properties[0].enum_values.is_none(), "enum_values should be None after deleting last enum value, not Some([])");
-
-        let _ = manager.set_defaults();
     }
 
     #[test]
     fn test_set_defaults_succeeds() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = PropertyManager { properties: vec![] };
         let result = manager.set_defaults();
         assert!(result.is_ok(), "resetting to defaults must succeed, got: {:?}", result.err());
@@ -756,16 +752,16 @@ mod tests {
 
     #[test]
     fn test_export_import_roundtrip() {
+        let _repo = gittask::testing::TestRepo::new();
         let json = serde_json::to_string(&PropertyManager::get_defaults()).unwrap();
         let parsed = PropertyManager::parse_properties(json).unwrap();
         let mut manager = PropertyManager { properties: vec![] };
         assert!(manager.set_properties(parsed).is_ok(), "importing exported properties must succeed");
-
-        let _ = manager.set_defaults();
     }
 
     #[test]
     fn test_set_properties_rejects_reserved_names() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = PropertyManager {
             properties: vec![],
         };
@@ -794,12 +790,11 @@ mod tests {
         ];
         let result = manager.set_properties(reserved);
         assert!(result.is_err(), "set_properties should reject reserved property name 'labels'");
-
-        let _ = manager.set_defaults();
     }
 
     #[test]
     fn test_add_property_duplicate_name() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut manager = PropertyManager {
             properties: vec![
                 Property {
@@ -814,7 +809,5 @@ mod tests {
         };
         let result = manager.add_property("priority".to_string(), "integer".to_string(), "Red".to_string(), None, None, None);
         assert!(result.is_err(), "add_property should reject duplicate property name");
-
-        let _ = manager.set_defaults();
     }
 }

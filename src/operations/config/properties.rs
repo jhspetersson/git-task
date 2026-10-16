@@ -211,6 +211,7 @@ mod tests {
 
     #[test]
     fn test_rename_property_to_same_name_preserves_task_data() {
+        let _repo = gittask::testing::TestRepo::new();
         // Create a task with a custom property
         let mut task = gittask::Task::new("Test".to_string(), "desc".to_string(), "OPEN".to_string()).unwrap();
         task.set_property("priority", "high");

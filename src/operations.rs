@@ -1493,6 +1493,7 @@ mod tests {
 
     #[test]
     fn test_task_create_rejects_blank_name_without_panic() {
+        let _repo = gittask::testing::TestRepo::new();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             task_create("".to_string(), None, true, false, &None, &None, &None)
         }));
@@ -1505,6 +1506,7 @@ mod tests {
 
     #[test]
     fn test_task_set_rejects_blank_name_and_status() {
+        let _repo = gittask::testing::TestRepo::new();
         let task = gittask::Task::new("Keep me".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
         let task = gittask::create_task(task).unwrap();
         let id = task.get_id().unwrap();
@@ -1520,6 +1522,7 @@ mod tests {
 
     #[test]
     fn test_task_set_status_validates_against_configured_statuses() {
+        let _repo = gittask::testing::TestRepo::new();
         let task = gittask::Task::new("Status check".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
         let task = gittask::create_task(task).unwrap();
         let id = task.get_id().unwrap();
@@ -1538,6 +1541,7 @@ mod tests {
 
     #[test]
     fn test_task_status_create_adds_unknown_status() {
+        let _repo = gittask::testing::TestRepo::new();
         let task = gittask::Task::new("Status create".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
         let task = gittask::create_task(task).unwrap();
         let id = task.get_id().unwrap();
@@ -1556,18 +1560,21 @@ mod tests {
 
     #[test]
     fn test_task_set_returns_false_on_nonexistent_task() {
+        let _repo = gittask::testing::TestRepo::new();
         let result = task_set("99999".to_string(), "name".to_string(), "test".to_string(), false, &None, &None, &None, true);
         assert!(!result, "task_set should return false when task is not found");
     }
 
     #[test]
     fn test_task_unset_returns_false_on_nonexistent_task() {
+        let _repo = gittask::testing::TestRepo::new();
         let result = task_unset("99999".to_string(), "name".to_string());
         assert!(!result, "task_unset should return false when task is not found");
     }
 
     #[test]
     fn test_task_unset_protected_properties() {
+        let _repo = gittask::testing::TestRepo::new();
         let task = gittask::Task::new("T".to_string(), "d".to_string(), "OPEN".to_string()).unwrap();
         let task = gittask::create_task(task).unwrap();
         let id = task.get_id().unwrap();
@@ -1583,6 +1590,7 @@ mod tests {
 
     #[test]
     fn test_task_list_with_statusless_task() {
+        let _repo = gittask::testing::TestRepo::new();
         let json = r#"[{"id":"999888","props":{"name":"nostatus","description":"","created":"123"},"comments":null,"labels":null}]"#;
         let tasks: Vec<gittask::Task> = serde_json::from_str(json).unwrap();
         let _ = gittask::create_task(tasks.into_iter().next().unwrap());
@@ -1605,12 +1613,14 @@ mod tests {
 
     #[test]
     fn test_task_replace_returns_false_on_nonexistent_task() {
+        let _repo = gittask::testing::TestRepo::new();
         let result = task_replace("99999".to_string(), "name".to_string(), "old".to_string(), "new".to_string(), false, false, &None, &None, &None, true);
         assert!(!result, "task_replace should return false when task is not found");
     }
 
     #[test]
     fn test_make_comparison_datetime_numeric() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut task_a = gittask::Task::new("A".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
         task_a.set_property("created", "9");
         let mut task_b = gittask::Task::new("B".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
@@ -1638,6 +1648,7 @@ mod tests {
 
     #[test]
     fn test_task_replace_invalid_regex_no_panic() {
+        let _repo = gittask::testing::TestRepo::new();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             task_replace("1".to_string(), "name".to_string(), "[invalid".to_string(), "".to_string(), true, false, &None, &None, &None, true)
         }));
@@ -1647,6 +1658,7 @@ mod tests {
 
     #[test]
     fn test_date_filter_with_non_numeric_created() {
+        let _repo = gittask::testing::TestRepo::new();
         let mut task = gittask::Task::new("Test".to_string(), "desc".to_string(), "OPEN".to_string()).unwrap();
         task.set_property("created", "not-a-number");
         let create_result = gittask::create_task(task);
@@ -1663,6 +1675,7 @@ mod tests {
 
     #[test]
     fn test_import_task_without_id() {
+        let _repo = gittask::testing::TestRepo::new();
         let input = r#"[{"props":{"name":"test","status":"OPEN","description":"d","created":"123"},"comments":null,"labels":null}]"#.to_string();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             import_from_input(None, &input)
@@ -1672,6 +1685,7 @@ mod tests {
 
     #[test]
     fn test_task_edit_id_same_value() {
+        let _repo = gittask::testing::TestRepo::new();
         let task = gittask::Task::new("Test".to_string(), "desc".to_string(), "OPEN".to_string()).unwrap();
         let create_result = gittask::create_task(task);
         assert!(create_result.is_ok());
@@ -1697,6 +1711,7 @@ mod tests {
 
     #[test]
     fn test_subtask_add_and_delete_flow() {
+        let _repo = gittask::testing::TestRepo::new();
         use crate::operations::subtask::{task_subtask_add, task_subtask_delete, task_subtask_set};
         let task = gittask::Task::new("Parent".to_string(), "d".to_string(), "OPEN".to_string()).unwrap();
         let created = gittask::create_task(task).unwrap();
@@ -1723,6 +1738,7 @@ mod tests {
 
     #[test]
     fn test_subtask_add_rejects_missing_name_without_pipe() {
+        let _repo = gittask::testing::TestRepo::new();
         use crate::operations::subtask::task_subtask_add;
         let task = gittask::Task::new("P".to_string(), "d".to_string(), "OPEN".to_string()).unwrap();
         let created = gittask::create_task(task).unwrap();
@@ -1736,6 +1752,7 @@ mod tests {
 
     #[test]
     fn test_subtask_export_roundtrip() {
+        let _repo = gittask::testing::TestRepo::new();
         let task = gittask::Task::new("Parent".to_string(), "d".to_string(), "OPEN".to_string()).unwrap();
         let mut created = gittask::create_task(task).unwrap();
         let id = created.get_id().unwrap();

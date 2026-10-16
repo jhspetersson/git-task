@@ -427,8 +427,20 @@ macro_rules! map_err {
     }
 }
 
+thread_local! {
+    static REPOSITORY_PATH: std::cell::RefCell<std::path::PathBuf> = std::cell::RefCell::new(std::path::PathBuf::from("."));
+}
+
+pub fn set_repository_path(path: impl Into<std::path::PathBuf>) {
+    REPOSITORY_PATH.with(|p| *p.borrow_mut() = path.into());
+}
+
+fn open_repo() -> Result<Repository, String> {
+    REPOSITORY_PATH.with(|p| Repository::discover(&*p.borrow())).map_err(|e| e.message().to_owned())
+}
+
 pub fn list_tasks() -> Result<Vec<Task>, String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let ref_path = get_ref_path();
     let task_ref = match repo.find_reference(&ref_path) {
         Ok(task_ref) => task_ref,
@@ -456,7 +468,7 @@ pub fn list_tasks() -> Result<Vec<Task>, String> {
 }
 
 pub fn find_task(id: &str) -> Result<Option<Task>, String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let task_ref = repo.find_reference(&get_ref_path());
     match task_ref {
         Ok(task_ref) => {
@@ -480,7 +492,7 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
 }
 
 pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let ref_path = get_ref_path();
     let task_ref = map_err!(repo.find_reference(&ref_path));
     let task_tree = map_err!(task_ref.peel_to_tree());
@@ -504,7 +516,7 @@ pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
 }
 
 pub fn clear_tasks() -> Result<u64, String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let ref_path = get_ref_path();
     let task_ref = map_err!(repo.find_reference(&ref_path));
     let task_tree = map_err!(task_ref.peel_to_tree());
@@ -524,7 +536,7 @@ pub fn clear_tasks() -> Result<u64, String> {
 }
 
 pub fn create_task(mut task: Task) -> Result<Task, String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let ref_path = get_ref_path();
     let task_ref_result = repo.find_reference(&ref_path);
     let source_tree = match task_ref_result {
@@ -562,7 +574,7 @@ pub fn create_task(mut task: Task) -> Result<Task, String> {
 }
 
 pub fn update_task(task: Task) -> Result<String, String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let ref_path = get_ref_path();
     let task_ref_result = map_err!(repo.find_reference(&ref_path));
     let parent_commit = map_err!(task_ref_result.peel_to_commit());
@@ -582,7 +594,7 @@ pub fn update_task(task: Task) -> Result<String, String> {
 }
 
 fn get_next_id() -> Result<String, String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let ref_path = get_ref_path();
     get_next_id_in(&repo, &ref_path)
 }
@@ -692,7 +704,7 @@ pub fn compare_ids(a: &str, b: &str) -> std::cmp::Ordering {
 }
 
 pub fn list_remotes(remote: &Option<String>) -> Result<Vec<String>, String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let remotes = map_err!(repo.remotes());
     Ok(remotes.iter()
         .filter_map(|s| s.ok().flatten())
@@ -706,7 +718,7 @@ fn get_current_timestamp() -> u64 {
 }
 
 fn get_current_user() -> Result<Option<String>, String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let me = &map_err!(repo.signature());
     match me.name() {
         Ok(name) => Ok(Some(String::from(name))),
@@ -722,20 +734,20 @@ pub fn get_ref_path() -> String {
 }
 
 pub fn get_config_value(key: &str) -> Result<String, String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let config = map_err!(repo.config());
     Ok(map_err!(config.get_string(key)))
 }
 
 pub fn set_config_value(key: &str, value: &str) -> Result<(), String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let mut config = map_err!(repo.config());
     map_err!(config.set_str(key, value));
     Ok(())
 }
 
 pub fn unset_config_value(key: &str) -> Result<(), String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let mut config = map_err!(repo.config());
     match config.remove(key) {
         Ok(_) => Ok(()),
@@ -745,7 +757,7 @@ pub fn unset_config_value(key: &str) -> Result<(), String> {
 }
 
 pub fn set_ref_path(ref_path: &str, move_ref: bool, force: bool) -> Result<(), String> {
-    let repo = map_err!(Repository::discover("."));
+    let repo = open_repo()?;
     let same_path = get_ref_path() == ref_path;
 
     let current_reference = repo.find_reference(&get_ref_path());
@@ -770,6 +782,42 @@ pub fn set_ref_path(ref_path: &str, move_ref: bool, force: bool) -> Result<(), S
     Ok(())
 }
 
+#[doc(hidden)]
+pub mod testing {
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    pub struct TestRepo {
+        dir: TempDir,
+    }
+
+    impl TestRepo {
+        pub fn new() -> TestRepo {
+            let dir = tempfile::Builder::new().prefix("git-task-test").tempdir().expect("failed to create a temporary directory");
+            let repo = git2::Repository::init(dir.path()).expect("failed to init a temporary repository");
+            let mut config = repo.config().expect("failed to open the repository config");
+            config.set_str("user.name", "git-task tests").expect("failed to set user.name");
+            config.set_str("user.email", "tests@git-task.invalid").expect("failed to set user.email");
+            let me = repo.signature().expect("failed to build a signature");
+            let tree_oid = repo.treebuilder(None).expect("failed to create a tree builder").write().expect("failed to write the empty tree");
+            let tree = repo.find_tree(tree_oid).expect("failed to find the empty tree");
+            repo.commit(Some("HEAD"), &me, &me, "Initial commit", &tree, &[]).expect("failed to create the initial commit");
+            super::set_repository_path(dir.path());
+            TestRepo { dir }
+        }
+
+        pub fn path(&self) -> &Path {
+            self.dir.path()
+        }
+    }
+
+    impl Drop for TestRepo {
+        fn drop(&mut self) {
+            super::set_repository_path(".");
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
@@ -777,6 +825,7 @@ mod test {
 
     #[test]
     fn test_ref_path() {
+        let _repo = testing::TestRepo::new();
         let ref_path = get_ref_path();
         assert!(set_ref_path("refs/heads/test-git-task", true, false).is_ok());
         assert_eq!(get_ref_path(), "refs/heads/test-git-task");
@@ -786,12 +835,13 @@ mod test {
 
     #[test]
     fn test_set_ref_path_refuses_to_overwrite_existing_ref() {
+        let _repo = testing::TestRepo::new();
         let ref_path = get_ref_path();
         let task = Task::construct_task("Ref clash".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let task = create_task(task).unwrap();
         let id = task.get_id().unwrap();
 
-        let repo = Repository::discover(".").unwrap();
+        let repo = open_repo().unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         let other_path = "refs/heads/test-git-task-existing";
         repo.reference(other_path, head.id(), true, "test").unwrap();
@@ -809,12 +859,13 @@ mod test {
 
     #[test]
     fn test_set_ref_path_force_overwrites_existing_ref() {
+        let _repo = testing::TestRepo::new();
         let ref_path = get_ref_path();
         let task = Task::construct_task("Ref force".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let task = create_task(task).unwrap();
         let id = task.get_id().unwrap();
 
-        let repo = Repository::discover(".").unwrap();
+        let repo = open_repo().unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
         let tasks_commit = repo.find_reference(&ref_path).unwrap().peel_to_commit().unwrap();
         let other_path = "refs/heads/test-git-task-forced";
@@ -834,12 +885,13 @@ mod test {
 
     #[test]
     fn test_set_ref_path_accepts_existing_ref_at_same_commit() {
+        let _repo = testing::TestRepo::new();
         let ref_path = get_ref_path();
         let task = Task::construct_task("Ref copy".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let task = create_task(task).unwrap();
         let id = task.get_id().unwrap();
 
-        let repo = Repository::discover(".").unwrap();
+        let repo = open_repo().unwrap();
         let tasks_commit = repo.find_reference(&ref_path).unwrap().peel_to_commit().unwrap();
         let other_path = "refs/heads/test-git-task-copy";
         repo.reference(other_path, tasks_commit.id(), true, "test").unwrap();
@@ -856,6 +908,7 @@ mod test {
 
     #[test]
     fn test_set_ref_path_same_path_keeps_tasks() {
+        let _repo = testing::TestRepo::new();
         let ref_path = get_ref_path();
         let task = Task::construct_task("Ref move".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let task = create_task(task).unwrap();
@@ -872,6 +925,7 @@ mod test {
 
     #[test]
     fn test_create_update_delete_task() {
+        let _repo = testing::TestRepo::new();
         let id = get_next_id().unwrap_or_else(|_| "1".to_string());
         let task = Task::construct_task("Test task".to_string(), "Description goes here".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let create_result = create_task(task);
@@ -919,6 +973,7 @@ mod test {
 
     #[test]
     fn test_update_comment_id() {
+        let _repo = testing::TestRepo::new();
         // Create a task first
         let id = get_next_id().unwrap_or_else(|_| "1".to_string());
         let task = Task::construct_task(
@@ -955,12 +1010,13 @@ mod test {
 
     #[test]
     fn test_list_tasks_skips_malformed_blob() {
+        let _repo = testing::TestRepo::new();
         let task = Task::construct_task("Good task".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let task = create_task(task).unwrap();
         let id = task.get_id().unwrap();
 
         // inject a malformed blob into the tasks tree
-        let repo = Repository::discover(".").unwrap();
+        let repo = open_repo().unwrap();
         let task_ref = repo.find_reference(&get_ref_path()).unwrap();
         let task_tree = task_ref.peel_to_tree().unwrap();
         let oid = repo.blob(b"not json").unwrap();
@@ -986,6 +1042,7 @@ mod test {
 
     #[test]
     fn test_clear_tasks() {
+        let _repo = testing::TestRepo::new();
         // Clear any leftover tasks from other tests first
         let _ = crate::clear_tasks();
 
@@ -1032,6 +1089,7 @@ mod test {
 
     #[test]
     fn test_delete_comment_without_id() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Test task".to_string(),
             "Description".to_string(),
@@ -1051,6 +1109,7 @@ mod test {
 
     #[test]
     fn test_add_comment_id_no_collision_after_deletion() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Test task".to_string(),
             "Description".to_string(),
@@ -1076,6 +1135,7 @@ mod test {
 
     #[test]
     fn test_delete_task_with_non_numeric_id() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Remote task".to_string(),
             "Description".to_string(),
@@ -1092,6 +1152,7 @@ mod test {
 
     #[test]
     fn test_update_comment_id_nonexistent_comment() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task("Test task".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         task.add_comment(Some("1".to_string()), HashMap::new(), "a comment".to_string());
         let task = create_task(task).unwrap();
@@ -1105,6 +1166,7 @@ mod test {
 
     #[test]
     fn test_update_subtask_id_nonexistent_subtask() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task("Test task".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         task.add_subtask(None, "Sub".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
         let task = create_task(task).unwrap();
@@ -1118,6 +1180,7 @@ mod test {
 
     #[test]
     fn test_update_task_id_existing_target() {
+        let _repo = testing::TestRepo::new();
         let task_a = Task::construct_task("Task A".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
         let task_a = create_task(task_a).unwrap();
         let id_a = task_a.get_id().unwrap();
@@ -1135,12 +1198,14 @@ mod test {
 
     #[test]
     fn test_update_task_id_nonexistent() {
+        let _repo = testing::TestRepo::new();
         let result = update_task_id("99999", "99998");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_update_comment_id_with_no_id_comment() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Test task".to_string(),
             "Description".to_string(),
@@ -1163,6 +1228,7 @@ mod test {
 
     #[test]
     fn test_find_comment_by_id_with_no_id_comment() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Test task".to_string(),
             "Description".to_string(),
@@ -1183,6 +1249,7 @@ mod test {
 
     #[test]
     fn test_collect_comment_ids_with_no_id_comment() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Test task".to_string(),
             "Description".to_string(),
@@ -1204,6 +1271,7 @@ mod test {
 
     #[test]
     fn test_update_task_id_same_id() {
+        let _repo = testing::TestRepo::new();
         let task = Task::construct_task(
             "Test task".to_string(),
             "Description".to_string(),
@@ -1227,6 +1295,7 @@ mod test {
 
     #[test]
     fn test_add_and_delete_subtask() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Parent task".to_string(),
             "Description".to_string(),
@@ -1256,6 +1325,7 @@ mod test {
 
     #[test]
     fn test_subtask_empty_name_or_status() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Parent".to_string(),
             "".to_string(),
@@ -1268,6 +1338,7 @@ mod test {
 
     #[test]
     fn test_subtask_id_no_collision_after_deletion() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Parent".to_string(),
             "".to_string(),
@@ -1289,6 +1360,7 @@ mod test {
 
     #[test]
     fn test_update_subtask_in_place() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Parent".to_string(),
             "".to_string(),
@@ -1317,6 +1389,7 @@ mod test {
 
     #[test]
     fn test_subtask_roundtrip_serialization() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Parent".to_string(),
             "Desc".to_string(),
@@ -1348,12 +1421,14 @@ mod test {
 
     #[test]
     fn test_update_subtask_id_nonexistent_task() {
+        let _repo = testing::TestRepo::new();
         let result = update_subtask_id("99999", "1", "2");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_new_task_rejects_blank_name_or_status() {
+        let _repo = testing::TestRepo::new();
         assert!(Task::new("".to_string(), "".to_string(), "OPEN".to_string()).is_err());
         assert!(Task::new("   ".to_string(), "".to_string(), "OPEN".to_string()).is_err(), "whitespace-only name must be rejected");
         assert!(Task::new("Name".to_string(), "".to_string(), "".to_string()).is_err());
@@ -1363,6 +1438,7 @@ mod test {
 
     #[test]
     fn test_add_duplicate_label() {
+        let _repo = testing::TestRepo::new();
         let mut task = Task::construct_task(
             "Test task".to_string(),
             "Description".to_string(),

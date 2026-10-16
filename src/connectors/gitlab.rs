@@ -477,21 +477,19 @@ mod test {
 
     #[test]
     fn test_remote_url() {
+        let _repo = gittask::testing::TestRepo::new();
         let connector = GitlabRemoteConnector {};
 
         gittask::set_config_value("task.gitlab.url", "https://gitlab.com/").unwrap();
         assert_eq!(connector.supports_remote("https://gitlab.com/jhspetersson/fselect"), Some(("jhspetersson".to_string(), "fselect".to_string())));
         assert_eq!(connector.supports_remote("https://gitlab.com/jhspetersson/fselect.git"), Some(("jhspetersson".to_string(), "fselect".to_string())));
 
-        let gitlab_url = get_base_url();
         gittask::set_config_value("task.gitlab.url", "gitlab.kitware.com").unwrap();
 
         let current_url = get_base_url();
         assert_eq!(current_url, "https://gitlab.kitware.com/".to_string());
 
         assert_eq!(connector.supports_remote("https://gitlab.kitware.com/jhspetersson/rust-gitlab.git"), Some(("jhspetersson".to_string(), "rust-gitlab".to_string())));
-
-        gittask::set_config_value("task.gitlab.url", &gitlab_url).unwrap();
     }
 
     #[test]
@@ -519,6 +517,7 @@ mod test {
 
     #[test]
     fn test_remote_url_with_uppercase_and_underscore() {
+        let _repo = gittask::testing::TestRepo::new();
         let connector = GitlabRemoteConnector {};
         gittask::set_config_value("task.gitlab.url", "https://gitlab.com/").unwrap();
         let result = connector.supports_remote("https://gitlab.com/UserName/my_repo");

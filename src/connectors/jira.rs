@@ -983,15 +983,16 @@ mod tests {
 
     #[test]
     fn test_supports_remote_cloud_url() {
+        let _repo = gittask::testing::TestRepo::new();
         let connector = JiraRemoteConnector {};
         gittask::set_config_value("task.jira.url", "https://mycompany.atlassian.net/jira/software/projects/GTPM").unwrap();
         let result = connector.supports_remote("");
-        gittask::set_config_value("task.jira.url", "").unwrap();
         assert_eq!(result, Some(("https://mycompany.atlassian.net".to_string(), "GTPM".to_string())));
     }
 
     #[test]
     fn test_supports_remote_self_hosted_url() {
+        let _repo = gittask::testing::TestRepo::new();
         let connector = JiraRemoteConnector {};
 
         gittask::set_config_value("task.jira.url", "https://jira.mycompany.com/projects/ABC").unwrap();
@@ -1000,31 +1001,28 @@ mod tests {
 
         gittask::set_config_value("task.jira.url", "https://jira.mycompany.com/browse/ABC").unwrap();
         let result = connector.supports_remote("");
-        gittask::set_config_value("task.jira.url", "").unwrap();
         assert_eq!(result, Some(("https://jira.mycompany.com".to_string(), "ABC".to_string())), "self-hosted Jira browse URL must be supported");
     }
 
     #[test]
     fn test_supports_remote_project_from_config() {
+        let _repo = gittask::testing::TestRepo::new();
         let connector = JiraRemoteConnector {};
         gittask::set_config_value("task.jira.url", "https://jira.mycompany.com").unwrap();
         gittask::set_config_value("task.jira.project", "XYZ").unwrap();
         let result = connector.supports_remote("");
-        gittask::set_config_value("task.jira.url", "").unwrap();
-        gittask::set_config_value("task.jira.project", "").unwrap();
         assert_eq!(result, Some(("https://jira.mycompany.com".to_string(), "XYZ".to_string())), "task.jira.project config must supply the project when the URL has none");
     }
 
     #[test]
     fn test_supports_remotes_lists_configured_projects() {
+        let _repo = gittask::testing::TestRepo::new();
         let connector = JiraRemoteConnector {};
         gittask::set_config_value("task.jira.url", "https://jira.mycompany.com/browse/ABC").unwrap();
         gittask::set_config_value("task.jira.projects", "XYZ, abc ,QRS").unwrap();
         let all = connector.supports_remotes("");
         let default = connector.supports_remote("");
         let multi = multi_project_mode();
-        gittask::set_config_value("task.jira.url", "").unwrap();
-        gittask::set_config_value("task.jira.projects", "").unwrap();
         let origin = "https://jira.mycompany.com".to_string();
         assert_eq!(default, Some((origin.clone(), "ABC".to_string())), "URL project stays the default");
         assert_eq!(all, vec![
@@ -1037,12 +1035,11 @@ mod tests {
 
     #[test]
     fn test_default_project_falls_back_to_first_configured() {
+        let _repo = gittask::testing::TestRepo::new();
         let connector = JiraRemoteConnector {};
         gittask::set_config_value("task.jira.url", "https://jira.mycompany.com").unwrap();
         gittask::set_config_value("task.jira.projects", "XYZ,QRS").unwrap();
         let default = connector.supports_remote("");
-        gittask::set_config_value("task.jira.url", "").unwrap();
-        gittask::set_config_value("task.jira.projects", "").unwrap();
         assert_eq!(default, Some(("https://jira.mycompany.com".to_string(), "XYZ".to_string())));
     }
 
