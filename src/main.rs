@@ -102,6 +102,9 @@ enum Command {
         /// status (by default: o - OPEN, i - IN_PROGRESS, c - CLOSED)
         #[clap(required = true)]
         status: String,
+        /// Create the status if it is not configured yet
+        #[arg(short, long)]
+        create: bool,
         /// Also push task(s) to the remote source (e.g., GitHub)
         #[arg(short, long)]
         push: bool,
@@ -822,7 +825,7 @@ fn main() -> ExitCode {
         Some(Command::List { status, keyword, filter, from, until, author, columns, headers, sort, limit, no_color }) => task_list(status, keyword, filter, from, until, author, columns, headers, sort, limit, no_color),
         Some(Command::Show { id, no_color }) => task_show(id, no_color),
         Some(Command::Create { name, description, no_desc, push, remote, connector_type: connector, project }) => task_create(name, description, no_desc, push, &remote, &connector, &project),
-        Some(Command::Status { ids, status, push, remote, connector_type: connector, project, no_color }) => task_status(ids, status, push, &remote, &connector, &project, no_color),
+        Some(Command::Status { ids, status, create, push, remote, connector_type: connector, project, no_color }) => task_status(ids, status, create, push, &remote, &connector, &project, no_color),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
         Some(Command::Set { ids, prop_name, value, push, remote, connector_type: connector, project, no_color }) => task_set(ids, prop_name, value, push, &remote, &connector, &project, no_color),
         Some(Command::Replace { ids, prop_name, search, replace, regex, push, remote, connector_type: connector, project, no_color }) => task_replace(ids, prop_name, search, replace, regex, push, &remote, &connector, &project, no_color),

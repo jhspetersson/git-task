@@ -129,6 +129,29 @@ impl StatusManager {
         save_config(&self.statuses)
     }
 
+    pub fn add_status_with_defaults(&mut self, name: &str) -> Result<String, String> {
+        let shortcut = self.free_shortcut(name);
+        self.add_status(name.to_string(), shortcut.clone(), "Default".to_string(), false)?;
+        Ok(shortcut)
+    }
+
+    fn free_shortcut(&self, name: &str) -> String {
+        let taken = |candidate: &str| self.statuses.iter().any(|s| s.shortcut == candidate || s.name == candidate);
+
+        for c in name.chars().filter(|c| c.is_alphanumeric()) {
+            let candidate = c.to_lowercase().to_string();
+            if !taken(&candidate) {
+                return candidate;
+            }
+        }
+
+        let base = name.to_lowercase();
+        if !taken(&base) {
+            return base;
+        }
+        (2..).map(|i| format!("{base}{i}")).find(|candidate| !taken(candidate)).unwrap()
+    }
+
     pub fn delete_status(&mut self, name: String) -> Result<(), String> {
         let prev_status_count = self.statuses.len();
         self.statuses.retain(|s| s.name != name);
@@ -155,6 +178,16 @@ impl StatusManager {
         self.statuses.iter().find_map(|saved_status| {
             if status == saved_status.shortcut.as_str() { Some(saved_status.name.clone()) } else { None }
         }).unwrap_or(status.clone())
+    }
+
+    pub fn resolve_status(&self, status: &str) -> Result<String, String> {
+        let full_name = self.get_full_status_name(&status.to_string());
+        if self.statuses.iter().any(|s| s.name == full_name) {
+            Ok(full_name)
+        } else {
+            let known = self.statuses.iter().map(|s| s.name.as_str()).collect::<Vec<_>>().join(", ");
+            Err(format!("Unknown status '{status}'. Known statuses: {known}"))
+        }
     }
 
     pub fn get_starting_status(&self) -> String {
@@ -321,6 +354,30 @@ mod tests {
                 is_done: true,
             },
         ]
+    }
+
+    #[test]
+    fn test_free_shortcut() {
+        let manager = StatusManager { statuses: make_test_statuses() };
+        assert_eq!(manager.free_shortcut("BLOCKED"), "b");
+        assert_eq!(manager.free_shortcut("CANCELLED"), "a", "skips 'c', which is taken, and uses the next letter");
+        assert_eq!(manager.free_shortcut("CO"), "co", "falls back to the lowercase name when every letter is taken");
+        assert_eq!(manager.free_shortcut("!!!"), "!!!");
+
+        let mut statuses = make_test_statuses();
+        statuses.push(Status { name: "co".into(), shortcut: "x".into(), color: "Red".into(), style: None, is_done: false });
+        let manager = StatusManager { statuses };
+        assert_eq!(manager.free_shortcut("CO"), "co2", "never collides with an existing name or shortcut");
+    }
+
+    #[test]
+    fn test_resolve_status() {
+        let manager = StatusManager { statuses: make_test_statuses() };
+        assert_eq!(manager.resolve_status("OPEN"), Ok("OPEN".to_string()));
+        assert_eq!(manager.resolve_status("c"), Ok("CLOSED".to_string()), "shortcuts resolve to the full name");
+        let err = manager.resolve_status("BOGUS").unwrap_err();
+        assert!(err.contains("BOGUS") && err.contains("OPEN, CLOSED"), "error names the value and the known statuses: {err}");
+        assert!(manager.resolve_status("").is_err());
     }
 
     #[test]

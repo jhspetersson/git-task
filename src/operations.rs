@@ -75,16 +75,30 @@ pub(crate) fn task_create(
 pub(crate) fn task_status(
     ids: String,
     status: String,
+    create: bool,
     push: bool,
     remote: &Option<String>,
     connector_type: &Option<String>,
     project: &Option<String>,
     no_color: bool,
 ) -> bool {
-    let status_manager = StatusManager::new();
-    let status = status_manager.get_full_status_name(&status);
+    let mut status_manager = StatusManager::new();
+    let status = match status_manager.resolve_status(&status) {
+        Ok(status) => status,
+        Err(e) if create => {
+            let name = status.trim().to_string();
+            match status_manager.add_status_with_defaults(&name) {
+                Ok(shortcut) => {
+                    println!("Status {name} created with shortcut '{shortcut}' and color Default, adjust it with `git task config status set`");
+                    name
+                },
+                Err(create_error) => return error_message(format!("ERROR: {e}. Could not create it: {create_error}")),
+            }
+        },
+        Err(e) => return error_message(format!("ERROR: {e}. Use --create to add it")),
+    };
 
-    task_set(ids, "status".to_string(), status.clone(), push, remote, connector_type, project, no_color)
+    task_set(ids, "status".to_string(), status, push, remote, connector_type, project, no_color)
 }
 
 pub(crate) fn task_get(id: String, prop_name: String) -> bool {
@@ -113,6 +127,14 @@ pub(crate) fn task_set(
     if (prop_name == "name" || prop_name == "status") && value.trim().is_empty() {
         return error_message(format!("Property '{prop_name}' cannot be empty"));
     }
+
+    let value = match prop_name.as_str() {
+        "status" => match StatusManager::new().resolve_status(&value) {
+            Ok(status) => status,
+            Err(e) => return error_message(format!("ERROR: {e}")),
+        },
+        _ => value,
+    };
 
     let ids = parse_ids(ids);
     let mut success = true;
@@ -199,6 +221,13 @@ pub(crate) fn task_replace(
                         Some(ref regex) => regex.replace_all(value.as_str(), replace.as_str()).to_string(),
                         None => value.replace(&search, &replace)
                     };
+                    if prop_name == "status" {
+                        if let Err(e) = StatusManager::new().resolve_status(&new_value) {
+                            eprintln!("Task ID {id}: {e}");
+                            success = false;
+                            continue;
+                        }
+                    }
                     task.set_property(&prop_name, &new_value);
                     match gittask::update_task(task) {
                         Ok(_) => {
@@ -290,6 +319,13 @@ pub(crate) fn task_edit(id: String, prop_name: String) -> bool {
                                                 return error_message(format!("Property '{prop_name}' cannot be empty"));
                                             }
                                             trimmed.to_string()
+                                        },
+                                        _ => text,
+                                    };
+                                    let text = match prop_name.as_str() {
+                                        "status" => match StatusManager::new().resolve_status(&text) {
+                                            Ok(status) => status,
+                                            Err(e) => return error_message(format!("ERROR: {e}")),
                                         },
                                         _ => text,
                                     };
@@ -1435,6 +1471,42 @@ mod tests {
         assert_eq!(task.get_property("status").unwrap(), "OPEN");
 
         let _ = gittask::delete_tasks(&[&id]);
+    }
+
+    #[test]
+    fn test_task_set_status_validates_against_configured_statuses() {
+        let task = gittask::Task::new("Status check".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+        let status_manager = StatusManager::new();
+        let final_status = status_manager.get_final_status();
+        let shortcut = status_manager.get_property(&final_status, "shortcut").unwrap();
+
+        assert!(!task_status(id.clone(), "BOGUS".to_string(), false, false, &None, &None, &None, true), "unknown status must be rejected");
+        assert_eq!(gittask::find_task(&id).unwrap().unwrap().get_property("status").unwrap(), "OPEN");
+
+        assert!(task_status(id.clone(), shortcut, false, false, &None, &None, &None, true), "a shortcut must be accepted");
+        assert_eq!(gittask::find_task(&id).unwrap().unwrap().get_property("status").unwrap(), &final_status);
+
+        let _ = gittask::delete_tasks(&[&id]);
+    }
+
+    #[test]
+    fn test_task_status_create_adds_unknown_status() {
+        let task = gittask::Task::new("Status create".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+        let name = "TEST_CREATED_STATUS";
+
+        let result = task_status(id.clone(), name.to_string(), true, false, &None, &None, &None, true);
+        let task_status_value = gittask::find_task(&id).unwrap().unwrap().get_property("status").cloned();
+        let created = StatusManager::new().resolve_status(name);
+        let _ = StatusManager::new().delete_status(name.to_string());
+        let _ = gittask::delete_tasks(&[&id]);
+
+        assert!(result, "--create must add the status and set it");
+        assert_eq!(task_status_value.as_deref(), Some(name));
+        assert_eq!(created, Ok(name.to_string()), "the status must be in the configuration afterwards");
     }
 
     #[test]

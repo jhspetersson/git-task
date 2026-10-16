@@ -25,7 +25,10 @@ pub(crate) fn task_subtask_add(
 
             let status_manager = StatusManager::new();
             let status = match status {
-                Some(s) => status_manager.get_full_status_name(&s),
+                Some(s) => match status_manager.resolve_status(&s) {
+                    Ok(status) => status,
+                    Err(e) => return error_message(format!("ERROR: {e}")),
+                },
                 None => status_manager.get_starting_status(),
             };
 
@@ -84,7 +87,10 @@ pub(crate) fn task_subtask_set(
         Ok(Some(mut task)) => {
             let status_manager = StatusManager::new();
             let resolved_value = if prop_name == "status" {
-                status_manager.get_full_status_name(&value)
+                match status_manager.resolve_status(&value) {
+                    Ok(status) => status,
+                    Err(e) => return error_message(format!("ERROR: {e}")),
+                }
             } else {
                 value.clone()
             };
@@ -190,6 +196,15 @@ pub(crate) fn task_subtask_edit(
             let new_value = match get_text_from_editor(Some(&current_value)) {
                 Some(text) => text,
                 None => return error_message("Editing failed".to_string()),
+            };
+            let new_value = match prop_name.as_str() {
+                "name" | "status" if new_value.trim().is_empty() => return error_message(format!("Property '{prop_name}' cannot be empty")),
+                "status" => match StatusManager::new().resolve_status(new_value.trim()) {
+                    Ok(status) => status,
+                    Err(e) => return error_message(format!("ERROR: {e}")),
+                },
+                "name" => new_value.trim().to_string(),
+                _ => new_value,
             };
 
             let update_result = task.update_subtask(&subtask_id, |s| {
