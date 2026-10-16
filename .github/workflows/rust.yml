@@ -48,7 +48,7 @@ jobs:
     - name: Set up git
       run: git config --global user.name Tester && git config --global user.email tester@example.com
     - name: Run Redmine integration tests
-      run: cargo test --verbose --test redmine
+      run: cargo test --verbose --test redmine_integration
 
   gitlab-integration:
     # GitLab CE takes several minutes to boot, so this job stays off the pull request path.
@@ -78,7 +78,7 @@ jobs:
     - name: Set up git
       run: git config --global user.name Tester && git config --global user.email tester@example.com
     - name: Run GitLab integration tests
-      run: cargo test --verbose --test gitlab
+      run: cargo test --verbose --test gitlab_integration
 
   github-integration:
     # Runs against the real github.com repository jhspetersson/git-task-ci, so it needs the
@@ -98,4 +98,4 @@ jobs:
     - name: Set up git
       run: git config --global user.name Tester && git config --global user.email tester@example.com
     - name: Run GitHub integration tests
-      run: cargo test --verbose --test github -- --test-threads 1
+      run: cargo test --verbose --test github_integration -- --test-threads 1
