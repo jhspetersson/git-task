@@ -1,5 +1,5 @@
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::blocking::Client;
 use serde_json::{json, Value};
@@ -158,6 +158,18 @@ impl GitHub {
             })
             .collect()
     }
+
+    fn wait_for_issues_with(&self, marker: &str, expected: usize) -> Vec<Issue> {
+        let mut issues = vec![];
+        for _ in 0..15 {
+            issues = self.issues_with(marker);
+            if issues.len() >= expected {
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+        issues
+    }
 }
 
 fn unique_suffix() -> String {
@@ -268,20 +280,24 @@ fn push_creates_the_issue_once_and_adopts_its_number() {
 
     run(&github, &repo, &["create", &title, "Pushed description"]);
     run(&github, &repo, &["set", "1", "id", "999999999"]);
-    run(&github, &repo, &["push", "999999999"]);
+    let out = run(&github, &repo, &["push", "999999999"]);
+    assert!(out.contains("Created REMOTE task ID"), "the first push must create the issue: {out}");
 
-    let issues = github.issues_with(&suffix);
-    assert_eq!(issues.len(), 1, "exactly one issue must be created for {suffix}");
-    let issue = &issues[0];
-    assert_eq!(issue.title, title);
-    assert_eq!(issue.state, "open");
-    assert_eq!(github.issue(issue.number)["body"], "Pushed description");
-    assert_eq!(local_task_ids(&repo), vec![issue.number.to_string()], "the local task must adopt the GitHub issue number");
+    let ids = local_task_ids(&repo);
+    assert_eq!(ids.len(), 1);
+    assert_ne!(ids[0], "999999999", "the local task must adopt the GitHub issue number");
+    let number: u64 = ids[0].parse().expect("issue number");
+    let issue = github.issue(number);
+    assert_eq!(issue["title"], title);
+    assert_eq!(issue["body"], "Pushed description");
+    assert_eq!(issue["state"], "open");
 
-    run(&github, &repo, &["push", &issue.number.to_string()]);
-    assert_eq!(github.issues_with(&suffix).len(), 1, "a second push must not create another issue");
+    let out = run(&github, &repo, &["push", &ids[0]]);
+    assert!(!out.contains("Created REMOTE task ID"), "a second push must not create another issue: {out}");
+    assert_eq!(local_task_ids(&repo), ids);
+    assert_eq!(github.wait_for_issues_with(&suffix, 1).len(), 1, "exactly one issue must exist for {suffix}");
 
-    github.close_issue(issue.number);
+    github.close_issue(number);
 }
 
 #[test]
@@ -320,12 +336,12 @@ fn push_closes_the_issue_when_the_local_task_is_closed() {
 
     run(&github, &repo, &["pull", &id]);
     run(&github, &repo, &["set", &id, "status", "CLOSED"]);
-    run(&github, &repo, &["push", &id]);
+    let out = run(&github, &repo, &["push", &id]);
+    assert!(!out.contains("Created REMOTE task ID"), "no new issue must be created: {out}");
 
-    let issues = github.issues_with(&suffix);
-    assert_eq!(issues.len(), 1, "no new issue must be created for {suffix}");
-    assert_eq!(issues[0].number, number);
-    assert_eq!(issues[0].state, "closed", "the remote issue must be closed by the push");
+    assert_eq!(local_task_ids(&repo), vec![id.clone()]);
+    assert_eq!(github.issue(number)["state"], "closed", "the remote issue must be closed by the push");
+    assert_eq!(github.wait_for_issues_with(&suffix, 1).len(), 1, "exactly one issue must exist for {suffix}");
 }
 
 #[test]
