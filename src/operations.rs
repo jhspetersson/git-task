@@ -751,14 +751,16 @@ pub(crate) fn task_push(
             let remote_name = remote_task.get_property("name").unwrap_or(&empty_string);
             let remote_text = remote_task.get_property("description").unwrap_or(&empty_string);
 
+            let mut anything_synced = false;
             if local_name != remote_name || local_text != remote_text || local_status != remote_status {
+                anything_synced = true;
                 if local_status != remote_status {
                     println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
                 }
-                let state = if status_manager.is_done(local_status) { 
-                    RemoteTaskState::Closed(local_status.to_string(), remote_status.to_string()) 
-                } else { 
-                    RemoteTaskState::Open(local_status.to_string(), remote_status.to_string()) 
+                let state = if status_manager.is_done(local_status) {
+                    RemoteTaskState::Closed(local_status.to_string(), remote_status.to_string())
+                } else {
+                    RemoteTaskState::Open(local_status.to_string(), remote_status.to_string())
                 };
 
                 match connector.update_remote_task(
@@ -776,27 +778,25 @@ pub(crate) fn task_push(
                         success = false;
                     }
                 }
-            } else {
-                let mut anything_synced = false;
-                if !no_comments {
-                    let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
-                    for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
-                        let local_comment_id = match comment.get_id() {
-                            Some(id) => id,
-                            None => continue,
-                        };
-                        if !remote_comment_ids.contains(&local_comment_id) {
-                            success &= create_remote_comment(&connector, &user, &repo, &id, &comment);
-                            anything_synced = true;
-                        }
+            }
+            if !no_comments {
+                let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
+                for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
+                    let local_comment_id = match comment.get_id() {
+                        Some(id) => id,
+                        None => continue,
+                    };
+                    if !remote_comment_ids.contains(&local_comment_id) {
+                        success &= create_remote_comment(&connector, &user, &repo, &id, &comment);
+                        anything_synced = true;
                     }
                 }
-                if sync_subtasks {
-                    anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
-                }
-                if !anything_synced {
-                    println!("Nothing to sync");
-                }
+            }
+            if sync_subtasks {
+                anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
+            }
+            if !anything_synced {
+                println!("Nothing to sync");
             }
         } else {
             eprintln!("Sync: REMOTE task ID {id} NOT found");
