@@ -1225,7 +1225,7 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
 
                         ordering.unwrap()
                     },
-                    _ => b.get_id().unwrap().parse::<u64>().unwrap_or(0).cmp(&a.get_id().unwrap().parse::<u64>().unwrap_or(0))
+                    _ => make_comparison(b, a, "id", "")
                 }
             });
 
