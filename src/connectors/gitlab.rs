@@ -62,14 +62,7 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 
     fn supports_remote(&self, url: &str) -> Option<(String, String)> {
-        match Regex::new(&(get_base_url() + "([a-zA-Z0-9._-]+)/([a-zA-Z0-9._-]+?)(\\.git)?/?$")).unwrap().captures(url) {
-            Some(caps) if caps.len() >= 3 => {
-                let user = caps.get(1)?.as_str().to_string();
-                let repo = caps.get(2)?.as_str().to_string();
-                Some((user, repo))
-            },
-            _ => None,
-        }
+        parse_remote_url(&get_base_url(), url)
     }
 
     fn list_remote_tasks(
@@ -467,6 +460,34 @@ fn get_token() -> Result<String, String> {
     get_token_from_env().ok_or_else(|| "Could not find GITLAB_TOKEN environment variable.".to_string())
 }
 
+/// Extracts (user, repo) from a git remote that points at the configured GitLab host.
+///
+/// Accepts the clone URL forms GitLab offers: `https://host/user/repo.git`,
+/// `http://host/user/repo`, `ssh://git@host[:port]/user/repo.git` and the
+/// scp-style `git@host:user/repo.git`. When the base URL carries a path prefix
+/// (a GitLab served under a sub-path), HTTP remotes must include it; SSH remotes
+/// never do.
+fn parse_remote_url(base_url: &str, url: &str) -> Option<(String, String)> {
+    let without_scheme = base_url
+        .strip_prefix("https://")
+        .or_else(|| base_url.strip_prefix("http://"))
+        .unwrap_or(base_url);
+    let (host, path) = match without_scheme.split_once('/') {
+        Some((host, path)) => (host, path.trim_matches('/')),
+        None => (without_scheme, ""),
+    };
+    if host.is_empty() {
+        return None;
+    }
+    let host = regex::escape(host);
+    let http_prefix = if path.is_empty() { String::new() } else { regex::escape(path) + "/" };
+    let pattern = format!(
+        "(?i)^(?:https?://(?:[^@/]+@)?{host}/{http_prefix}|ssh://(?:[^@/]+@)?{host}(?::\\d+)?/|[^@/:]+@{host}:)(?P<user>[a-zA-Z0-9._-]+)/(?P<repo>[a-zA-Z0-9._-]+?)(?:\\.git)?/?$"
+    );
+    let caps = Regex::new(&pattern).ok()?.captures(url)?;
+    Some((caps.name("user")?.as_str().to_string(), caps.name("repo")?.as_str().to_string()))
+}
+
 fn get_base_url() -> String {
     let mut result = match gittask::get_config_value("task.gitlab.url") {
         Ok(url) if !url.is_empty() => url,
@@ -524,6 +545,46 @@ mod test {
         assert_eq!(current_url, "https://gitlab.kitware.com/".to_string());
 
         assert_eq!(connector.supports_remote("https://gitlab.kitware.com/jhspetersson/rust-gitlab.git"), Some(("jhspetersson".to_string(), "rust-gitlab".to_string())));
+    }
+
+    #[test]
+    fn test_remote_url_accepts_every_clone_form_gitlab_offers() {
+        let expected = Some(("jhspetersson".to_string(), "fselect".to_string()));
+        for url in [
+            "https://gitlab.com/jhspetersson/fselect.git",
+            "https://gitlab.com/jhspetersson/fselect",
+            "https://oauth2:token@gitlab.com/jhspetersson/fselect.git",
+            "http://gitlab.com/jhspetersson/fselect.git",
+            "git@gitlab.com:jhspetersson/fselect.git",
+            "git@gitlab.com:jhspetersson/fselect",
+            "ssh://git@gitlab.com/jhspetersson/fselect.git",
+            "ssh://git@gitlab.com:2222/jhspetersson/fselect.git",
+            "GIT@GITLAB.COM:jhspetersson/fselect.git",
+        ] {
+            assert_eq!(parse_remote_url("https://gitlab.com/", url), expected, "{url} must match the gitlab.com base");
+        }
+    }
+
+    #[test]
+    fn test_remote_url_rejects_other_hosts() {
+        for url in [
+            "git@github.com:jhspetersson/fselect.git",
+            "https://github.com/jhspetersson/fselect.git",
+            "https://gitlabXcom/jhspetersson/fselect.git",
+            "https://gitlab.com.evil.org/jhspetersson/fselect.git",
+            "https://gitlab.com/jhspetersson/fselect/extra",
+        ] {
+            assert_eq!(parse_remote_url("https://gitlab.com/", url), None, "{url} must not match the gitlab.com base");
+        }
+    }
+
+    #[test]
+    fn test_remote_url_with_a_self_hosted_base_and_path_prefix() {
+        let expected = Some(("team".to_string(), "tool".to_string()));
+        assert_eq!(parse_remote_url("https://git.example.com/gitlab/", "https://git.example.com/gitlab/team/tool.git"), expected);
+        assert_eq!(parse_remote_url("https://git.example.com/gitlab/", "git@git.example.com:team/tool.git"), expected, "SSH remotes carry no path prefix");
+        assert_eq!(parse_remote_url("https://git.example.com/gitlab/", "https://git.example.com/team/tool.git"), None, "an HTTP remote must include the prefix");
+        assert_eq!(parse_remote_url("http://git.example.com/", "git@git.example.com:team/tool.git"), expected, "an http:// base still matches SSH remotes");
     }
 
     #[test]
