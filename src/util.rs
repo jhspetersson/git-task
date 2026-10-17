@@ -5,7 +5,7 @@ use std::iter::Iterator;
 use std::process::Command;
 use std::time::{Duration, UNIX_EPOCH};
 
-use chrono::{DateTime, Local, MappedLocalTime, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, Utc};
 use nu_ansi_term::{Color, Style};
 use nu_ansi_term::Color::{Black, Blue, Cyan, DarkGray, Default, Fixed, Green, LightBlue, LightCyan, LightGray, LightGreen, LightMagenta, LightPurple, LightRed, LightYellow, Magenta, Purple, Red, White, Yellow};
 
@@ -432,11 +432,8 @@ pub fn format_datetime(seconds: u64) -> String {
     datetime.format("%Y-%m-%d %H:%M").to_string()
 }
 
-pub fn parse_date(date: Option<String>) -> Option<MappedLocalTime<DateTime<Local>>> {
-    date.and_then(|date| {
-        let naive_date = NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok()?;
-        Some(Local.from_local_datetime(&naive_date.and_hms_opt(0, 0, 0).unwrap()))
-    })
+pub fn parse_date(date: Option<String>) -> Option<NaiveDate> {
+    date.and_then(|date| NaiveDate::parse_from_str(&date, "%Y-%m-%d").ok())
 }
 
 pub fn parse_bool(value: &str) -> Result<bool, String> {

@@ -6,7 +6,7 @@ pub(crate) mod subtask;
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
-use chrono::{Local, TimeZone};
+use chrono::{DateTime, Local, NaiveDate, TimeZone};
 use nu_ansi_term::Color::DarkGray;
 use regex::Regex;
 
@@ -482,6 +482,11 @@ pub(crate) fn task_pull(
     }
 
     success
+}
+
+fn created_within(created: &DateTime<Local>, from: &Option<NaiveDate>, until: &Option<NaiveDate>) -> bool {
+    let day = created.date_naive();
+    from.is_none_or(|from| day >= from) && until.is_none_or(|until| day <= until)
 }
 
 fn pull_state(status: Option<String>, open: bool, status_manager: &StatusManager) -> RemoteTaskState {
@@ -1335,16 +1340,8 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                             None => return true,
                         };
 
-                        if from.is_some() {
-                            if created < from.unwrap().earliest().unwrap() {
-                                return false;
-                            }
-                        }
-
-                        if until.is_some() {
-                            if created > until.unwrap().latest().unwrap() {
-                                return false;
-                            }
+                        if !created_within(&created, &from, &until) {
+                            return false;
                         }
                     }
                 }
@@ -1785,6 +1782,27 @@ mod tests {
         let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
         let result = push_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &StatusManager::new(), &statuses, true);
         (result, fake, id)
+    }
+
+    #[test]
+    fn test_until_includes_the_whole_day() {
+        let from = parse_date(Some("2024-03-10".to_string()));
+        let until = parse_date(Some("2024-03-12".to_string()));
+
+        let noon_on_the_until_day = Local.with_ymd_and_hms(2024, 3, 12, 12, 0, 0).unwrap();
+        assert!(created_within(&noon_on_the_until_day, &from, &until), "--until is documented as inclusive");
+        let last_second_of_the_until_day = Local.with_ymd_and_hms(2024, 3, 12, 23, 59, 59).unwrap();
+        assert!(created_within(&last_second_of_the_until_day, &from, &until));
+        let next_day = Local.with_ymd_and_hms(2024, 3, 13, 0, 0, 0).unwrap();
+        assert!(!created_within(&next_day, &from, &until));
+
+        let noon_on_the_from_day = Local.with_ymd_and_hms(2024, 3, 10, 12, 0, 0).unwrap();
+        assert!(created_within(&noon_on_the_from_day, &from, &until));
+        let before_the_from_day = Local.with_ymd_and_hms(2024, 3, 9, 23, 59, 59).unwrap();
+        assert!(!created_within(&before_the_from_day, &from, &until));
+
+        assert!(created_within(&next_day, &from, &None), "no upper bound");
+        assert!(created_within(&before_the_from_day, &None, &until), "no lower bound");
     }
 
     #[test]
