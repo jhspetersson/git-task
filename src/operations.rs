@@ -971,11 +971,21 @@ pub(crate) fn task_delete(
     let ids = ids.iter().map(|id| id.as_str()).collect::<Vec<_>>();
 
     match gittask::delete_tasks(&ids) {
-        Ok(_) => {
-            println!("Task(s) {} deleted", ids.join(", "));
+        Ok(deleted) => {
+            let missing = ids.iter().filter(|id| !deleted.iter().any(|d| d == *id)).map(|id| id.to_string()).collect::<Vec<_>>();
+            if deleted.is_empty() {
+                return error_message(match missing.is_empty() {
+                    true => "No tasks to delete".to_string(),
+                    false => format!("Task(s) {} not found", missing.join(", ")),
+                });
+            }
+            if !missing.is_empty() {
+                eprintln!("Task(s) {} not found", missing.join(", "));
+            }
+            println!("Task(s) {} deleted", deleted.join(", "));
             let mut success = true;
             if push {
-                for id in ids {
+                for id in &deleted {
                     match get_user_repo(remote, connector_type, &resolve_project(project, id)) {
                         Ok((connector, user, repo)) => {
                             match connector.delete_remote_task(&user, &repo, &id.to_string()) {
@@ -1649,6 +1659,38 @@ mod tests {
         let result = evalexpr::eval_boolean_with_context("created > 100", &eval_context);
         assert!(result.is_ok(), "datetime filter should evaluate without error, got: {:?}", result);
         assert!(result.unwrap(), "created (1000000) should be > 100 numerically");
+    }
+
+    fn tasks_ref_target(repo: &gittask::testing::TestRepo) -> git2::Oid {
+        git2::Repository::open(repo.path()).unwrap().find_reference(&gittask::get_ref_path()).unwrap().target().unwrap()
+    }
+
+    #[test]
+    fn test_task_delete_continues_past_absent_ids() {
+        let _repo = gittask::testing::TestRepo::new();
+        let a = gittask::create_task(gittask::Task::new("A".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+        let b = gittask::create_task(gittask::Task::new("B".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+        let c = gittask::create_task(gittask::Task::new("C".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+        assert!(task_delete(Some(b.clone()), None, false, &None, &None, &None));
+
+        let result = task_delete(Some(format!("{a},{b},{c}")), None, false, &None, &None, &None);
+
+        assert!(result, "a batch with an already deleted id must still delete the others");
+        assert!(gittask::find_task(&a).unwrap().is_none());
+        assert!(gittask::find_task(&c).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_task_delete_fails_when_nothing_matches() {
+        let repo = gittask::testing::TestRepo::new();
+        let a = gittask::create_task(gittask::Task::new("A".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+        let before = tasks_ref_target(&repo);
+
+        assert!(!task_delete(Some("999999".to_string()), None, false, &None, &None, &None), "deleting an unknown id must fail");
+        assert!(!task_delete(None, Some(vec!["CLOSED".to_string()]), false, &None, &None, &None), "deleting by a status no task has must fail");
+
+        assert_eq!(tasks_ref_target(&repo), before, "no commit must be written when nothing is deleted");
+        assert!(gittask::find_task(&a).unwrap().is_some());
     }
 
     #[test]

@@ -491,15 +491,25 @@ pub fn find_task(id: &str) -> Result<Option<Task>, String> {
     }
 }
 
-pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
+/// Deletes the tasks with the given ids and returns the ids that were actually deleted.
+/// Unknown ids are skipped, and nothing is committed when none of the ids exist.
+pub fn delete_tasks(ids: &[&str]) -> Result<Vec<String>, String> {
     let repo = open_repo()?;
     let ref_path = get_ref_path();
     let task_ref = map_err!(repo.find_reference(&ref_path));
     let task_tree = map_err!(task_ref.peel_to_tree());
 
     let mut treebuilder = map_err!(repo.treebuilder(Some(&task_tree)));
+    let mut deleted = vec![];
     for id in ids {
+        if task_tree.get_name(id).is_none() || deleted.iter().any(|d| d == id) {
+            continue;
+        }
         map_err!(treebuilder.remove(id));
+        deleted.push(id.to_string());
+    }
+    if deleted.is_empty() {
+        return Ok(deleted);
     }
     let tree_oid = map_err!(treebuilder.write());
 
@@ -507,12 +517,11 @@ pub fn delete_tasks(ids: &[&str]) -> Result<(), String> {
     let parents = vec![parent_commit];
     let me = &map_err!(repo.signature());
 
-    let mut ids = ids.iter().map(|id| id.to_string()).collect::<Vec<_>>();
-    ids.sort_by(|a, b| compare_ids(a, b));
-    let ids = ids.join(", ");
-    map_err!(repo.commit(Some(&ref_path), me, me, format!("Delete task {}", ids).as_str(), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
+    deleted.sort_by(|a, b| compare_ids(a, b));
+    let message = format!("Delete task {}", deleted.join(", "));
+    map_err!(repo.commit(Some(&ref_path), me, me, &message, &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
-    Ok(())
+    Ok(deleted)
 }
 
 pub fn clear_tasks() -> Result<u64, String> {
@@ -1038,6 +1047,36 @@ mod test {
         assert!(find_result.unwrap().is_err(), "find_task should report an error for a malformed blob");
 
         let _ = delete_tasks(&[&id, "999999"]);
+    }
+
+    #[test]
+    fn test_delete_tasks_skips_absent_ids() {
+        let _repo = testing::TestRepo::new();
+        let a = create_task(Task::new("A".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+        let b = create_task(Task::new("B".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+        let c = create_task(Task::new("C".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+        delete_tasks(&[&b]).unwrap();
+
+        let result = delete_tasks(&[&a, &b, &c]);
+
+        assert!(result.is_ok(), "an already deleted id must not abort the batch: {result:?}");
+        assert_eq!(result.unwrap(), vec![a.clone(), c.clone()], "only the ids that existed are reported as deleted");
+        assert!(find_task(&a).unwrap().is_none());
+        assert!(find_task(&c).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_delete_tasks_without_matching_ids_writes_no_commit() {
+        let _repo = testing::TestRepo::new();
+        let a = create_task(Task::new("A".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+        let before = open_repo().unwrap().find_reference(&get_ref_path()).unwrap().target().unwrap();
+
+        let result = delete_tasks(&["999999"]);
+
+        assert_eq!(result, Ok(vec![]));
+        let after = open_repo().unwrap().find_reference(&get_ref_path()).unwrap().target().unwrap();
+        assert_eq!(before, after, "no commit must be written when nothing is deleted");
+        assert!(find_task(&a).unwrap().is_some());
     }
 
     #[test]
