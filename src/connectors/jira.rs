@@ -437,7 +437,7 @@ impl RemoteConnector for JiraRemoteConnector {
                 ..Default::default()
             };
 
-            let result = match issues_api::edit_issue(
+            let mut result = match issues_api::edit_issue(
                 &config,
                 task_id_to_issue_key(project, &task.get_id().unwrap()).as_str(),
                 issue_details,
@@ -458,45 +458,10 @@ impl RemoteConnector for JiraRemoteConnector {
                     RemoteTaskState::Closed(s1, s2) => (s1, s2),
                     _ => ("".to_string(), "".to_string())
                 };
-                if local_status != remote_status {
-                    if let Ok(transitions) = issues_api::get_transitions(
-                        &config,
-                        task_id_to_issue_key(project, &task.get_id().unwrap()).as_str(),
-                        None,
-                        None,
-                        None,
-                        None,
-                        None,
-                    ).await {
-                        for transition in transitions.transitions.unwrap_or_else(|| vec![]) {
-                            if let Some(target_status) = transition.to {
-                                if target_status.name.as_deref().is_some_and(|name| status_names_match(name, &local_status)) {
-                                    let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
-                                        transition: Some(IssueTransition {
-                                            id: transition.id.clone(),
-                                            ..Default::default()
-                                        }),
-                                        ..Default::default()
-                                    };
-
-                                    if let Err(e) = issues_api::do_transition(
-                                        &config,
-                                        task_id_to_issue_key(project, &task.get_id().unwrap()).as_str(),
-                                        issue_details,
-                                    ).await {
-                                        eprintln!("ERROR: failed to transition issue status: {e}");
-                                    }
-
-                                    break;
-                                }
-                            }
-                        }
-                    } else {
-                        error_message("Failed to get transitions.".to_string());
-                    }
-                }
+                let issue_key = task_id_to_issue_key(project, &task.get_id().unwrap());
+                result = transition_issue(&config, &issue_key, &local_status, &remote_status).await;
             }
-            
+
             result
         })
     }
@@ -968,9 +933,72 @@ fn parse_creator(creator: &serde_json::Value) -> String {
     "".to_string()
 }
 
+fn find_transition(transitions: &[IssueTransition], wanted_status: &str) -> Result<String, String> {
+    let target_name = |transition: &IssueTransition| transition.to.as_ref().and_then(|to| to.name.clone());
+    match transitions.iter().find(|t| target_name(t).is_some_and(|name| status_names_match(&name, wanted_status))).and_then(|t| t.id.clone()) {
+        Some(id) => Ok(id),
+        None => {
+            let reachable = transitions.iter().filter_map(|t| target_name(t)).collect::<Vec<_>>();
+            Err(match reachable.is_empty() {
+                true => format!("No transition leads to status '{wanted_status}'"),
+                false => format!("No transition leads to status '{wanted_status}', reachable statuses: {}", reachable.join(", ")),
+            })
+        }
+    }
+}
+
+async fn transition_issue(config: &Configuration, issue_key: &str, local_status: &str, remote_status: &str) -> Result<(), String> {
+    if local_status.is_empty() || local_status == remote_status {
+        return Ok(());
+    }
+    let transitions = issues_api::get_transitions(config, issue_key, None, None, None, None, None)
+        .await
+        .map_err(|e| format!("Failed to get transitions for {issue_key}: {e}"))?;
+    let transition_id = find_transition(&transitions.transitions.unwrap_or_default(), local_status)?;
+    let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
+        transition: Some(IssueTransition {
+            id: Some(transition_id),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    match issues_api::do_transition(config, issue_key, issue_details).await {
+        Ok(_) => Ok(()),
+        Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => Ok(()),
+        Err(e) => Err(format!("Failed to transition {issue_key} to status '{local_status}': {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn transition(id: &str, target: &str) -> IssueTransition {
+        IssueTransition {
+            id: Some(id.to_string()),
+            to: Some(jira_v3_openapi::models::StatusDetails { name: Some(target.to_string()), ..Default::default() }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_find_transition_picks_the_one_leading_to_the_wanted_status() {
+        let transitions = vec![transition("11", "To Do"), transition("21", "In Progress"), transition("31", "Done")];
+
+        assert_eq!(find_transition(&transitions, "Done"), Ok("31".to_string()));
+        assert_eq!(find_transition(&transitions, "IN_PROGRESS"), Ok("21".to_string()), "status names match loosely");
+    }
+
+    #[test]
+    fn test_find_transition_reports_the_reachable_statuses_when_none_matches() {
+        let transitions = vec![transition("11", "To Do"), transition("21", "In Progress")];
+
+        let error = find_transition(&transitions, "Done").unwrap_err();
+
+        assert!(error.contains("Done"), "the wanted status must be named: {error}");
+        assert!(error.contains("To Do") && error.contains("In Progress"), "the reachable statuses must be listed: {error}");
+        assert!(find_transition(&[], "Done").is_err());
+    }
 
     #[test]
     fn test_parse_creator_uses_display_name() {
