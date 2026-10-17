@@ -746,8 +746,13 @@ pub fn list_remotes(remote: &Option<String>) -> Result<Vec<String>, String> {
     Ok(remotes.iter()
         .filter_map(|s| s.ok().flatten())
         .filter(|name| remote.is_none() || remote.as_ref().unwrap().as_str() == *name)
-        .map(|name| repo.find_remote(name).unwrap().url().unwrap().to_owned())
+        .filter_map(|name| repo.find_remote(name).ok())
+        .filter_map(|remote| non_empty_url(remote.url().ok()).or_else(|| non_empty_url(remote.pushurl().ok().flatten())))
         .collect())
+}
+
+fn non_empty_url(url: Option<&str>) -> Option<String> {
+    url.filter(|url| !url.trim().is_empty()).map(str::to_owned)
 }
 
 fn get_current_timestamp() -> u64 {
@@ -1167,6 +1172,22 @@ mod test {
 
         assert!(result.is_err(), "renaming onto an id that stays in use must fail");
         assert_eq!(comment_ids_by_text(&task_id)[0].1, "1");
+    }
+
+    #[test]
+    fn test_list_remotes_tolerates_a_push_only_remote() {
+        let repo_dir = testing::TestRepo::new();
+        let repo = Repository::open(repo_dir.path()).unwrap();
+        repo.remote("origin", "https://github.com/user/fetch.git").unwrap();
+        let mut config = repo.config().unwrap();
+        config.set_str("remote.mirror.pushurl", "https://github.com/user/push-only.git").unwrap();
+
+        let result = std::panic::catch_unwind(|| list_remotes(&None));
+
+        assert!(result.is_ok(), "a remote with only a pushurl must not crash remote listing");
+        let mut urls = result.unwrap().unwrap();
+        urls.sort();
+        assert_eq!(urls, vec!["https://github.com/user/fetch.git".to_string(), "https://github.com/user/push-only.git".to_string()], "the push url stands in for the missing fetch url");
     }
 
     #[test]
