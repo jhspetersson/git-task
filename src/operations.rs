@@ -463,7 +463,7 @@ pub(crate) fn task_pull(
                                 }
                             }
                         }
-                        match import_remote_task(task, no_comments, fetch_subtasks) {
+                        match import_remote_task(task, no_comments, fetch_subtasks, !no_labels) {
                             Ok(Some(id)) => println!("Task ID {id} updated"),
                             Ok(None) => println!("Task ID {task_id} skipped, nothing to update"),
                             Err(e) => {
@@ -607,7 +607,7 @@ fn pull_task(
                     }
                 }
             }
-            match import_remote_task(task, no_comments, fetch_subtasks) {
+            match import_remote_task(task, no_comments, fetch_subtasks, !no_labels) {
                 Ok(Some(id)) => println!("Task ID {id} updated"),
                 Ok(None) => println!("Task ID {id} skipped, nothing to update"),
                 Err(e) => {
@@ -628,17 +628,20 @@ fn pull_task(
     success
 }
 
-fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool) -> Result<Option<String>, String> {
+fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool, with_labels: bool) -> Result<Option<String>, String> {
     match gittask::find_task(&remote_task.get_id().unwrap()) {
         Ok(Some(mut local_task)) => {
             let subtasks_equal = !with_subtasks
                 || subtasks_are_equal(local_task.get_subtasks(), remote_task.get_subtasks());
+            let labels_equal = !with_labels
+                || label_names(local_task.get_labels()) == label_names(remote_task.get_labels());
 
             if local_task.get_property("name") == remote_task.get_property("name")
                 && local_task.get_property("description") == remote_task.get_property("description")
                 && local_task.get_property("status") == remote_task.get_property("status")
                 && (no_comments || comments_are_equal(local_task.get_comments(), remote_task.get_comments()))
-                && subtasks_equal {
+                && subtasks_equal
+                && labels_equal {
                 Ok(None)
             } else {
                 local_task.set_property("name", remote_task.get_property("name").map(String::as_str).unwrap_or(""));
@@ -654,6 +657,9 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool)
                         local_task.set_subtasks(subtasks.to_vec());
                     }
                 }
+                if with_labels {
+                    local_task.set_labels(remote_task.get_labels().clone().unwrap_or_default());
+                }
 
                 match gittask::update_task(local_task) {
                     Ok(id) => Ok(Some(id)),
@@ -667,6 +673,12 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool)
         },
         Err(e) => Err(e)
     }
+}
+
+fn label_names(labels: &Option<Vec<Label>>) -> Vec<String> {
+    let mut names = labels.as_ref().map(|labels| labels.iter().map(|l| l.get_name()).collect::<Vec<_>>()).unwrap_or_default();
+    names.sort();
+    names
 }
 
 fn subtasks_are_equal(local: &Option<Vec<Subtask>>, remote: &Option<Vec<Subtask>>) -> bool {
@@ -896,7 +908,8 @@ fn push_task(
 
         let mut anything_synced = false;
         let status_changed = !status_names_match(local_status, remote_status);
-        if local_name != remote_name || local_text != remote_text || status_changed {
+        let labels_changed = !no_labels && label_names(local_task.get_labels()) != label_names(remote_task.get_labels());
+        if local_name != remote_name || local_text != remote_text || status_changed || labels_changed {
             anything_synced = true;
             if status_changed {
                 println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
@@ -1740,6 +1753,7 @@ mod tests {
         next_id: std::sync::atomic::AtomicU64,
         lookup: std::sync::Mutex<Result<Option<Task>, String>>,
         created_tasks: std::sync::atomic::AtomicU64,
+        updates: std::sync::Mutex<Vec<Option<Vec<Label>>>>,
     }
 
     impl FakeConnector {
@@ -1752,6 +1766,7 @@ mod tests {
                 next_id: std::sync::atomic::AtomicU64::new(first_id),
                 lookup: std::sync::Mutex::new(lookup),
                 created_tasks: std::sync::atomic::AtomicU64::new(0),
+                updates: std::sync::Mutex::new(vec![]),
             }))
         }
 
@@ -1761,6 +1776,10 @@ mod tests {
 
         fn created_tasks(&self) -> u64 {
             self.created_tasks.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn updates(&self) -> Vec<Option<Vec<Label>>> {
+            self.updates.lock().unwrap().clone()
         }
     }
 
@@ -1772,7 +1791,7 @@ mod tests {
         fn create_remote_task(&self, _: &String, _: &String, _: &Task) -> Result<String, String> { self.created_tasks.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Ok("77".to_string()) }
         fn create_remote_comment(&self, _: &String, _: &String, _: &String, _: &Comment) -> Result<String, String> { Ok(self.next()) }
         fn create_remote_label(&self, _: &String, _: &String, _: &String, _: &Label) -> Result<(), String> { Err("not used".to_string()) }
-        fn update_remote_task(&self, _: &String, _: &String, _: &Task, _: Option<&Vec<Label>>, _: RemoteTaskState) -> Result<(), String> { Err("not used".to_string()) }
+        fn update_remote_task(&self, _: &String, _: &String, _: &Task, labels: Option<&Vec<Label>>, _: RemoteTaskState) -> Result<(), String> { self.updates.lock().unwrap().push(labels.cloned()); Ok(()) }
         fn update_remote_comment(&self, _: &String, _: &String, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
         fn delete_remote_task(&self, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
         fn delete_remote_comment(&self, _: &String, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
@@ -1859,6 +1878,52 @@ mod tests {
         assert_eq!(fake.created_tasks(), 1);
         assert!(gittask::find_task(&id).unwrap().is_none(), "the local task must adopt the new remote id");
         assert!(gittask::find_task("77").unwrap().is_some());
+    }
+
+    fn label_names(task: &Task) -> Vec<String> {
+        task.get_labels().clone().unwrap_or_default().iter().map(|l| l.get_name()).collect()
+    }
+
+    #[test]
+    fn test_pull_task_updates_the_labels_of_an_existing_task() {
+        let _repo = gittask::testing::TestRepo::new();
+        let local = gittask::create_task(gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap()).unwrap();
+        let id = local.get_id().unwrap();
+        let mut remote = local.clone();
+        remote.set_labels(vec![Label::new("bug".to_string(), Some("ff0000".to_string()), None)]);
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+
+        assert!(pull_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &statuses));
+        assert_eq!(label_names(&gittask::find_task(&id).unwrap().unwrap()), vec!["bug".to_string()], "a label added on the remote must reach the existing local task");
+
+        let mut remote = local.clone();
+        remote.set_labels(vec![]);
+        *fake.lookup.lock().unwrap() = Ok(Some(remote));
+        assert!(pull_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &statuses));
+        assert!(label_names(&gittask::find_task(&id).unwrap().unwrap()).is_empty(), "a label removed on the remote must disappear locally");
+    }
+
+    #[test]
+    fn test_push_task_sends_label_only_changes() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap();
+        local.set_labels(vec![Label::new("bug".to_string(), None, None)]);
+        let local = gittask::create_task(local).unwrap();
+        let id = local.get_id().unwrap();
+        let mut remote = local.clone();
+        remote.set_labels(vec![]);
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+
+        assert!(push_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &StatusManager::new(), &statuses, true));
+
+        let updates = fake.updates();
+        assert_eq!(updates.len(), 1, "a label-only change must still update the remote task");
+        let sent = updates[0].clone().unwrap_or_default().iter().map(|l| l.get_name()).collect::<Vec<_>>();
+        assert_eq!(sent, vec!["bug".to_string()]);
     }
 
     #[test]

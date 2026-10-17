@@ -122,6 +122,10 @@ impl GitLab {
         self.put(&format!("/projects/{}/issues/{iid}", project.id), json!({ "add_labels": name }));
     }
 
+    fn remove_label(&self, project: &Project, iid: u64, name: &str) {
+        self.put(&format!("/projects/{}/issues/{iid}", project.id), json!({ "remove_labels": name }));
+    }
+
     fn issues(&self, project: &Project) -> Vec<(u64, String, String)> {
         self.get(&format!("/projects/{}/issues?state=all", project.id))
             .as_array()
@@ -383,6 +387,44 @@ fn label_commands_push_to_the_remote() {
     run(&gitlab, &repo, &["label", "delete", &id, LABEL, "--push"]);
     assert!(gitlab.issue_labels(&project, iid).is_empty(), "the label must be removed from the remote issue");
     assert!(local_labels(&repo, &id).is_empty());
+}
+
+#[test]
+fn pull_updates_the_labels_of_an_existing_task() {
+    let gitlab = gitlab_or_skip!();
+    let project = gitlab.create_project("relabel");
+    let iid = gitlab.create_issue(&project, "Relabeled from CI", "Labels change remotely");
+    let repo = local_repo(&gitlab, &project);
+    let id = iid.to_string();
+
+    run(&gitlab, &repo, &["pull", &id]);
+    assert!(local_labels(&repo, &id).is_empty());
+
+    gitlab.add_label(&project, iid, LABEL, "#ff6633");
+    run(&gitlab, &repo, &["pull", &id]);
+    assert_eq!(local_labels(&repo, &id), vec![LABEL.to_string()], "a label added on GitLab must reach the existing local task");
+
+    gitlab.remove_label(&project, iid, LABEL);
+    run(&gitlab, &repo, &["pull", &id]);
+    assert!(local_labels(&repo, &id).is_empty(), "a label removed on GitLab must disappear locally");
+}
+
+#[test]
+fn push_syncs_label_only_changes() {
+    let gitlab = gitlab_or_skip!();
+    let project = gitlab.create_project("label-push");
+    let iid = gitlab.create_issue(&project, "Label pushed from CI", "Labels change locally");
+    let repo = local_repo(&gitlab, &project);
+    let id = iid.to_string();
+
+    run(&gitlab, &repo, &["pull", &id]);
+    run(&gitlab, &repo, &["label", "add", &id, LABEL]);
+    run(&gitlab, &repo, &["push", &id]);
+    assert_eq!(gitlab.issue_labels(&project, iid), vec![LABEL.to_string()], "a label added locally must be pushed without other changes");
+
+    run(&gitlab, &repo, &["label", "delete", &id, LABEL]);
+    run(&gitlab, &repo, &["push", &id]);
+    assert!(gitlab.issue_labels(&project, iid).is_empty(), "a label removed locally must be removed by push");
 }
 
 #[test]

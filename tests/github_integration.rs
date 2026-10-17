@@ -143,6 +143,11 @@ impl GitHub {
         self.post(&format!("/issues/{number}/labels"), json!({ "labels": [name] }));
     }
 
+    fn remove_label(&self, number: u64, name: &str) {
+        let response = self.send(reqwest::Method::DELETE, &format!("/issues/{number}/labels/{name}"), None);
+        assert!(response.status().is_success(), "could not remove label {name}: {}", response.status());
+    }
+
     fn create_sub_issue(&self, parent: u64, title: &str) -> u64 {
         let issue = self.post("/issues", json!({ "title": title }));
         let database_id = issue["id"].as_u64().expect("issue id");
@@ -472,6 +477,50 @@ fn label_commands_push_to_the_remote() {
     run(&github, &repo, &["label", "delete", &id, LABEL, "--push"]);
     assert!(github.issue_labels(number).is_empty(), "the label must be removed from the remote issue");
     assert!(local_labels(&repo, &id).is_empty());
+
+    github.close_issue(number);
+}
+
+#[test]
+fn pull_updates_the_labels_of_an_existing_task() {
+    let github = github_or_skip!();
+    let suffix = unique_suffix();
+    let title = format!("Relabeled from CI {suffix}");
+    let number = github.create_issue(&title, "Labels change remotely");
+    let repo = local_repo(&github);
+    let id = number.to_string();
+
+    run(&github, &repo, &["pull", &id]);
+    assert!(local_labels(&repo, &id).is_empty());
+
+    github.add_label(number, LABEL);
+    run(&github, &repo, &["pull", &id]);
+    assert_eq!(local_labels(&repo, &id), vec![LABEL.to_string()], "a label added on GitHub must reach the existing local task");
+
+    github.remove_label(number, LABEL);
+    run(&github, &repo, &["pull", &id]);
+    assert!(local_labels(&repo, &id).is_empty(), "a label removed on GitHub must disappear locally");
+
+    github.close_issue(number);
+}
+
+#[test]
+fn push_syncs_label_only_changes() {
+    let github = github_or_skip!();
+    let suffix = unique_suffix();
+    let title = format!("Label pushed from CI {suffix}");
+    let number = github.create_issue(&title, "Labels change locally");
+    let repo = local_repo(&github);
+    let id = number.to_string();
+
+    run(&github, &repo, &["pull", &id]);
+    run(&github, &repo, &["label", "add", &id, LABEL]);
+    run(&github, &repo, &["push", &id]);
+    assert_eq!(github.issue_labels(number), vec![LABEL.to_string()], "a label added locally must be pushed without other changes");
+
+    run(&github, &repo, &["label", "delete", &id, LABEL]);
+    run(&github, &repo, &["push", &id]);
+    assert!(github.issue_labels(number).is_empty(), "a label removed locally must be removed by push");
 
     github.close_issue(number);
 }
