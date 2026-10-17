@@ -95,7 +95,7 @@ impl RemoteConnector for RedmineRemoteConnector {
                     }
                 }
             },
-            RemoteTaskState::All => None,
+            RemoteTaskState::All => Some(IssueStatusFilter::All),
         };
         let mut builder = ListIssues::builder();
         builder.project_id(vec![project_id]);
