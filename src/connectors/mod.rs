@@ -1,3 +1,4 @@
+mod adf;
 mod github;
 mod gitlab;
 pub(crate) mod jira;

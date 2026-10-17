@@ -10,6 +10,7 @@ use tokio::runtime::Runtime;
 
 use gittask::{Task, Comment, Label, Subtask};
 
+use crate::connectors::adf;
 use crate::connectors::{status_names_match, RemoteConnector, RemoteTaskState};
 use crate::util::error_message;
 
@@ -416,45 +417,41 @@ impl RemoteConnector for JiraRemoteConnector {
         let config = get_configuration(domain)?;
         let name = task.get_property("name").ok_or_else(|| "Task has no name".to_string())?;
         let description = task.get_property("description").map(String::as_str).unwrap_or("");
+        let issue_key = task_id_to_issue_key(project, &task.get_id().unwrap());
 
         RUNTIME.block_on(async {
-            let mut fields = HashMap::new();
-            fields.insert("summary".to_string(), serde_json::json!(name));
-            fields.insert("description".to_string(), format_adf(description));
-            
-            if let Some(labels) = labels {
-                fields.insert("labels".to_string(), serde_json::json!(
-                    labels.iter().map(|l| l.get_name()).collect::<Vec<String>>()
-                ));
-            }
+            let current = fetch_current_fields(&config, &issue_key).await?;
+            let fields = changed_fields(&current, name, description, labels);
 
-            let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
-                fields: Some(fields),
-                ..Default::default()
+            let mut result = if fields.is_empty() {
+                Ok(())
+            } else {
+                let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
+                    fields: Some(fields),
+                    ..Default::default()
+                };
+                match issues_api::edit_issue(
+                    &config,
+                    issue_key.as_str(),
+                    issue_details,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ).await {
+                    Ok(_) => Ok(()),
+                    Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => Ok(()),
+                    Err(e) => Err(format!("Failed to update issue: {}", e))
+                }
             };
 
-            let mut result = match issues_api::edit_issue(
-                &config,
-                task_id_to_issue_key(project, &task.get_id().unwrap()).as_str(),
-                issue_details,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ).await {
-                Ok(_) => Ok(()),
-                Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => Ok(()),
-                Err(e) => Err(format!("Failed to update issue: {}", e))
-            };
-            
             if result.is_ok() {
                 let (local_status, remote_status) = match state {
                     RemoteTaskState::Open(s1, s2) => (s1, s2),
                     RemoteTaskState::Closed(s1, s2) => (s1, s2),
                     _ => ("".to_string(), "".to_string())
                 };
-                let issue_key = task_id_to_issue_key(project, &task.get_id().unwrap());
                 result = transition_issue(&config, &issue_key, &local_status, &remote_status).await;
             }
 
@@ -865,58 +862,72 @@ pub(crate) fn is_issue_key(id: &str) -> bool {
     ISSUE_KEY_REGEX.is_match(id)
 }
 
+/// Converts an ADF document (description or comment body) to the markdown
+/// subset stored in local tasks. See `connectors::adf` for what survives.
 fn parse_adf(description: &serde_json::Value) -> String {
-    if let serde_json::Value::Object(doc) = description {
-        if let Some(serde_json::Value::String(doc_type)) = doc.get("type") {
-            if doc_type == "doc" {
-                if let Some(serde_json::Value::Array(content)) = doc.get("content") {
-                    return content.iter().map(|v| {
-                        if let serde_json::Value::Object(node) = v {
-                            if let Some(serde_json::Value::String(node_type)) = node.get("type") {
-                                if node_type == "paragraph" {
-                                    if let Some(serde_json::Value::Array(paragraph_content)) = node.get("content") {
-                                        return paragraph_content.iter().map(|v| {
-                                            if let serde_json::Value::Object(paragraph_node) = v {
-                                                if let Some(serde_json::Value::String(paragraph_node_type)) = paragraph_node.get("type") {
-                                                    if paragraph_node_type == "text" {
-                                                        if let Some(serde_json::Value::String(text)) = paragraph_node.get("text") {
-                                                            return text.to_string();
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            "".to_string()
-                                        }).collect::<Vec<String>>().join(" ");
-                                    }
-                                }
-                            }
-                        }
-                        "".to_string()
-                    }).collect::<Vec<String>>().join("\n");
-                }
-            }
-        }
-    }
-
-    "".to_string()
+    adf::adf_to_markdown(description)
 }
 
+/// Converts local markdown text to an ADF document for Jira.
 fn format_adf(text: &str) -> serde_json::Value {
-    serde_json::json!({
-        "type": "doc",
-        "version": 1,
-        "content": [
-            {
-                "type": "paragraph",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": text
-                    }
-                ]
-            }
-        ]
-    })
+    adf::markdown_to_adf(text)
+}
+
+/// The remote state of the fields `update_remote_task` may write.
+struct CurrentFields {
+    summary: Option<String>,
+    description: String,
+    labels: Vec<String>,
+}
+
+async fn fetch_current_fields(config: &Configuration, issue_key: &str) -> Result<CurrentFields, String> {
+    match issues_api::get_issue(
+        config,
+        issue_key,
+        Some(vec!["summary".to_string(), "description".to_string(), "labels".to_string()]),
+        None,
+        None,
+        None,
+        None,
+        None,
+    ).await {
+        Ok(issue) => {
+            let fields = issue.fields.unwrap_or_default();
+            Ok(CurrentFields {
+                summary: fields.get("summary").and_then(|v| v.as_str()).map(str::to_string),
+                description: fields.get("description").map(parse_adf).unwrap_or_default(),
+                labels: fields.get("labels").and_then(|v| v.as_array())
+                    .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+                    .unwrap_or_default(),
+            })
+        }
+        Err(e) => Err(format!("Could not fetch issue {issue_key} before updating it: {e}")),
+    }
+}
+
+/// Builds the edit payload with only the fields that differ from Jira.
+///
+/// The description is the important one: the local text is a markdown
+/// approximation of the Jira document, so writing it back when it has not
+/// changed would strip whatever formatting the conversion could not keep.
+fn changed_fields(current: &CurrentFields, name: &str, description: &str, labels: Option<&Vec<Label>>) -> HashMap<String, serde_json::Value> {
+    let mut fields = HashMap::new();
+    if current.summary.as_deref() != Some(name) {
+        fields.insert("summary".to_string(), serde_json::json!(name));
+    }
+    if current.description != description {
+        fields.insert("description".to_string(), format_adf(description));
+    }
+    if let Some(labels) = labels {
+        let mut wanted: Vec<String> = labels.iter().map(|l| l.get_name()).collect();
+        wanted.sort();
+        let mut have = current.labels.clone();
+        have.sort();
+        if wanted != have {
+            fields.insert("labels".to_string(), serde_json::json!(wanted));
+        }
+    }
+    fields
 }
 
 fn parse_creator(creator: &serde_json::Value) -> String {
@@ -1076,6 +1087,60 @@ mod tests {
         assert!(error.contains("Done"), "the wanted status must be named: {error}");
         assert!(error.contains("To Do") && error.contains("In Progress"), "the reachable statuses must be listed: {error}");
         assert!(find_transition(&[], "Done").is_err());
+    }
+
+    fn current(summary: &str, description: &str, labels: &[&str]) -> CurrentFields {
+        CurrentFields {
+            summary: Some(summary.to_string()),
+            description: description.to_string(),
+            labels: labels.iter().map(|l| l.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn test_update_sends_nothing_when_only_the_status_changed() {
+        let remote = current("Title", "# Heading\n\n- a list", &["bug"]);
+        let labels = vec![Label::new("bug".to_string(), None, None)];
+        let fields = changed_fields(&remote, "Title", "# Heading\n\n- a list", Some(&labels));
+        assert!(fields.is_empty(), "an unchanged description must never be written back: {fields:?}");
+    }
+
+    #[test]
+    fn test_update_sends_only_the_changed_fields() {
+        let remote = current("Title", "body", &["bug"]);
+        let labels = vec![Label::new("bug".to_string(), None, None), Label::new("ui".to_string(), None, None)];
+
+        let fields = changed_fields(&remote, "New title", "body", Some(&labels));
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields["summary"], serde_json::json!("New title"));
+        assert_eq!(fields["labels"], serde_json::json!(["bug", "ui"]));
+        assert!(!fields.contains_key("description"));
+
+        let fields = changed_fields(&remote, "Title", "edited body", None);
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields["description"], format_adf("edited body"));
+    }
+
+    #[test]
+    fn test_update_ignores_label_order() {
+        let remote = current("Title", "body", &["ui", "bug"]);
+        let labels = vec![Label::new("bug".to_string(), None, None), Label::new("ui".to_string(), None, None)];
+        assert!(changed_fields(&remote, "Title", "body", Some(&labels)).is_empty());
+    }
+
+    #[test]
+    fn test_rich_description_round_trips_through_pull_and_push() {
+        let jira_doc = serde_json::json!({"type": "doc", "version": 1, "content": [
+            {"type": "heading", "attrs": {"level": 2}, "content": [{"type": "text", "text": "Steps"}]},
+            {"type": "orderedList", "content": [
+                {"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "open the "}, {"type": "text", "text": "page", "marks": [{"type": "link", "attrs": {"href": "https://example.com"}}]}]}]},
+                {"type": "listItem", "content": [{"type": "paragraph", "content": [{"type": "text", "text": "run "}, {"type": "text", "text": "cargo test", "marks": [{"type": "code"}]}]}]}
+            ]},
+            {"type": "codeBlock", "attrs": {"language": "sh"}, "content": [{"type": "text", "text": "git task list"}]}
+        ]});
+        let local = parse_adf(&jira_doc);
+        assert_eq!(local, "## Steps\n\n1. open the [page](https://example.com)\n2. run `cargo test`\n\n```sh\ngit task list\n```");
+        assert_eq!(format_adf(&local), jira_doc, "pushing the pulled text must rebuild the same document");
     }
 
     #[test]
