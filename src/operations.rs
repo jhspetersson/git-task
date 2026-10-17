@@ -694,7 +694,8 @@ fn comments_are_equal(local_comments: &Option<Vec<Comment>>, remote_comments: &O
     match (local_comments, remote_comments) {
         (None, None) => true,
         (Some(l), Some(r)) => l == r,
-        _ => false,
+        (None, Some(r)) => r.is_empty(),
+        (Some(l), None) => l.is_empty(),
     }
 }
 
@@ -1882,6 +1883,33 @@ mod tests {
 
     fn label_names(task: &Task) -> Vec<String> {
         task.get_labels().clone().unwrap_or_default().iter().map(|l| l.get_name()).collect()
+    }
+
+    #[test]
+    fn test_comments_are_equal_treats_missing_and_empty_alike() {
+        assert!(comments_are_equal(&None, &Some(vec![])), "a task created locally has no comment list, a fetched task has an empty one");
+        assert!(comments_are_equal(&Some(vec![]), &None));
+        assert!(comments_are_equal(&None, &None));
+        let comment = Comment::new("1".to_string(), HashMap::new(), "text".to_string());
+        assert!(!comments_are_equal(&None, &Some(vec![comment.clone()])));
+        assert!(!comments_are_equal(&Some(vec![comment]), &Some(vec![])));
+    }
+
+    #[test]
+    fn test_pull_task_skips_a_local_task_without_comments_when_the_remote_has_none() {
+        let _repo = gittask::testing::TestRepo::new();
+        let local = gittask::create_task(gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap()).unwrap();
+        let id = local.get_id().unwrap();
+        let before = tasks_ref_target(&_repo);
+        let mut remote = local.clone();
+        remote.set_comments(vec![]);
+        remote.set_labels(vec![]);
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+
+        assert!(pull_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &vec!["OPEN".to_string(), "CLOSED".to_string()]));
+
+        assert_eq!(tasks_ref_target(&_repo), before, "nothing changed, so nothing must be written");
     }
 
     #[test]

@@ -82,19 +82,19 @@ impl RemoteConnector for JiraRemoteConnector {
 
         RUNTIME.block_on(async {
             let mut tasks: Vec<Task> = vec![];
-            let mut start_at: i32 = 0;
+            let mut next_page_token: Option<String> = None;
             loop {
                 let max_results = match limit {
                     Some(limit) => std::cmp::min(limit.saturating_sub(tasks.len()), 100) as i32,
                     None => 100,
                 };
-                let response = issue_search_api::search_for_issues_using_jql(
+                let response = issue_search_api::search_and_reconsile_issues_using_jql(
                     &config,
                     Some(&jql),
-                    Some(start_at),
+                    next_page_token.as_deref(),
                     Some(max_results),
-                    None,
                     Some(field_list.clone()),
+                    None,
                     None,
                     None,
                     None,
@@ -167,11 +167,10 @@ impl RemoteConnector for JiraRemoteConnector {
                     tasks.push(task);
                 }
 
-                start_at += batch_len as i32;
-                let total = response.total.unwrap_or(0);
-                if batch_len == 0 || start_at >= total || limit.map_or(false, |l| tasks.len() >= l) {
-                    break;
-                }
+                next_page_token = match next_search_page(response.is_last, response.next_page_token, batch_len, tasks.len(), limit) {
+                    Some(token) => Some(token),
+                    None => break,
+                };
             }
 
             Ok(tasks)
@@ -930,6 +929,13 @@ fn parse_creator(creator: &serde_json::Value) -> String {
     "".to_string()
 }
 
+fn next_search_page(is_last: Option<bool>, next_page_token: Option<String>, batch_len: usize, collected: usize, limit: Option<usize>) -> Option<String> {
+    if batch_len == 0 || is_last.unwrap_or(false) || limit.is_some_and(|limit| collected >= limit) {
+        return None;
+    }
+    next_page_token.filter(|token| !token.is_empty())
+}
+
 fn build_jql(project: &str, state: &RemoteTaskState, jira_statuses: &[String]) -> String {
     let (status, is_done) = match state {
         RemoteTaskState::Open(status, _) => (status, false),
@@ -1008,6 +1014,22 @@ mod tests {
 
     fn jira_statuses() -> Vec<String> {
         vec!["To Do".to_string(), "In Progress".to_string(), "Done".to_string()]
+    }
+
+    #[test]
+    fn test_next_search_page_follows_the_token_until_the_last_page() {
+        assert_eq!(next_search_page(Some(false), Some("page2".to_string()), 100, 100, None), Some("page2".to_string()));
+        assert_eq!(next_search_page(None, Some("page2".to_string()), 100, 100, None), Some("page2".to_string()), "a missing is_last flag does not stop paging while a token is present");
+        assert_eq!(next_search_page(Some(true), Some("stale".to_string()), 7, 107, None), None, "the last page ends paging even if a token is present");
+        assert_eq!(next_search_page(Some(false), None, 100, 100, None), None, "no token means no further page");
+        assert_eq!(next_search_page(Some(false), Some(String::new()), 100, 100, None), None, "an empty token means no further page");
+        assert_eq!(next_search_page(Some(false), Some("page2".to_string()), 0, 0, None), None, "an empty page ends paging");
+    }
+
+    #[test]
+    fn test_next_search_page_stops_at_the_limit() {
+        assert_eq!(next_search_page(Some(false), Some("page2".to_string()), 50, 50, Some(50)), None);
+        assert_eq!(next_search_page(Some(false), Some("page2".to_string()), 50, 50, Some(80)), Some("page2".to_string()));
     }
 
     #[test]
