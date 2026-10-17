@@ -113,6 +113,10 @@ impl GitLab {
             .collect()
     }
 
+    fn close_issue(&self, project: &Project, iid: u64) {
+        self.put(&format!("/projects/{}/issues/{iid}", project.id), json!({ "state_event": "close" }));
+    }
+
     fn add_label(&self, project: &Project, iid: u64, name: &str, color: &str) {
         self.post(&format!("/projects/{}/labels", project.id), json!({ "name": name, "color": color }));
         self.put(&format!("/projects/{}/issues/{iid}", project.id), json!({ "add_labels": name }));
@@ -278,6 +282,21 @@ fn pull_by_id_imports_a_single_issue() {
     let task = local_task(&repo, &second.to_string());
     assert_eq!(task["props"]["name"], "Second issue");
     assert_eq!(task["props"]["description"], "Second");
+}
+
+#[test]
+fn pull_open_imports_only_open_issues() {
+    let gitlab = gitlab_or_skip!();
+    let project = gitlab.create_project("pull-open");
+    let open_iid = gitlab.create_issue(&project, "Open issue", "Open");
+    let closed_iid = gitlab.create_issue(&project, "Closed issue", "Closed");
+    gitlab.close_issue(&project, closed_iid);
+    let repo = local_repo(&gitlab, &project);
+
+    run(&gitlab, &repo, &["pull", "--open"]);
+
+    assert_eq!(local_task_ids(&repo), vec![open_iid.to_string()], "--open must skip closed issues");
+    assert_ne!(open_iid, closed_iid);
 }
 
 #[test]

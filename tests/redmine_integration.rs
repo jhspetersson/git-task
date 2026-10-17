@@ -358,6 +358,26 @@ fn pull_without_ids_imports_closed_issues_too() {
 }
 
 #[test]
+fn pull_open_imports_only_open_issues() {
+    let redmine = redmine_or_skip!();
+    let project = redmine.create_project("pull-open");
+    let open_id = redmine.create_issue(project, "Open issue");
+    let in_progress_id = redmine.create_issue(project, "In progress issue");
+    redmine.change_status(in_progress_id, "In Progress");
+    let closed_id = redmine.create_issue(project, "Closed issue");
+    redmine.change_status(closed_id, "Closed");
+    let repo = local_repo(&redmine, project);
+
+    run(&repo, &["pull", "--open"]);
+
+    let mut ids = local_task_ids(&repo);
+    ids.sort();
+    let mut expected = vec![open_id.to_string(), in_progress_id.to_string()];
+    expected.sort();
+    assert_eq!(ids, expected, "--open must import every open Redmine status and skip closed ones");
+}
+
+#[test]
 fn push_syncs_local_edits_comments_subtasks_and_status() {
     let redmine = redmine_or_skip!();
     let project = redmine.create_project("sync");

@@ -401,6 +401,7 @@ pub(crate) fn task_pull(
     ids: Option<String>,
     limit: Option<usize>,
     status: Option<String>,
+    open: bool,
     remote: &Option<String>,
     connector_type: &Option<String>,
     project: &Option<String>,
@@ -439,14 +440,7 @@ pub(crate) fn task_pull(
         Err(e) => return error_message(format!("ERROR: {e}")),
     };
 
-    let state = match status {
-        Some(s) => {
-            let status = status_manager.get_full_status_name(&s);
-            let is_done = status_manager.get_property(&status, "is_done").and_then(|v| parse_bool(&v).ok()).unwrap_or(false);
-            if is_done { RemoteTaskState::Closed(status.clone(), status) } else { RemoteTaskState::Open(status.clone(), status) }
-        },
-        None => RemoteTaskState::All
-    };
+    let state = pull_state(status, open, &status_manager);
 
     let mut success = true;
     for (connector, user, repo) in targets {
@@ -488,6 +482,20 @@ pub(crate) fn task_pull(
     }
 
     success
+}
+
+fn pull_state(status: Option<String>, open: bool, status_manager: &StatusManager) -> RemoteTaskState {
+    if open {
+        return RemoteTaskState::Open(String::new(), String::new());
+    }
+    match status {
+        Some(s) => {
+            let status = status_manager.get_full_status_name(&s);
+            let is_done = status_manager.get_property(&status, "is_done").and_then(|v| parse_bool(&v).ok()).unwrap_or(false);
+            if is_done { RemoteTaskState::Closed(status.clone(), status) } else { RemoteTaskState::Open(status.clone(), status) }
+        },
+        None => RemoteTaskState::All
+    }
 }
 
 fn pull_task(
@@ -1777,6 +1785,17 @@ mod tests {
         let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
         let result = push_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &StatusManager::new(), &statuses, true);
         (result, fake, id)
+    }
+
+    #[test]
+    fn test_pull_state_open_requests_every_open_issue() {
+        let _repo = gittask::testing::TestRepo::new();
+        let manager = StatusManager::new();
+
+        assert_eq!(pull_state(None, false, &manager), RemoteTaskState::All);
+        assert_eq!(pull_state(Some("o".to_string()), false, &manager), RemoteTaskState::Open("OPEN".to_string(), "OPEN".to_string()));
+        assert_eq!(pull_state(Some("c".to_string()), false, &manager), RemoteTaskState::Closed("CLOSED".to_string(), "CLOSED".to_string()));
+        assert_eq!(pull_state(None, true, &manager), RemoteTaskState::Open(String::new(), String::new()), "--open must not pin a single status name, so connectors fall back to their open group");
     }
 
     #[test]

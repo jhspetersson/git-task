@@ -274,8 +274,13 @@ Grab issues from a remote source.
 
 Pull only open issues:
 
+    git task pull --open
+
+Pull only issues with a particular status:
+
     git task pull -s o
     git task pull --status OPEN
+    git task pull --status "In Progress"
 
 When the connector manages several projects (see [JIRA support](#jira-support)), pull one of them or all of them:
 

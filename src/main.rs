@@ -252,6 +252,9 @@ enum Command {
         /// Import only issues with this status
         #[arg(short, long, conflicts_with = "ids")]
         status: Option<String>,
+        /// Import only open issues
+        #[arg(long, conflicts_with_all = ["ids", "status"])]
+        open: bool,
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
@@ -836,7 +839,7 @@ fn main() -> ExitCode {
         Some(Command::Label { subcommand }) => task_label(subcommand),
         Some(Command::Import { ids, format }) => task_import(ids, format),
         Some(Command::Export { ids, status, limit, format, pretty }) => task_export(ids, status, limit, format, pretty),
-        Some(Command::Pull { ids, limit, status, remote, connector_type: connector, project, no_comments, no_labels, no_subtasks }) => task_pull(ids, limit, status, &remote, &connector, &project, no_comments, no_labels, no_subtasks),
+        Some(Command::Pull { ids, limit, status, open, remote, connector_type: connector, project, no_comments, no_labels, no_subtasks }) => task_pull(ids, limit, status, open, &remote, &connector, &project, no_comments, no_labels, no_subtasks),
         Some(Command::Push { ids, remote, connector_type: connector, project, no_comments, no_labels, no_subtasks, no_color }) => task_push(ids, &remote, &connector, &project, no_comments, no_labels, no_subtasks, no_color),
         Some(Command::Stats { no_color }) => task_stats(no_color),
         Some(Command::Delete { ids, status, push, remote, connector_type: connector, project }) => task_delete(ids, status, push, &remote, &connector, &project),
