@@ -790,16 +790,7 @@ pub(crate) fn task_push(
             }
             if !no_comments {
                 let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
-                for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
-                    let local_comment_id = match comment.get_id() {
-                        Some(id) => id,
-                        None => continue,
-                    };
-                    if !remote_comment_ids.contains(&local_comment_id) {
-                        success &= create_remote_comment(&connector, &user, &repo, &id, &comment);
-                        anything_synced = true;
-                    }
-                }
+                anything_synced |= sync_local_comments(&connector, &user, &repo, &id, &local_task, &remote_comment_ids, &mut success);
             }
             if sync_subtasks {
                 anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
@@ -833,13 +824,7 @@ pub(crate) fn task_push(
                     }
 
                     if !no_comments {
-                        if let Some(comments) = local_task.get_comments() {
-                            if !comments.is_empty() {
-                                for comment in comments {
-                                    success &= create_remote_comment(&connector, &user, &repo, &id, &comment);
-                                }
-                            }
-                        }
+                        sync_local_comments(&connector, &user, &repo, &id, &local_task, &[], &mut success);
                     }
 
                     if sync_subtasks {
@@ -882,6 +867,7 @@ fn sync_local_subtasks(
 
     let remote_ids: Vec<String> = remote_subtasks.iter().filter_map(|s| s.get_id()).collect();
     let mut synced = false;
+    let mut id_updates = vec![];
     for subtask in &local_subtasks {
         let local_id = match subtask.get_id() {
             Some(id) => id,
@@ -901,12 +887,7 @@ fn sync_local_subtasks(
                 Ok(remote_id) => {
                     println!("Created REMOTE subtask ID {remote_id}");
                     if local_id != remote_id {
-                        if let Err(e) = gittask::update_subtask_id(task_id, &local_id, &remote_id) {
-                            eprintln!("ERROR: {e}");
-                            *success = false;
-                        } else {
-                            println!("Subtask ID {local_id} -> {remote_id} updated");
-                        }
+                        id_updates.push((local_id, remote_id));
                     }
                     synced = true;
                 },
@@ -917,24 +898,65 @@ fn sync_local_subtasks(
             }
         }
     }
+    match gittask::update_subtask_ids(task_id, &id_updates) {
+        Ok(_) => for (local_id, remote_id) in &id_updates {
+            println!("Subtask ID {local_id} -> {remote_id} updated");
+        },
+        Err(e) => {
+            eprintln!("ERROR: {e}");
+            *success = false;
+        }
+    }
     synced
 }
 
-fn create_remote_comment(connector: &Box<&'static dyn RemoteConnector>, user: &String, repo: &String, id: &String, comment: &Comment) -> bool {
-    let local_comment_id = match comment.get_id() {
-        Some(id) => id,
-        None => { eprintln!("ERROR: comment has no ID, skipping"); return false; }
-    };
-    match connector.create_remote_comment(user, repo, id, comment) {
-        Ok(remote_comment_id) => {
-            println!("Created REMOTE comment ID {}", remote_comment_id);
-            match gittask::update_comment_id(&id, &local_comment_id, &remote_comment_id) {
-                Ok(_) => { println!("Comment ID {} -> {} updated", local_comment_id, remote_comment_id); true },
-                Err(e) => { eprintln!("ERROR: {e}"); false }
+fn sync_local_comments(
+    connector: &Box<&'static dyn RemoteConnector>,
+    user: &String,
+    repo: &String,
+    task_id: &String,
+    local_task: &Task,
+    remote_comment_ids: &[String],
+    success: &mut bool,
+) -> bool {
+    let mut synced = false;
+    let mut id_updates = vec![];
+    for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
+        let local_id = match comment.get_id() {
+            Some(id) => id,
+            None => {
+                eprintln!("ERROR: comment has no ID, skipping");
+                *success = false;
+                continue;
             }
-        },
-        Err(e) => { eprintln!("ERROR creating REMOTE comment: {}", e); false }
+        };
+        if remote_comment_ids.contains(&local_id) {
+            continue;
+        }
+        match connector.create_remote_comment(user, repo, task_id, comment) {
+            Ok(remote_id) => {
+                println!("Created REMOTE comment ID {remote_id}");
+                if local_id != remote_id {
+                    id_updates.push((local_id, remote_id));
+                }
+                synced = true;
+            },
+            Err(e) => {
+                eprintln!("ERROR creating REMOTE comment: {e}");
+                *success = false;
+            }
+        }
     }
+    match gittask::update_comment_ids(task_id, &id_updates) {
+        Ok(_) => for (local_id, remote_id) in &id_updates {
+            println!("Comment ID {local_id} -> {remote_id} updated");
+        },
+        Err(e) => {
+            eprintln!("ERROR: {e}");
+            *success = false;
+        }
+    }
+    synced
 }
 
 pub(crate) fn task_delete(
@@ -1659,6 +1681,77 @@ mod tests {
         let result = evalexpr::eval_boolean_with_context("created > 100", &eval_context);
         assert!(result.is_ok(), "datetime filter should evaluate without error, got: {:?}", result);
         assert!(result.unwrap(), "created (1000000) should be > 100 numerically");
+    }
+
+    struct FakeConnector {
+        next_id: std::sync::atomic::AtomicU64,
+    }
+
+    impl FakeConnector {
+        fn leaked(first_id: u64) -> Box<&'static dyn RemoteConnector> {
+            Box::new(Box::leak(Box::new(FakeConnector { next_id: std::sync::atomic::AtomicU64::new(first_id) })))
+        }
+
+        fn next(&self) -> String {
+            self.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst).to_string()
+        }
+    }
+
+    impl RemoteConnector for FakeConnector {
+        fn type_name(&self) -> &str { "fake" }
+        fn supports_remote(&self, _url: &str) -> Option<(String, String)> { None }
+        fn list_remote_tasks(&self, _: &String, _: &String, _: bool, _: bool, _: Option<usize>, _: RemoteTaskState, _: &Vec<String>) -> Result<Vec<Task>, String> { Err("not used".to_string()) }
+        fn get_remote_task(&self, _: &String, _: &String, _: &String, _: bool, _: bool, _: &Vec<String>) -> Result<Task, String> { Err("not used".to_string()) }
+        fn create_remote_task(&self, _: &String, _: &String, _: &Task) -> Result<String, String> { Err("not used".to_string()) }
+        fn create_remote_comment(&self, _: &String, _: &String, _: &String, _: &Comment) -> Result<String, String> { Ok(self.next()) }
+        fn create_remote_label(&self, _: &String, _: &String, _: &String, _: &Label) -> Result<(), String> { Err("not used".to_string()) }
+        fn update_remote_task(&self, _: &String, _: &String, _: &Task, _: Option<&Vec<Label>>, _: RemoteTaskState) -> Result<(), String> { Err("not used".to_string()) }
+        fn update_remote_comment(&self, _: &String, _: &String, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
+        fn delete_remote_task(&self, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
+        fn delete_remote_comment(&self, _: &String, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
+        fn delete_remote_label(&self, _: &String, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
+        fn supports_subtasks(&self) -> bool { true }
+        fn list_remote_subtasks(&self, _: &String, _: &String, _: &String, _: &Vec<String>) -> Result<Vec<Subtask>, String> { Ok(vec![]) }
+        fn create_remote_subtask(&self, _: &String, _: &String, _: &String, _: &Subtask, _: bool) -> Result<String, String> { Ok(self.next()) }
+    }
+
+    #[test]
+    fn test_sync_local_subtasks_survives_remote_ids_that_collide_with_local_ones() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut task = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task.add_subtask(None, "A".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        task.add_subtask(None, "B".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+        let connector = FakeConnector::leaked(2);
+        let status_manager = StatusManager::new();
+        let mut success = true;
+
+        sync_local_subtasks(&connector, &"u".to_string(), &"r".to_string(), &id, &task, &status_manager, &vec!["OPEN".to_string(), "CLOSED".to_string()], &mut success);
+
+        assert!(success);
+        let ids = gittask::find_task(&id).unwrap().unwrap().get_subtasks().clone().unwrap()
+            .iter().map(|s| (s.get_name().to_string(), s.get_id().unwrap())).collect::<Vec<_>>();
+        assert_eq!(ids, vec![("A".to_string(), "2".to_string()), ("B".to_string(), "3".to_string())], "each subtask must end up with the id the remote returned for it");
+    }
+
+    #[test]
+    fn test_sync_local_comments_survives_remote_ids_that_collide_with_local_ones() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut task = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task.add_comment(None, HashMap::new(), "first".to_string());
+        task.add_comment(None, HashMap::new(), "second".to_string());
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+        let connector = FakeConnector::leaked(2);
+        let mut success = true;
+
+        sync_local_comments(&connector, &"u".to_string(), &"r".to_string(), &id, &task, &[], &mut success);
+
+        assert!(success);
+        let ids = gittask::find_task(&id).unwrap().unwrap().get_comments().clone().unwrap()
+            .iter().map(|c| (c.get_text().to_string(), c.get_id().unwrap())).collect::<Vec<_>>();
+        assert_eq!(ids, vec![("first".to_string(), "2".to_string()), ("second".to_string(), "3".to_string())], "each comment must end up with the id the remote returned for it");
     }
 
     fn tasks_ref_target(repo: &gittask::testing::TestRepo) -> git2::Oid {

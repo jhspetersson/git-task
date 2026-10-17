@@ -1,5 +1,5 @@
 use std::borrow::ToOwned;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Deref;
 use std::time::{SystemTime, UNIX_EPOCH};
 use git2::*;
@@ -645,56 +645,84 @@ pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn update_subtask_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
-    let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?.clone();
-    let mut found = false;
-    if let Some(subtasks) = task.get_subtasks() {
-        let updated_subtasks = subtasks.iter().map(|s| {
-            if s.get_id().map(|sid| sid == id).unwrap_or(false) {
-                found = true;
-                let mut s = s.clone();
-                s.set_id(new_id.to_string());
-                s
-            } else {
-                s.clone()
-            }
-        }).collect::<Vec<_>>();
-        if found {
-            task.set_subtasks(updated_subtasks);
-            update_task(task)?;
+fn apply_id_updates(ids: &[Option<String>], id_updates: &[(String, String)], kind: &str) -> Result<Vec<Option<String>>, String> {
+    for (old, _) in id_updates {
+        if !ids.iter().any(|id| id.as_deref() == Some(old.as_str())) {
+            return Err(format!("{kind} ID {old} not found"));
         }
     }
-
-    match found {
-        true => Ok(()),
-        false => Err(format!("Subtask ID {id} not found")),
+    let new_ids = ids.iter().map(|id| id.as_ref().map(|id| {
+        id_updates.iter().find(|(old, _)| old == id).map(|(_, new)| new.clone()).unwrap_or_else(|| id.clone())
+    })).collect::<Vec<_>>();
+    let mut seen = HashSet::new();
+    for id in new_ids.iter().flatten() {
+        if !seen.insert(id) {
+            return Err(format!("{kind} ID {id} already exists"));
+        }
     }
+    Ok(new_ids)
+}
+
+fn next_free_numeric_id(ids: &[Option<String>]) -> String {
+    (ids.iter().flatten().filter_map(|id| id.parse::<u64>().ok()).max().unwrap_or(0) + 1).to_string()
+}
+
+fn single_id_update(ids: &[Option<String>], id: &str, new_id: &str) -> Vec<(String, String)> {
+    let mut id_updates = vec![(id.to_string(), new_id.to_string())];
+    if id != new_id && ids.iter().any(|existing| existing.as_deref() == Some(new_id)) {
+        id_updates.push((new_id.to_string(), next_free_numeric_id(ids)));
+    }
+    id_updates
+}
+
+pub fn update_subtask_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
+    let task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?;
+    let ids = task.get_subtasks().as_ref().map(|subtasks| subtasks.iter().map(|s| s.get_id()).collect::<Vec<_>>()).unwrap_or_default();
+    update_subtask_ids(task_id, &single_id_update(&ids, id, new_id))
+}
+
+pub fn update_subtask_ids(task_id: &str, id_updates: &[(String, String)]) -> Result<(), String> {
+    if id_updates.is_empty() {
+        return Ok(());
+    }
+    let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?;
+    let subtasks = task.get_subtasks().clone().unwrap_or_default();
+    let ids = subtasks.iter().map(|s| s.get_id()).collect::<Vec<_>>();
+    let new_ids = apply_id_updates(&ids, id_updates, "Subtask")?;
+    let updated = subtasks.into_iter().zip(new_ids).map(|(mut subtask, id)| {
+        if let Some(id) = id {
+            subtask.set_id(id);
+        }
+        subtask
+    }).collect();
+    task.set_subtasks(updated);
+    update_task(task)?;
+    Ok(())
 }
 
 pub fn update_comment_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
-    let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?.clone();
-    let mut found = false;
-    if let Some(comments) = task.get_comments() {
-        let updated_comments = comments.iter().map(|c| {
-            if c.get_id().map(|cid| cid == id).unwrap_or(false) {
-                found = true;
-                let mut c = c.clone();
-                c.set_id(new_id.to_string());
-                c
-            } else {
-                c.clone()
-            }
-        }).collect::<Vec<_>>();
-        if found {
-            task.set_comments(updated_comments);
-            update_task(task)?;
-        }
-    }
+    let task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?;
+    let ids = task.get_comments().as_ref().map(|comments| comments.iter().map(|c| c.get_id()).collect::<Vec<_>>()).unwrap_or_default();
+    update_comment_ids(task_id, &single_id_update(&ids, id, new_id))
+}
 
-    match found {
-        true => Ok(()),
-        false => Err(format!("Comment ID {id} not found")),
+pub fn update_comment_ids(task_id: &str, id_updates: &[(String, String)]) -> Result<(), String> {
+    if id_updates.is_empty() {
+        return Ok(());
     }
+    let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?;
+    let comments = task.get_comments().clone().unwrap_or_default();
+    let ids = comments.iter().map(|c| c.get_id()).collect::<Vec<_>>();
+    let new_ids = apply_id_updates(&ids, id_updates, "Comment")?;
+    let updated = comments.into_iter().zip(new_ids).map(|(mut comment, id)| {
+        if let Some(id) = id {
+            comment.set_id(id);
+        }
+        comment
+    }).collect();
+    task.set_comments(updated);
+    update_task(task)?;
+    Ok(())
 }
 
 /// Orders task IDs by project prefix (none first), then numerically: `7`, `42`, `ABC-7`, `ABC-42`, `XYZ-1`.
@@ -1047,6 +1075,98 @@ mod test {
         assert!(find_result.unwrap().is_err(), "find_task should report an error for a malformed blob");
 
         let _ = delete_tasks(&[&id, "999999"]);
+    }
+
+    fn task_with_subtasks(names: &[&str]) -> String {
+        let mut task = Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        for name in names {
+            task.add_subtask(None, name.to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        }
+        create_task(task).unwrap().get_id().unwrap()
+    }
+
+    fn subtask_ids_by_name(task_id: &str) -> Vec<(String, String)> {
+        find_task(task_id).unwrap().unwrap().get_subtasks().clone().unwrap_or_default()
+            .iter().map(|s| (s.get_name().to_string(), s.get_id().unwrap_or_default())).collect()
+    }
+
+    fn task_with_comments(texts: &[&str]) -> String {
+        let mut task = Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        for text in texts {
+            task.add_comment(None, HashMap::new(), text.to_string());
+        }
+        create_task(task).unwrap().get_id().unwrap()
+    }
+
+    fn comment_ids_by_text(task_id: &str) -> Vec<(String, String)> {
+        find_task(task_id).unwrap().unwrap().get_comments().clone().unwrap_or_default()
+            .iter().map(|c| (c.get_text().to_string(), c.get_id().unwrap_or_default())).collect()
+    }
+
+    #[test]
+    fn test_update_subtask_id_displaces_a_colliding_provisional_subtask() {
+        let _repo = testing::TestRepo::new();
+        let task_id = task_with_subtasks(&["A", "B"]);
+        assert_eq!(subtask_ids_by_name(&task_id), vec![("A".to_string(), "1".to_string()), ("B".to_string(), "2".to_string())]);
+
+        update_subtask_id(&task_id, "1", "2").unwrap();
+
+        assert_eq!(subtask_ids_by_name(&task_id), vec![("A".to_string(), "2".to_string()), ("B".to_string(), "3".to_string())], "the updated subtask takes the id and the unsynced holder moves to a fresh id");
+    }
+
+    #[test]
+    fn test_update_subtask_ids_applies_updates_against_the_original_ids() {
+        let _repo = testing::TestRepo::new();
+        let task_id = task_with_subtasks(&["A", "B"]);
+
+        update_subtask_ids(&task_id, &[("1".to_string(), "2".to_string()), ("2".to_string(), "3".to_string())]).unwrap();
+
+        assert_eq!(subtask_ids_by_name(&task_id), vec![("A".to_string(), "2".to_string()), ("B".to_string(), "3".to_string())]);
+    }
+
+    #[test]
+    fn test_update_subtask_ids_refuses_duplicates_without_writing() {
+        let _repo = testing::TestRepo::new();
+        let task_id = task_with_subtasks(&["A", "B", "C"]);
+        let before = open_repo().unwrap().find_reference(&get_ref_path()).unwrap().target().unwrap();
+
+        let result = update_subtask_ids(&task_id, &[("1".to_string(), "3".to_string())]);
+
+        assert!(result.is_err(), "renaming onto an id that stays in use must fail");
+        let after = open_repo().unwrap().find_reference(&get_ref_path()).unwrap().target().unwrap();
+        assert_eq!(before, after, "nothing must be written");
+        assert_eq!(subtask_ids_by_name(&task_id)[0].1, "1");
+    }
+
+    #[test]
+    fn test_update_comment_id_displaces_a_colliding_provisional_comment() {
+        let _repo = testing::TestRepo::new();
+        let task_id = task_with_comments(&["first", "second"]);
+
+        update_comment_id(&task_id, "1", "2").unwrap();
+
+        assert_eq!(comment_ids_by_text(&task_id), vec![("first".to_string(), "2".to_string()), ("second".to_string(), "3".to_string())]);
+    }
+
+    #[test]
+    fn test_update_comment_ids_applies_updates_against_the_original_ids() {
+        let _repo = testing::TestRepo::new();
+        let task_id = task_with_comments(&["first", "second"]);
+
+        update_comment_ids(&task_id, &[("1".to_string(), "2".to_string()), ("2".to_string(), "3".to_string())]).unwrap();
+
+        assert_eq!(comment_ids_by_text(&task_id), vec![("first".to_string(), "2".to_string()), ("second".to_string(), "3".to_string())]);
+    }
+
+    #[test]
+    fn test_update_comment_ids_refuses_duplicates_without_writing() {
+        let _repo = testing::TestRepo::new();
+        let task_id = task_with_comments(&["first", "second", "third"]);
+
+        let result = update_comment_ids(&task_id, &[("1".to_string(), "3".to_string())]);
+
+        assert!(result.is_err(), "renaming onto an id that stays in use must fail");
+        assert_eq!(comment_ids_by_text(&task_id)[0].1, "1");
     }
 
     #[test]
