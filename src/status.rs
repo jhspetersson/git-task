@@ -155,15 +155,15 @@ impl StatusManager {
     }
 
     pub fn delete_status(&mut self, name: String) -> Result<(), String> {
-        let prev_status_count = self.statuses.len();
-        self.statuses.retain(|s| s.name != name);
-        match prev_status_count == self.statuses.len() {
-            true => Err("Status not found".to_string()),
-            false => {
-                save_config(&self.statuses)?;
-                self.clear_role_references(&name)
-            }
+        if !self.statuses.iter().any(|s| s.name == name) {
+            return Err("Status not found".to_string());
         }
+        if self.statuses.len() == 1 {
+            return Err("Status list can't be empty".to_string());
+        }
+        self.statuses.retain(|s| s.name != name);
+        save_config(&self.statuses)?;
+        self.clear_role_references(&name)
     }
 
     fn rename_role_references(&self, old_name: &str, new_name: &str) -> Result<(), String> {
@@ -540,6 +540,27 @@ mod tests {
         let mut manager = StatusManager { statuses: make_test_statuses() };
         let result = manager.set_statuses(vec![]);
         assert!(result.is_err(), "set_statuses should reject an empty status list");
+    }
+
+    #[test]
+    fn test_delete_status_refuses_to_remove_the_last_status() {
+        let _repo = gittask::testing::TestRepo::new();
+        let only = Status { name: "OPEN".into(), shortcut: "o".into(), color: "Green".into(), style: None, is_done: false };
+        let mut manager = StatusManager { statuses: vec![only] };
+        let result = manager.delete_status("OPEN".to_string());
+        assert!(result.is_err(), "deleting the last status must be rejected");
+        assert_eq!(manager.statuses.len(), 1, "the last status must stay in memory");
+        assert!(!StatusManager::new().get_starting_status().is_empty(), "an empty list must not be saved to the config");
+    }
+
+    #[test]
+    fn test_delete_status_removes_one_of_several() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut manager = StatusManager { statuses: make_test_statuses() };
+        let before = manager.statuses.len();
+        manager.delete_status(manager.statuses[0].name.clone()).unwrap();
+        assert_eq!(manager.statuses.len(), before - 1);
+        assert!(manager.delete_status("NO_SUCH_STATUS".to_string()).is_err());
     }
 
     #[test]
