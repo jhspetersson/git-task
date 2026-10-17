@@ -145,11 +145,14 @@ impl RemoteConnector for RedmineRemoteConnector {
         with_comments: bool,
         _with_labels: bool,
         _task_statuses: &Vec<String>
-    ) -> Result<Task, String> {
+    ) -> Result<Option<Task>, String> {
         let redmine = get_redmine_instance(domain)?;
         let issue_id = task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?;
         let include = if with_comments { Some(vec![IssueInclude::Journals]) } else { None };
-        let issue = get_issue_in_project(&redmine, project, issue_id, include)?;
+        let issue = match get_issue_in_project(&redmine, project, issue_id, include)? {
+            Some(issue) => issue,
+            None => return Ok(None),
+        };
 
         let mut task = issue_to_task(&issue)?;
 
@@ -157,7 +160,7 @@ impl RemoteConnector for RedmineRemoteConnector {
             append_journals_as_comments(&issue, &mut task);
         }
 
-        Ok(task)
+        Ok(Some(task))
     }
 
     fn create_remote_task(&self, domain: &String, _project: &String, task: &Task) -> Result<String, String> {
@@ -243,7 +246,7 @@ impl RemoteConnector for RedmineRemoteConnector {
             .parse::<u64>()
             .map_err(|e| format!("Invalid task id '{}': {}", task.get_id().unwrap(), e))?;
 
-        get_issue_in_project(&redmine, project, id, None)?;
+        get_issue_in_project(&redmine, project, id, None)?.ok_or_else(|| format!("Issue #{id} not found in project '{project}'"))?;
 
         let mut builder = UpdateIssue::builder();
         builder.id(id);
@@ -416,7 +419,7 @@ impl RemoteConnector for RedmineRemoteConnector {
     }
 }
 
-fn get_issue_in_project(redmine: &Redmine, project: &String, issue_id: u64, include: Option<Vec<IssueInclude>>) -> Result<Issue, String> {
+fn get_issue_in_project(redmine: &Redmine, project: &String, issue_id: u64, include: Option<Vec<IssueInclude>>) -> Result<Option<Issue>, String> {
     let project_id = resolve_project_id(redmine, project)?;
 
     let mut builder = GetIssue::builder();
@@ -425,15 +428,18 @@ fn get_issue_in_project(redmine: &Redmine, project: &String, issue_id: u64, incl
         builder.include(include);
     }
     let endpoint = builder.build().map_err(|e| e.to_string())?;
-    let IssueWrapper { issue } = redmine
-        .json_response_body::<_, IssueWrapper<Issue>>(&endpoint)
-        .map_err(|e| e.to_string())?;
+    let IssueWrapper { issue } = match redmine.json_response_body::<_, IssueWrapper<Issue>>(&endpoint) {
+        Ok(wrapper) => wrapper,
+        Err(redmine_api::Error::HttpErrorResponse(status)) if status.as_u16() == 404 => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
 
     if issue.project.id != project_id {
-        return Err(format!("Issue #{issue_id} belongs to project '{}' (id {}), not to project '{project}'", issue.project.name, issue.project.id));
+        eprintln!("Issue #{issue_id} belongs to project '{}' (id {}), not to project '{project}'", issue.project.name, issue.project.id);
+        return Ok(None);
     }
 
-    Ok(issue)
+    Ok(Some(issue))
 }
 
 fn resolve_project_id(redmine: &Redmine, project: &String) -> Result<u64, String> {

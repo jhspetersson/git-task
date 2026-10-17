@@ -428,32 +428,7 @@ pub(crate) fn task_pull(
                     continue;
                 }
             };
-            let fetch_subtasks = !no_subtasks && connector.supports_subtasks();
-            match connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses) {
-                Ok(mut task) => {
-                    if fetch_subtasks {
-                        match connector.list_remote_subtasks(&user, &repo, &id, &task_statuses) {
-                            Ok(subtasks) => task.set_subtasks(subtasks),
-                            Err(e) => {
-                                eprintln!("Task ID {id}: {e}");
-                                success = false;
-                            }
-                        }
-                    }
-                    match import_remote_task(task, no_comments, fetch_subtasks) {
-                        Ok(Some(id)) => println!("Task ID {id} updated"),
-                        Ok(None) => println!("Task ID {id} skipped, nothing to update"),
-                        Err(e) => {
-                            eprintln!("ERROR: {e}");
-                            success = false;
-                        }
-                    }
-                },
-                Err(e) => {
-                    eprintln!("Task ID {id}: {e}");
-                    success = false;
-                }
-            }
+            success &= pull_task(&connector, &user, &repo, &id, no_comments, no_labels, no_subtasks, &task_statuses);
         }
         return success;
     }
@@ -512,6 +487,50 @@ pub(crate) fn task_pull(
         }
     }
 
+    success
+}
+
+fn pull_task(
+    connector: &Box<&'static dyn RemoteConnector>,
+    user: &String,
+    repo: &String,
+    id: &String,
+    no_comments: bool,
+    no_labels: bool,
+    no_subtasks: bool,
+    task_statuses: &Vec<String>,
+) -> bool {
+    let fetch_subtasks = !no_subtasks && connector.supports_subtasks();
+    let mut success = true;
+    match connector.get_remote_task(user, repo, id, !no_comments, !no_labels, task_statuses) {
+        Ok(Some(mut task)) => {
+            if fetch_subtasks {
+                match connector.list_remote_subtasks(user, repo, id, task_statuses) {
+                    Ok(subtasks) => task.set_subtasks(subtasks),
+                    Err(e) => {
+                        eprintln!("Task ID {id}: {e}");
+                        success = false;
+                    }
+                }
+            }
+            match import_remote_task(task, no_comments, fetch_subtasks) {
+                Ok(Some(id)) => println!("Task ID {id} updated"),
+                Ok(None) => println!("Task ID {id} skipped, nothing to update"),
+                Err(e) => {
+                    eprintln!("ERROR: {e}");
+                    success = false;
+                }
+            }
+        },
+        Ok(None) => {
+            eprintln!("Task ID {id}: not found on the remote");
+            success = false;
+        },
+        Err(e) => {
+            eprintln!("Task ID {id}: {e}");
+            success = false;
+        }
+    }
     success
 }
 
@@ -720,7 +739,6 @@ pub(crate) fn task_push(
     }
 
     let no_color = check_no_color(no_color);
-    let empty_string = String::new();
     let mut success = true;
     for id in ids {
         println!("Sync: task ID {id}");
@@ -732,109 +750,131 @@ pub(crate) fn task_push(
                 continue;
             }
         };
-        let sync_subtasks = !no_subtasks && connector.supports_subtasks();
-        let local_task = match gittask::find_task(&id) {
-            Ok(Some(local_task)) => local_task,
-            Ok(None) => {
-                eprintln!("Sync: LOCAL task ID {id} NOT found");
-                success = false;
-                continue;
-            }
-            Err(e) => {
-                eprintln!("ERROR: {e}");
-                success = false;
-                continue;
-            }
-        };
-        println!("Sync: LOCAL task ID {id} found");
-        let remote_task = connector.get_remote_task(&user, &repo, &id, !no_comments, !no_labels, &task_statuses);
-        if let Ok(remote_task) = remote_task {
-            println!("Sync: REMOTE task ID {id} found");
+        success &= push_task(&connector, &user, &repo, &id, no_comments, no_labels, no_subtasks, &status_manager, &task_statuses, no_color);
+    }
+    success
+}
 
-            let local_status = local_task.get_property("status").unwrap_or(&empty_string);
-            let local_name = local_task.get_property("name").unwrap_or(&empty_string);
-            let local_text = local_task.get_property("description").unwrap_or(&empty_string);
+fn push_task(
+    connector: &Box<&'static dyn RemoteConnector>,
+    user: &String,
+    repo: &String,
+    id: &String,
+    no_comments: bool,
+    no_labels: bool,
+    no_subtasks: bool,
+    status_manager: &StatusManager,
+    task_statuses: &Vec<String>,
+    no_color: bool,
+) -> bool {
+    let empty_string = String::new();
+    let mut success = true;
+    let sync_subtasks = !no_subtasks && connector.supports_subtasks();
+    let local_task = match gittask::find_task(id) {
+        Ok(Some(local_task)) => local_task,
+        Ok(None) => {
+            eprintln!("Sync: LOCAL task ID {id} NOT found");
+            return false;
+        }
+        Err(e) => {
+            eprintln!("ERROR: {e}");
+            return false;
+        }
+    };
+    println!("Sync: LOCAL task ID {id} found");
+    let remote_task = match connector.get_remote_task(user, repo, id, !no_comments, !no_labels, task_statuses) {
+        Ok(remote_task) => remote_task,
+        Err(e) => {
+            eprintln!("ERROR: could not fetch REMOTE task ID {id}: {e}");
+            return false;
+        }
+    };
+    if let Some(remote_task) = remote_task {
+        println!("Sync: REMOTE task ID {id} found");
 
-            let remote_status = remote_task.get_property("status").unwrap_or(&empty_string);
-            let remote_name = remote_task.get_property("name").unwrap_or(&empty_string);
-            let remote_text = remote_task.get_property("description").unwrap_or(&empty_string);
+        let local_status = local_task.get_property("status").unwrap_or(&empty_string);
+        let local_name = local_task.get_property("name").unwrap_or(&empty_string);
+        let local_text = local_task.get_property("description").unwrap_or(&empty_string);
 
-            let mut anything_synced = false;
-            let status_changed = !status_names_match(local_status, remote_status);
-            if local_name != remote_name || local_text != remote_text || status_changed {
-                anything_synced = true;
-                if status_changed {
-                    println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
-                }
-                let state = if status_manager.is_done(local_status) {
-                    RemoteTaskState::Closed(local_status.to_string(), remote_status.to_string())
-                } else {
-                    RemoteTaskState::Open(local_status.to_string(), remote_status.to_string())
-                };
+        let remote_status = remote_task.get_property("status").unwrap_or(&empty_string);
+        let remote_name = remote_task.get_property("name").unwrap_or(&empty_string);
+        let remote_text = remote_task.get_property("description").unwrap_or(&empty_string);
 
-                match connector.update_remote_task(
-                    &user,
-                    &repo,
-                    &local_task,
-                    if !no_labels { local_task.get_labels().into() } else { None },
-                    state
-                ) {
-                    Ok(_) => {
-                        println!("Sync: REMOTE task ID {id} has been updated");
-                    },
-                    Err(e) => {
-                        eprintln!("ERROR: {e}");
-                        success = false;
-                    }
-                }
+        let mut anything_synced = false;
+        let status_changed = !status_names_match(local_status, remote_status);
+        if local_name != remote_name || local_text != remote_text || status_changed {
+            anything_synced = true;
+            if status_changed {
+                println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
             }
-            if !no_comments {
-                let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
-                anything_synced |= sync_local_comments(&connector, &user, &repo, &id, &local_task, &remote_comment_ids, &mut success);
-            }
-            if sync_subtasks {
-                anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
-            }
-            if !anything_synced {
-                println!("Nothing to sync");
-            }
-        } else {
-            eprintln!("Sync: REMOTE task ID {id} NOT found");
-
-            let local_task = match no_labels {
-                true => {
-                    let mut local_task = local_task;
-                    local_task.set_labels(vec![]);
-                    local_task
-                },
-                false => local_task
+            let state = if status_manager.is_done(local_status) {
+                RemoteTaskState::Closed(local_status.to_string(), remote_status.to_string())
+            } else {
+                RemoteTaskState::Open(local_status.to_string(), remote_status.to_string())
             };
 
-            match connector.create_remote_task(&user, &repo, &local_task) {
-                Ok(id) => {
-                    println!("Sync: Created REMOTE task ID {id}");
-                    if local_task.get_id().unwrap() != id {
-                        match gittask::update_task_id(&local_task.get_id().unwrap(), &id) {
-                            Ok(_) => println!("Task ID {} -> {} updated", local_task.get_id().unwrap(), id),
-                            Err(e) => {
-                                eprintln!("ERROR: {e}");
-                                success = false;
-                            }
-                        }
-                    }
-
-                    if !no_comments {
-                        sync_local_comments(&connector, &user, &repo, &id, &local_task, &[], &mut success);
-                    }
-
-                    if sync_subtasks {
-                        sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
-                    }
+            match connector.update_remote_task(
+                &user,
+                &repo,
+                &local_task,
+                if !no_labels { local_task.get_labels().into() } else { None },
+                state
+            ) {
+                Ok(_) => {
+                    println!("Sync: REMOTE task ID {id} has been updated");
                 },
                 Err(e) => {
                     eprintln!("ERROR: {e}");
                     success = false;
                 }
+            }
+        }
+        if !no_comments {
+            let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
+            anything_synced |= sync_local_comments(&connector, &user, &repo, &id, &local_task, &remote_comment_ids, &mut success);
+        }
+        if sync_subtasks {
+            anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
+        }
+        if !anything_synced {
+            println!("Nothing to sync");
+        }
+    } else {
+        eprintln!("Sync: REMOTE task ID {id} NOT found");
+
+        let local_task = match no_labels {
+            true => {
+                let mut local_task = local_task;
+                local_task.set_labels(vec![]);
+                local_task
+            },
+            false => local_task
+        };
+
+        match connector.create_remote_task(&user, &repo, &local_task) {
+            Ok(id) => {
+                println!("Sync: Created REMOTE task ID {id}");
+                if local_task.get_id().unwrap() != id {
+                    match gittask::update_task_id(&local_task.get_id().unwrap(), &id) {
+                        Ok(_) => println!("Task ID {} -> {} updated", local_task.get_id().unwrap(), id),
+                        Err(e) => {
+                            eprintln!("ERROR: {e}");
+                            success = false;
+                        }
+                    }
+                }
+
+                if !no_comments {
+                    sync_local_comments(&connector, &user, &repo, &id, &local_task, &[], &mut success);
+                }
+
+                if sync_subtasks {
+                    sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
+                }
+            },
+            Err(e) => {
+                eprintln!("ERROR: {e}");
+                success = false;
             }
         }
     }
@@ -1685,15 +1725,29 @@ mod tests {
 
     struct FakeConnector {
         next_id: std::sync::atomic::AtomicU64,
+        lookup: std::sync::Mutex<Result<Option<Task>, String>>,
+        created_tasks: std::sync::atomic::AtomicU64,
     }
 
     impl FakeConnector {
         fn leaked(first_id: u64) -> Box<&'static dyn RemoteConnector> {
-            Box::new(Box::leak(Box::new(FakeConnector { next_id: std::sync::atomic::AtomicU64::new(first_id) })))
+            Box::new(Self::leaked_with_lookup(first_id, Err("not used".to_string())))
+        }
+
+        fn leaked_with_lookup(first_id: u64, lookup: Result<Option<Task>, String>) -> &'static FakeConnector {
+            Box::leak(Box::new(FakeConnector {
+                next_id: std::sync::atomic::AtomicU64::new(first_id),
+                lookup: std::sync::Mutex::new(lookup),
+                created_tasks: std::sync::atomic::AtomicU64::new(0),
+            }))
         }
 
         fn next(&self) -> String {
             self.next_id.fetch_add(1, std::sync::atomic::Ordering::SeqCst).to_string()
+        }
+
+        fn created_tasks(&self) -> u64 {
+            self.created_tasks.load(std::sync::atomic::Ordering::SeqCst)
         }
     }
 
@@ -1701,8 +1755,8 @@ mod tests {
         fn type_name(&self) -> &str { "fake" }
         fn supports_remote(&self, _url: &str) -> Option<(String, String)> { None }
         fn list_remote_tasks(&self, _: &String, _: &String, _: bool, _: bool, _: Option<usize>, _: RemoteTaskState, _: &Vec<String>) -> Result<Vec<Task>, String> { Err("not used".to_string()) }
-        fn get_remote_task(&self, _: &String, _: &String, _: &String, _: bool, _: bool, _: &Vec<String>) -> Result<Task, String> { Err("not used".to_string()) }
-        fn create_remote_task(&self, _: &String, _: &String, _: &Task) -> Result<String, String> { Err("not used".to_string()) }
+        fn get_remote_task(&self, _: &String, _: &String, _: &String, _: bool, _: bool, _: &Vec<String>) -> Result<Option<Task>, String> { self.lookup.lock().unwrap().clone() }
+        fn create_remote_task(&self, _: &String, _: &String, _: &Task) -> Result<String, String> { self.created_tasks.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Ok("77".to_string()) }
         fn create_remote_comment(&self, _: &String, _: &String, _: &String, _: &Comment) -> Result<String, String> { Ok(self.next()) }
         fn create_remote_label(&self, _: &String, _: &String, _: &String, _: &Label) -> Result<(), String> { Err("not used".to_string()) }
         fn update_remote_task(&self, _: &String, _: &String, _: &Task, _: Option<&Vec<Label>>, _: RemoteTaskState) -> Result<(), String> { Err("not used".to_string()) }
@@ -1713,6 +1767,55 @@ mod tests {
         fn supports_subtasks(&self) -> bool { true }
         fn list_remote_subtasks(&self, _: &String, _: &String, _: &String, _: &Vec<String>) -> Result<Vec<Subtask>, String> { Ok(vec![]) }
         fn create_remote_subtask(&self, _: &String, _: &String, _: &String, _: &Subtask, _: bool) -> Result<String, String> { Ok(self.next()) }
+    }
+
+    fn push_with_lookup(lookup: Result<Option<Task>, String>) -> (bool, &'static FakeConnector, String) {
+        let task = gittask::create_task(gittask::Task::new("Local".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap();
+        let id = task.get_id().unwrap();
+        let fake = FakeConnector::leaked_with_lookup(2, lookup);
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+        let result = push_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &StatusManager::new(), &statuses, true);
+        (result, fake, id)
+    }
+
+    #[test]
+    fn test_push_task_does_not_create_a_remote_task_when_the_lookup_fails() {
+        let _repo = gittask::testing::TestRepo::new();
+
+        let (result, fake, id) = push_with_lookup(Err("network down".to_string()));
+
+        assert!(!result, "a failed lookup must fail the push");
+        assert_eq!(fake.created_tasks(), 0, "a failed lookup must not be mistaken for a missing remote task");
+        assert!(gittask::find_task(&id).unwrap().is_some(), "the local task must keep its id");
+    }
+
+    #[test]
+    fn test_push_task_creates_the_remote_task_when_it_is_not_found() {
+        let _repo = gittask::testing::TestRepo::new();
+
+        let (result, fake, id) = push_with_lookup(Ok(None));
+
+        assert!(result, "a missing remote task must be created");
+        assert_eq!(fake.created_tasks(), 1);
+        assert!(gittask::find_task(&id).unwrap().is_none(), "the local task must adopt the new remote id");
+        assert!(gittask::find_task("77").unwrap().is_some());
+    }
+
+    #[test]
+    fn test_pull_task_keeps_the_local_task_when_the_lookup_fails() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut task = gittask::Task::new("Local".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task.add_comment(None, HashMap::new(), "keep me".to_string());
+        let id = gittask::create_task(task).unwrap().get_id().unwrap();
+        let fake = FakeConnector::leaked_with_lookup(2, Err("network down".to_string()));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+
+        let result = pull_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &vec!["OPEN".to_string(), "CLOSED".to_string()]);
+
+        assert!(!result);
+        let comments = gittask::find_task(&id).unwrap().unwrap().get_comments().clone().unwrap_or_default();
+        assert_eq!(comments.len(), 1, "a failed lookup must leave local comments alone");
     }
 
     #[test]

@@ -151,7 +151,7 @@ impl RemoteConnector for JiraRemoteConnector {
                             if comments_are_truncated(comments) {
                                 match fetch_all_comments(&config, &key).await {
                                     Ok(all_comments) => task_comments = all_comments,
-                                    Err(e) => eprintln!("WARNING: could not fetch all comments for {key}: {e}"),
+                                    Err(e) => return Err(format!("Could not fetch all comments for {key}: {e}")),
                                 }
                             }
                             task.set_comments(task_comments);
@@ -189,7 +189,7 @@ impl RemoteConnector for JiraRemoteConnector {
         with_comments: bool,
         with_labels: bool,
         _task_statuses: &Vec<String>
-    ) -> Result<Task, String> {
+    ) -> Result<Option<Task>, String> {
         let config = get_configuration(domain)?;
         let prefixed = multi_project_mode();
 
@@ -236,7 +236,7 @@ impl RemoteConnector for JiraRemoteConnector {
                                 if comments_are_truncated(comments) {
                                     match fetch_all_comments(&config, &issue_key).await {
                                         Ok(all_comments) => task_comments = all_comments,
-                                        Err(e) => eprintln!("WARNING: could not fetch all comments for {issue_key}: {e}"),
+                                        Err(e) => return Err(format!("Could not fetch all comments for {issue_key}: {e}")),
                                     }
                                 }
                                 task.set_comments(task_comments);
@@ -252,11 +252,12 @@ impl RemoteConnector for JiraRemoteConnector {
                             }
                         }
 
-                        Ok(task)
+                        Ok(Some(task))
                     } else {
                         Err("Failed to get issue: no fields returned.".to_string())
                     }
                 },
+                Err(jira_v3_openapi::apis::Error::ResponseError(content)) if content.status.as_u16() == 404 => Ok(None),
                 Err(e) => Err(e.to_string()),
             }
         })

@@ -82,7 +82,7 @@ impl RemoteConnector for GithubRemoteConnector {
         with_comments: bool,
         with_labels: bool,
         task_statuses: &Vec<String>
-    ) -> Result<Task, String> {
+    ) -> Result<Option<Task>, String> {
         RUNTIME.block_on(
             get_issue(
                 &user, &repo, task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?, with_comments, with_labels, task_statuses
@@ -321,7 +321,7 @@ async fn list_issues(
         let mut task = Task::from_properties(issue.number.to_string(), props).unwrap();
 
         if with_comments {
-            let task_comments = list_issue_comments(&user, &repo, issue.number).await;
+            let task_comments = list_issue_comments(&crab, &user, &repo, issue.number).await?;
             task.set_comments(task_comments);
         }
 
@@ -344,19 +344,15 @@ async fn list_issues(
     Ok(result)
 }
 
-async fn list_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Comment> {
+async fn list_issue_comments(crab: &Octocrab, user: &String, repo: &String, n: u64) -> Result<Vec<Comment>, String> {
     let mut result = vec![];
-    let crab = get_octocrab_instance().await;
     let stream = match crab.issues(user, repo)
         .list_comments(n)
         .per_page(100)
         .send()
         .await {
-        Ok(page) => page.into_stream(&crab),
-        Err(e) => {
-            eprintln!("ERROR fetching comments for issue {n}: {e}");
-            return result;
-        }
+        Ok(page) => page.into_stream(crab),
+        Err(e) => return Err(format!("Could not fetch comments for issue {n}: {e}")),
     };
     pin!(stream);
     loop {
@@ -369,14 +365,11 @@ async fn list_issue_comments(user: &String, repo: &String, n: u64) -> Vec<Commen
                 result.push(comment);
             },
             Ok(None) => break,
-            Err(e) => {
-                eprintln!("ERROR fetching comments for issue {n}: {e}");
-                break;
-            }
+            Err(e) => return Err(format!("Could not fetch comments for issue {n}: {e}")),
         }
     }
 
-    result
+    Ok(result)
 }
 
 async fn get_issue(
@@ -386,7 +379,7 @@ async fn get_issue(
     with_comments: bool,
     with_labels: bool,
     task_statuses: &Vec<String>
-) -> Result<Task, String> {
+) -> Result<Option<Task>, String> {
     let crab = get_octocrab_instance().await;
     let issue = crab.issues(user, repo).get(n).await;
     match issue {
@@ -401,7 +394,7 @@ async fn get_issue(
             let mut task = Task::from_properties(n.to_string(), props).unwrap();
 
             if with_comments {
-                let task_comments = list_issue_comments(user, repo, issue.number).await;
+                let task_comments = list_issue_comments(&crab, user, repo, issue.number).await?;
                 task.set_comments(task_comments);
             }
 
@@ -415,8 +408,9 @@ async fn get_issue(
                 task.set_labels(labels);
             }
 
-            Ok(task)
+            Ok(Some(task))
         },
+        Err(octocrab::Error::GitHub { source, .. }) if source.status_code.as_u16() == 404 => Ok(None),
         Err(e) => Err(e.to_string())
     }
 }
@@ -644,6 +638,16 @@ fn get_token_from_env() -> Option<String> {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_list_issue_comments_reports_a_failed_fetch() {
+        let result = RUNTIME.block_on(async {
+            let crab = Octocrab::builder().base_uri("http://127.0.0.1:9").unwrap().build().unwrap();
+            list_issue_comments(&crab, &"user".to_string(), &"repo".to_string(), 1).await
+        });
+
+        assert!(result.is_err(), "a failed comment fetch must not look like an issue without comments, got {} comments", result.as_ref().map(|c| c.len()).unwrap_or(0));
+    }
 
     #[test]
     fn test_remote_url() {

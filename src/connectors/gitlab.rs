@@ -131,7 +131,7 @@ impl RemoteConnector for GitlabRemoteConnector {
             let mut task = Task::from_properties(issue.iid.to_string(), props).unwrap();
 
             if with_comments {
-                let comments = list_issue_comments(&client, &user, &repo, issue.iid);
+                let comments = list_issue_comments(&client, &user, &repo, issue.iid)?;
                 task.set_comments(comments);
             }
 
@@ -159,7 +159,7 @@ impl RemoteConnector for GitlabRemoteConnector {
         with_comments: bool,
         with_labels: bool,
         task_statuses: &Vec<String>
-    ) -> Result<Task, String> {
+    ) -> Result<Option<Task>, String> {
         let iid = parse_task_id(task_id)?;
         let client = get_client(get_token()?.as_str())?;
         let mut endpoint = gitlab::api::projects::issues::Issue::builder();
@@ -179,7 +179,7 @@ impl RemoteConnector for GitlabRemoteConnector {
                 let mut task = Task::from_properties(task_id.to_string(), props).unwrap();
 
                 if with_comments {
-                    let comments = list_issue_comments(&client, &user, &repo, iid);
+                    let comments = list_issue_comments(&client, &user, &repo, iid)?;
                     task.set_comments(comments);
                 }
 
@@ -195,8 +195,9 @@ impl RemoteConnector for GitlabRemoteConnector {
                     task.set_labels(labels);
                 }
 
-                Ok(task)
+                Ok(Some(task))
             },
+            Err(e) if is_not_found(&e) => Ok(None),
             Err(e) => Err(e.to_string())
         }
     }
@@ -372,7 +373,7 @@ impl RemoteConnector for GitlabRemoteConnector {
     }
 }
 
-fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, iid: u64) -> Vec<Comment> {
+fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, iid: u64) -> Result<Vec<Comment>, String> {
     let mut endpoint = gitlab::api::projects::issues::notes::IssueNotes::builder();
     let endpoint = endpoint.project(user.to_string() + "/" + repo).issue(iid);
     let endpoint = endpoint.build().unwrap();
@@ -390,12 +391,17 @@ fn list_issue_comments(client: &Gitlab, user: &String, repo: &String, iid: u64) 
                 ]), comment.body);
                 result.push(comment);
             }
-            result
+            Ok(result)
         },
-        Err(e) => {
-            eprintln!("{}", e);
-            vec![]
-        }
+        Err(e) => Err(format!("Could not fetch notes for issue {iid}: {e}")),
+    }
+}
+
+fn is_not_found<E: std::error::Error + Send + Sync + 'static>(error: &gitlab::api::ApiError<E>) -> bool {
+    use gitlab::api::ApiError::*;
+    match error {
+        GitlabService { status, .. } | GitlabWithStatus { status, .. } | GitlabObjectWithStatus { status, .. } | GitlabUnrecognizedWithStatus { status, .. } => status.as_u16() == 404,
+        _ => false,
     }
 }
 
@@ -484,6 +490,24 @@ fn get_base_url() -> String {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn test_list_issue_comments_reports_a_failed_fetch() {
+        let (url, token) = match (std::env::var("GIT_TASK_GITLAB_URL"), std::env::var("GIT_TASK_GITLAB_TOKEN")) {
+            (Ok(url), Ok(token)) if !url.trim().is_empty() && !token.trim().is_empty() => (url, token),
+            _ => {
+                eprintln!("skipped: set GIT_TASK_GITLAB_URL and GIT_TASK_GITLAB_TOKEN to run this test");
+                return;
+            }
+        };
+        let _repo = gittask::testing::TestRepo::new();
+        gittask::set_config_value("task.gitlab.url", url.trim()).unwrap();
+        let client = get_client(token.trim()).expect("client");
+
+        let result = list_issue_comments(&client, &"no-such-user".to_string(), &"no-such-repo".to_string(), 999999);
+
+        assert!(result.is_err(), "a failed note fetch must not look like an issue without notes, got {} notes", result.as_ref().map(|c| c.len()).unwrap_or(0));
+    }
 
     #[test]
     fn test_remote_url() {
