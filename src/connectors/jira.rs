@@ -62,18 +62,15 @@ impl RemoteConnector for JiraRemoteConnector {
         with_labels: bool,
         limit: Option<usize>,
         state: RemoteTaskState,
-        task_statuses: &Vec<String>
+        _task_statuses: &Vec<String>
     ) -> Result<Vec<Task>, String> {
         let config = get_configuration(domain)?;
         let prefixed = multi_project_mode();
 
-        let done_status = "Done".to_string();
-        let last_status = task_statuses.last().unwrap_or_else(|| &done_status);
-        let jql = match state {
-            RemoteTaskState::Open(_, _) => format!("project = {} AND status != '{}'", project, last_status),
-            RemoteTaskState::Closed(_, _) => format!("project = {} AND status = '{}'", project, last_status),
-            RemoteTaskState::All => format!("project = {}", project),
-        };
+        let jql = RUNTIME.block_on(async {
+            let jira_statuses = jira_status_names(&config, &state).await?;
+            Ok::<String, String>(build_jql(project, &state, &jira_statuses))
+        })?;
         
         let mut field_list = vec!["summary".to_string(), "description".to_string(), "status".to_string(), "created".to_string(), "creator".to_string()];
         if with_comments {
@@ -933,6 +930,34 @@ fn parse_creator(creator: &serde_json::Value) -> String {
     "".to_string()
 }
 
+fn build_jql(project: &str, state: &RemoteTaskState, jira_statuses: &[String]) -> String {
+    let (status, is_done) = match state {
+        RemoteTaskState::Open(status, _) => (status, false),
+        RemoteTaskState::Closed(status, _) => (status, true),
+        RemoteTaskState::All => return format!("project = {project}"),
+    };
+    let jira_status = jira_statuses.iter().find(|name| !status.is_empty() && status_names_match(name, status));
+    match jira_status {
+        Some(name) => format!("project = {project} AND status = \"{}\"", name.replace('\\', "\\\\").replace('"', "\\\"")),
+        None if is_done => format!("project = {project} AND statusCategory = Done"),
+        None => format!("project = {project} AND statusCategory != Done"),
+    }
+}
+
+async fn jira_status_names(config: &Configuration, state: &RemoteTaskState) -> Result<Vec<String>, String> {
+    let needs_lookup = match state {
+        RemoteTaskState::Open(status, _) | RemoteTaskState::Closed(status, _) => !status.is_empty(),
+        RemoteTaskState::All => false,
+    };
+    if !needs_lookup {
+        return Ok(vec![]);
+    }
+    let statuses = jira_v3_openapi::apis::workflow_statuses_api::get_statuses(config)
+        .await
+        .map_err(|e| format!("Failed to list Jira statuses: {e}"))?;
+    Ok(statuses.into_iter().filter_map(|status| status.name).collect())
+}
+
 fn find_transition(transitions: &[IssueTransition], wanted_status: &str) -> Result<String, String> {
     let target_name = |transition: &IssueTransition| transition.to.as_ref().and_then(|to| to.name.clone());
     match transitions.iter().find(|t| target_name(t).is_some_and(|name| status_names_match(&name, wanted_status))).and_then(|t| t.id.clone()) {
@@ -979,6 +1004,37 @@ mod tests {
             to: Some(jira_v3_openapi::models::StatusDetails { name: Some(target.to_string()), ..Default::default() }),
             ..Default::default()
         }
+    }
+
+    fn jira_statuses() -> Vec<String> {
+        vec!["To Do".to_string(), "In Progress".to_string(), "Done".to_string()]
+    }
+
+    #[test]
+    fn test_build_jql_without_a_status_filter() {
+        assert_eq!(build_jql("ABC", &RemoteTaskState::All, &jira_statuses()), "project = ABC");
+    }
+
+    #[test]
+    fn test_build_jql_for_any_open_or_closed_status_uses_the_status_category() {
+        assert_eq!(build_jql("ABC", &RemoteTaskState::Open(String::new(), String::new()), &jira_statuses()), "project = ABC AND statusCategory != Done");
+        assert_eq!(build_jql("ABC", &RemoteTaskState::Closed(String::new(), String::new()), &jira_statuses()), "project = ABC AND statusCategory = Done");
+    }
+
+    #[test]
+    fn test_build_jql_for_a_status_known_to_jira_filters_by_that_status() {
+        let state = RemoteTaskState::Open("IN_PROGRESS".to_string(), "IN_PROGRESS".to_string());
+        assert_eq!(build_jql("ABC", &state, &jira_statuses()), "project = ABC AND status = \"In Progress\"", "the requested status must be used, spelled as Jira spells it");
+        let state = RemoteTaskState::Closed("Done".to_string(), "Done".to_string());
+        assert_eq!(build_jql("ABC", &state, &jira_statuses()), "project = ABC AND status = \"Done\"");
+    }
+
+    #[test]
+    fn test_build_jql_for_a_status_unknown_to_jira_falls_back_to_the_category() {
+        let state = RemoteTaskState::Open("OPEN".to_string(), "OPEN".to_string());
+        assert_eq!(build_jql("ABC", &state, &jira_statuses()), "project = ABC AND statusCategory != Done");
+        let state = RemoteTaskState::Closed("CLOSED".to_string(), "CLOSED".to_string());
+        assert_eq!(build_jql("ABC", &state, &jira_statuses()), "project = ABC AND statusCategory = Done");
     }
 
     #[test]
