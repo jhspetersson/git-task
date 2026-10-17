@@ -484,6 +484,87 @@ pub(crate) fn task_pull(
     success
 }
 
+fn task_matches(
+    task: &Task,
+    statuses: &Option<Vec<String>>,
+    keyword: &Option<String>,
+    filter: &Option<String>,
+    from: &Option<NaiveDate>,
+    until: &Option<NaiveDate>,
+    author: &Option<String>,
+    prop_manager: &PropertyManager,
+) -> bool {
+    if let Some(statuses) = statuses {
+        match task.get_property("status") {
+            Some(task_status) if statuses.contains(task_status) => {},
+            _ => return false,
+        }
+    }
+
+    if keyword.as_ref().is_some() {
+        let keyword = keyword.as_ref().unwrap().as_str();
+        let props = task.get_all_properties();
+        if !props.iter().any(|entry| entry.1.contains(keyword)) {
+            return false;
+        }
+    }
+
+    if let Some(filter) = filter {
+        let mut eval_context = HashMapContext::new();
+        let context = extract_task_context(&task);
+
+        for (k, v) in context {
+            let property = prop_manager.get_properties().iter().find(|p| p.get_name() == k);
+            let is_integer = match property {
+                Some(property) => matches!(property.get_value_type(), PropertyValueType::Integer | PropertyValueType::DateTime),
+                None => false,
+            };
+
+            if is_integer {
+                if let Ok(i) = v.parse::<i64>() {
+                    eval_context.set_value(k.into(), i.into()).unwrap();
+                } else {
+                    eval_context.set_value(k.into(), v.into()).unwrap();
+                }
+            } else {
+                eval_context.set_value(k.into(), v.into()).unwrap();
+            }
+        }
+
+        if let Ok(result) = evalexpr::eval_boolean_with_context(filter, &eval_context) {
+            if !result {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+
+    if from.is_some() || until.is_some() {
+        let created = task.get_property("created")
+            .and_then(|created| created.parse().ok())
+            .and_then(|ts| Local.timestamp_opt(ts, 0).single());
+        if let Some(created) = created {
+            if !created_within(&created, from, until) {
+                return false;
+            }
+        }
+    }
+
+    if author.as_ref().is_some() {
+        match task.get_property("author") {
+            Some(task_author) => {
+                if author.as_ref().unwrap().to_lowercase() != task_author.to_lowercase() {
+                    return false;
+                }
+            },
+            None => return false,
+        }
+    }
+
+    true
+}
+
 fn created_within(created: &DateTime<Local>, from: &Option<NaiveDate>, until: &Option<NaiveDate>) -> bool {
     let day = created.date_naive();
     from.is_none_or(|from| day >= from) && until.is_none_or(|until| day <= until)
@@ -1285,80 +1366,7 @@ pub(crate) fn task_list(status: Option<Vec<String>>,
                 None => None
             };
 
-            let mut filtered_tasks: Vec<Task> = tasks.into_iter().filter(|task| {
-                if let Some(ref statuses) = statuses {
-                    match task.get_property("status") {
-                        Some(task_status) if statuses.contains(task_status) => {},
-                        _ => return false,
-                    }
-                }
-
-                if keyword.as_ref().is_some() {
-                    let keyword = keyword.as_ref().unwrap().as_str();
-                    let props = task.get_all_properties();
-                    if !props.iter().any(|entry| entry.1.contains(keyword)) {
-                        return false;
-                    }
-                }
-
-                if let Some(ref filter) = filter {
-                    let mut eval_context = HashMapContext::new();
-                    let context = extract_task_context(&task);
-
-                    for (k, v) in context {
-                        let property = prop_manager.get_properties().iter().find(|p| p.get_name() == k);
-                        let is_integer = match property {
-                            Some(property) => matches!(property.get_value_type(), PropertyValueType::Integer | PropertyValueType::DateTime),
-                            None => false,
-                        };
-
-                        if is_integer {
-                            if let Ok(i) = v.parse::<i64>() {
-                                eval_context.set_value(k.into(), i.into()).unwrap();
-                            } else {
-                                eval_context.set_value(k.into(), v.into()).unwrap();
-                            }
-                        } else {
-                            eval_context.set_value(k.into(), v.into()).unwrap();
-                        }
-                    }
-
-                    if let Ok(result) = evalexpr::eval_boolean_with_context(filter, &eval_context) {
-                        if !result {
-                            return false;
-                        }
-                    } else {
-                        return false;
-                    }
-                }
-
-                if from.is_some() || until.is_some() {
-                    let created = task.get_property("created");
-                    if let Some(created) = created {
-                        let created = match created.parse().ok().and_then(|ts| Local.timestamp_opt(ts, 0).single()) {
-                            Some(dt) => dt,
-                            None => return true,
-                        };
-
-                        if !created_within(&created, &from, &until) {
-                            return false;
-                        }
-                    }
-                }
-
-                if author.as_ref().is_some() {
-                    match task.get_property("author") {
-                        Some(task_author) => {
-                            if author.as_ref().unwrap().to_lowercase() != task_author.to_lowercase() {
-                                return false;
-                            }
-                        },
-                        None => return false,
-                    }
-                }
-
-                true
-            }).collect();
+            let mut filtered_tasks: Vec<Task> = tasks.into_iter().filter(|task| task_matches(task, &statuses, &keyword, &filter, &from, &until, &author, &prop_manager)).collect();
 
             let sort = match sort {
                 Some(sort) => Some(sort),
@@ -1782,6 +1790,20 @@ mod tests {
         let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
         let result = push_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &StatusManager::new(), &statuses, true);
         (result, fake, id)
+    }
+
+    #[test]
+    fn test_list_filter_applies_the_author_when_created_is_unparseable() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut task = gittask::Task::new("Test".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task.set_property("created", "not-a-number");
+        task.set_property("author", "alice");
+        let from = parse_date(Some("2020-01-01".to_string()));
+        let prop_manager = PropertyManager::new();
+
+        assert!(!task_matches(&task, &None, &None, &None, &from, &None, &Some("bob".to_string()), &prop_manager), "a bad created value must not switch off the author filter");
+        assert!(task_matches(&task, &None, &None, &None, &from, &None, &Some("alice".to_string()), &prop_manager));
+        assert!(task_matches(&task, &None, &None, &None, &from, &None, &None, &prop_manager), "a bad created value is tolerated by the date filter");
     }
 
     #[test]
