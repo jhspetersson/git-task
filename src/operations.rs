@@ -442,20 +442,46 @@ pub(crate) fn task_pull(
 
     let state = pull_state(status, open, &status_manager);
 
+    pull_targets(targets, limit, &state, &task_statuses, no_comments, no_labels, no_subtasks)
+}
+
+/// Pulls tasks from every target in turn. `limit` caps the total number of tasks
+/// imported across all targets, not the number per target: each target is asked
+/// for whatever budget is left, and targets after the budget runs out are skipped.
+fn pull_targets(
+    targets: Vec<RemoteTarget>,
+    limit: Option<usize>,
+    state: &RemoteTaskState,
+    task_statuses: &Vec<String>,
+    no_comments: bool,
+    no_labels: bool,
+    no_subtasks: bool,
+) -> bool {
     let mut success = true;
+    let mut remaining = limit;
     for (connector, user, repo) in targets {
+        if remaining == Some(0) {
+            break;
+        }
         println!("Pulling tasks from {user}/{repo}...");
         let fetch_subtasks = !no_subtasks && connector.supports_subtasks();
 
-        match connector.list_remote_tasks(&user, &repo, !no_comments, !no_labels, limit, state.clone(), &task_statuses) {
+        match connector.list_remote_tasks(&user, &repo, !no_comments, !no_labels, remaining, state.clone(), task_statuses) {
             Ok(tasks) => {
+                let tasks: Vec<Task> = match remaining {
+                    Some(budget) => tasks.into_iter().take(budget).collect(),
+                    None => tasks,
+                };
+                if let Some(budget) = remaining.as_mut() {
+                    *budget -= tasks.len();
+                }
                 if tasks.is_empty() {
                     success_message("No tasks found".to_string());
                 } else {
                     for mut task in tasks {
                         let task_id = task.get_id().unwrap();
                         if fetch_subtasks {
-                            match connector.list_remote_subtasks(&user, &repo, &task_id, &task_statuses) {
+                            match connector.list_remote_subtasks(&user, &repo, &task_id, task_statuses) {
                                 Ok(subtasks) => task.set_subtasks(subtasks),
                                 Err(e) => {
                                     eprintln!("Task ID {task_id}: {e}");
@@ -1755,6 +1781,8 @@ mod tests {
         lookup: std::sync::Mutex<Result<Option<Task>, String>>,
         created_tasks: std::sync::atomic::AtomicU64,
         updates: std::sync::Mutex<Vec<Option<Vec<Label>>>>,
+        remote_tasks: std::sync::Mutex<HashMap<String, Vec<Task>>>,
+        list_limits: std::sync::Mutex<Vec<(String, Option<usize>)>>,
     }
 
     impl FakeConnector {
@@ -1768,7 +1796,21 @@ mod tests {
                 lookup: std::sync::Mutex::new(lookup),
                 created_tasks: std::sync::atomic::AtomicU64::new(0),
                 updates: std::sync::Mutex::new(vec![]),
+                remote_tasks: std::sync::Mutex::new(HashMap::new()),
+                list_limits: std::sync::Mutex::new(vec![]),
             }))
+        }
+
+        /// A connector whose `list_remote_tasks` serves the given tasks per repo name.
+        fn leaked_with_remote_tasks(remote_tasks: HashMap<String, Vec<Task>>) -> &'static FakeConnector {
+            let fake = Self::leaked_with_lookup(1, Err("not used".to_string()));
+            *fake.remote_tasks.lock().unwrap() = remote_tasks;
+            fake
+        }
+
+        /// The (repo, limit) pairs passed to `list_remote_tasks`, in call order.
+        fn list_limits(&self) -> Vec<(String, Option<usize>)> {
+            self.list_limits.lock().unwrap().clone()
         }
 
         fn next(&self) -> String {
@@ -1787,7 +1829,14 @@ mod tests {
     impl RemoteConnector for FakeConnector {
         fn type_name(&self) -> &str { "fake" }
         fn supports_remote(&self, _url: &str) -> Option<(String, String)> { None }
-        fn list_remote_tasks(&self, _: &String, _: &String, _: bool, _: bool, _: Option<usize>, _: RemoteTaskState, _: &Vec<String>) -> Result<Vec<Task>, String> { Err("not used".to_string()) }
+        fn list_remote_tasks(&self, _: &String, repo: &String, _: bool, _: bool, limit: Option<usize>, _: RemoteTaskState, _: &Vec<String>) -> Result<Vec<Task>, String> {
+            self.list_limits.lock().unwrap().push((repo.clone(), limit));
+            let tasks = self.remote_tasks.lock().unwrap().get(repo).cloned().unwrap_or_default();
+            Ok(match limit {
+                Some(n) => tasks.into_iter().take(n).collect(),
+                None => tasks,
+            })
+        }
         fn get_remote_task(&self, _: &String, _: &String, _: &String, _: bool, _: bool, _: &Vec<String>) -> Result<Option<Task>, String> { self.lookup.lock().unwrap().clone() }
         fn create_remote_task(&self, _: &String, _: &String, _: &Task) -> Result<String, String> { self.created_tasks.fetch_add(1, std::sync::atomic::Ordering::SeqCst); Ok("77".to_string()) }
         fn create_remote_comment(&self, _: &String, _: &String, _: &String, _: &Comment) -> Result<String, String> { Ok(self.next()) }
@@ -1893,6 +1942,56 @@ mod tests {
         let comment = Comment::new("1".to_string(), HashMap::new(), "text".to_string());
         assert!(!comments_are_equal(&None, &Some(vec![comment.clone()])));
         assert!(!comments_are_equal(&Some(vec![comment]), &Some(vec![])));
+    }
+
+    fn remote_task(id: &str) -> Task {
+        let mut task = gittask::Task::new(format!("Remote {id}"), "".to_string(), "OPEN".to_string()).unwrap();
+        task.set_id(id.to_string());
+        task
+    }
+
+    fn pull_targets_for(fake: &'static FakeConnector, repos: &[&str], limit: Option<usize>) -> bool {
+        let targets: Vec<RemoteTarget> = repos.iter().map(|repo| {
+            let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+            (connector, "u".to_string(), repo.to_string())
+        }).collect();
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+        pull_targets(targets, limit, &RemoteTaskState::All, &statuses, true, true, true)
+    }
+
+    #[test]
+    fn test_pull_targets_applies_the_limit_across_projects() {
+        let _repo = gittask::testing::TestRepo::new();
+        let fake = FakeConnector::leaked_with_remote_tasks(HashMap::from([
+            ("a".to_string(), vec![remote_task("1"), remote_task("2"), remote_task("3")]),
+            ("b".to_string(), vec![remote_task("4"), remote_task("5"), remote_task("6")]),
+            ("c".to_string(), vec![remote_task("7")]),
+        ]));
+
+        let result = pull_targets_for(fake, &["a", "b", "c"], Some(4));
+
+        assert!(result);
+        assert_eq!(gittask::list_tasks().unwrap().len(), 4, "--limit caps the total across all projects");
+        assert_eq!(
+            fake.list_limits(),
+            vec![("a".to_string(), Some(4)), ("b".to_string(), Some(1))],
+            "each project is asked for the remaining budget and projects after it runs out are skipped"
+        );
+    }
+
+    #[test]
+    fn test_pull_targets_without_a_limit_pulls_every_project() {
+        let _repo = gittask::testing::TestRepo::new();
+        let fake = FakeConnector::leaked_with_remote_tasks(HashMap::from([
+            ("a".to_string(), vec![remote_task("1"), remote_task("2")]),
+            ("b".to_string(), vec![remote_task("3")]),
+        ]));
+
+        let result = pull_targets_for(fake, &["a", "b"], None);
+
+        assert!(result);
+        assert_eq!(gittask::list_tasks().unwrap().len(), 3);
+        assert_eq!(fake.list_limits(), vec![("a".to_string(), None), ("b".to_string(), None)]);
     }
 
     #[test]

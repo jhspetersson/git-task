@@ -246,7 +246,7 @@ enum Command {
     Pull {
         /// one or more task IDs (comma separated, including ranges like 1..10)
         ids: Option<String>,
-        /// Limit the count of imported tasks
+        /// Limit the total count of imported tasks (across all projects when several are pulled)
         #[arg(short, long, conflicts_with = "ids")]
         limit: Option<usize>,
         /// Import only issues with this status
