@@ -108,7 +108,9 @@ pub fn str_to_color(color: &str, style: &Option<String>) -> Style {
 fn str_to_rgb(color: &str) -> Option<Color> {
     let color = color.trim_start_matches('#');
 
-    if color.len() != 6 {
+    // Byte slicing below is only safe on ASCII; a six-byte string of multi-byte
+    // characters (e.g. "€€") would otherwise panic on a char boundary.
+    if color.len() != 6 || !color.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
 
@@ -712,6 +714,16 @@ mod tests {
         assert_eq!(result, Style::new().fg(Color::Rgb(0, 1, 35)), "six-digit hex must parse as RGB even when the digits fit in a u8");
         let result = str_to_color("000123", &None);
         assert_eq!(result, Style::new().fg(Color::Rgb(0, 1, 35)), "bare six-digit hex must parse as RGB, not an ANSI fixed color");
+    }
+
+    #[test]
+    fn test_multi_byte_color_strings_do_not_panic() {
+        // Six bytes but not six ASCII hex digits: must be treated as an unknown colour, not sliced.
+        for input in ["€€", "#€€", "ééé", "ab€x", "zzzzzz"] {
+            assert_eq!(str_to_rgb(input), None, "{input:?} must not parse as RGB");
+            assert_eq!(color_str_to_rgb_str(input), "000000", "{input:?} must fall back to black");
+            assert_eq!(str_to_color(input, &None), Style::new().fg(Color::Default), "{input:?} must fall back to the default colour");
+        }
     }
 
     #[test]
