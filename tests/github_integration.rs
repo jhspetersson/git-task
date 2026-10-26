@@ -72,6 +72,12 @@ impl GitHub {
                 std::thread::sleep(Duration::from_secs(retry_after));
                 continue;
             }
+            if status.is_server_error() && attempt < 4 {
+                let delay = 2u64.pow(attempt + 1);
+                eprintln!("{method} {path} failed with {status}, retrying in {delay}s");
+                std::thread::sleep(Duration::from_secs(delay));
+                continue;
+            }
             assert!(status.is_success(), "{method} {path} failed with {status}: {text}");
             return serde_json::from_str(&text).expect("response is not JSON");
         }
