@@ -373,11 +373,16 @@ pub(crate) fn task_import(ids: Option<String>, format: Option<String>) -> bool {
 fn import_from_input(ids: Option<String>, input: &String) -> bool {
     if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(input) {
         let ids = ids.map(parse_ids);
+        let mut success = true;
 
         for task in tasks {
             let id = match task.get_id() {
                 Some(id) => id,
-                None => { eprintln!("ERROR: task has no id, skipping"); continue; }
+                None => {
+                    eprintln!("ERROR: task has no id, skipping");
+                    success = false;
+                    continue;
+                }
             };
 
             if let Some(ids) = &ids {
@@ -388,10 +393,13 @@ fn import_from_input(ids: Option<String>, input: &String) -> bool {
 
             match gittask::create_task(task) {
                 Ok(_) => println!("Task ID {id} imported"),
-                Err(e) => eprintln!("ERROR: {e}"),
+                Err(e) => {
+                    eprintln!("ERROR: {e}");
+                    success = false;
+                }
             }
         }
-        true
+        success
     } else {
         error_message("Can't deserialize input".to_string())
     }
