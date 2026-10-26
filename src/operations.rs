@@ -55,7 +55,7 @@ pub(crate) fn task_create(
                         match connector.create_remote_task(&user, &repo, &task) {
                             Ok(id) => {
                                 println!("Sync: Created REMOTE task ID {id}");
-                                match gittask::update_task_id(&task.get_id().unwrap(), &id) {
+                                match gittask::update_task_id(&task.get_id().unwrap(), &id, false) {
                                     Ok(_) => {
                                         println!("Task ID {} -> {} updated", task.get_id().unwrap(), id);
                                         success = true;
@@ -101,7 +101,7 @@ pub(crate) fn task_status(
         Err(e) => return error_message(format!("ERROR: {e}. Use --create to add it")),
     };
 
-    task_set(ids, "status".to_string(), status, push, remote, connector_type, project, no_color)
+    task_set(ids, "status".to_string(), status, push, false, remote, connector_type, project, no_color)
 }
 
 pub(crate) fn task_get(id: String, prop_name: String) -> bool {
@@ -122,6 +122,7 @@ pub(crate) fn task_set(
     prop_name: String,
     value: String,
     push: bool,
+    force: bool,
     remote: &Option<String>,
     connector_type: &Option<String>,
     project: &Option<String>,
@@ -144,7 +145,7 @@ pub(crate) fn task_set(
     match prop_name.as_str() {
         "id" => {
             for id in &ids {
-                match gittask::update_task_id(&id, &value) {
+                match gittask::update_task_id(&id, &value, force) {
                     Ok(_) => {
                         println!("Task ID {id} -> {value} updated");
 
@@ -292,7 +293,7 @@ pub(crate) fn task_unset(ids: String, prop_name: String) -> bool {
     success
 }
 
-pub(crate) fn task_edit(id: String, prop_name: String) -> bool {
+pub(crate) fn task_edit(id: String, prop_name: String, force: bool) -> bool {
     match gittask::find_task(&id) {
         Ok(Some(mut task)) => {
             match prop_name.as_str() {
@@ -303,17 +304,8 @@ pub(crate) fn task_edit(id: String, prop_name: String) -> bool {
                             if text.is_empty() {
                                 return error_message("Task ID cannot be empty".to_string());
                             }
-                            task.set_id(text.clone());
-                            match gittask::update_task(task) {
-                                Ok(_) => {
-                                    println!("Task ID {id} -> {text} updated");
-                                    if text != id {
-                                        if let Err(e) = gittask::delete_tasks(&[&id]) {
-                                            eprintln!("ERROR: {e}");
-                                        }
-                                    }
-                                    true
-                                },
+                            match gittask::update_task_id(&id, &text, force) {
+                                Ok(_) => success_message(format!("Task ID {id} -> {text} updated")),
                                 Err(e) => error_message(format!("ERROR: {e}")),
                             }
                         },
@@ -1003,7 +995,7 @@ fn push_task(
                 println!("Sync: Created REMOTE task ID {id}");
                 let local_id = local_task.get_id().unwrap();
                 if local_id != id {
-                    match gittask::update_task_id(&local_id, &id) {
+                    match gittask::update_task_id(&local_id, &id, false) {
                         Ok(_) => println!("Task ID {local_id} -> {id} updated"),
                         Err(e) => {
                             eprintln!("ERROR: could not rename LOCAL task ID {local_id} to {id}: {e}");
@@ -1691,8 +1683,8 @@ mod tests {
         let task = gittask::create_task(task).unwrap();
         let id = task.get_id().unwrap();
 
-        assert!(!task_set(id.clone(), "name".to_string(), "  ".to_string(), false, &None, &None, &None, true));
-        assert!(!task_set(id.clone(), "status".to_string(), "".to_string(), false, &None, &None, &None, true));
+        assert!(!task_set(id.clone(), "name".to_string(), "  ".to_string(), false, false, &None, &None, &None, true));
+        assert!(!task_set(id.clone(), "status".to_string(), "".to_string(), false, false, &None, &None, &None, true));
         let task = gittask::find_task(&id).unwrap().unwrap();
         assert_eq!(task.get_property("name").unwrap(), "Keep me");
         assert_eq!(task.get_property("status").unwrap(), "OPEN");
@@ -1741,7 +1733,7 @@ mod tests {
     #[test]
     fn test_task_set_returns_false_on_nonexistent_task() {
         let _repo = gittask::testing::TestRepo::new();
-        let result = task_set("99999".to_string(), "name".to_string(), "test".to_string(), false, &None, &None, &None, true);
+        let result = task_set("99999".to_string(), "name".to_string(), "test".to_string(), false, false, &None, &None, &None, true);
         assert!(!result, "task_set should return false when task is not found");
     }
 
@@ -2003,6 +1995,19 @@ mod tests {
         assert_eq!(other.get_property("name").unwrap(), "Other");
         let local = gittask::find_task(&id).unwrap().expect("the local task must keep its id");
         assert_eq!(comment_ids(&local), vec!["1".to_string()], "nothing must be synced against the wrong task");
+    }
+
+    #[test]
+    fn test_update_task_id_refuses_to_overwrite_another_task() {
+        let _repo = gittask::testing::TestRepo::new();
+        let first = gittask::create_task(gittask::Task::new("First".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+        let second = gittask::create_task(gittask::Task::new("Second".to_string(), "".to_string(), "OPEN".to_string()).unwrap()).unwrap().get_id().unwrap();
+
+        let result = gittask::update_task_id(&first, &second, false);
+
+        assert_eq!(result, Err(format!("Task ID {second} already exists")));
+        assert_eq!(gittask::find_task(&first).unwrap().unwrap().get_property("name").unwrap(), "First", "the renamed task must survive");
+        assert_eq!(gittask::find_task(&second).unwrap().unwrap().get_property("name").unwrap(), "Second", "the task owning the id must not be overwritten");
     }
 
     fn comment_ids(task: &Task) -> Vec<String> {

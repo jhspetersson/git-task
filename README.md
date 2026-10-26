@@ -158,6 +158,11 @@ Sets task property:
     git task set 1 description "I figured it out all wrong. Fizz Buzz has to be rewritten in Rust!"
     git task set 1..10 priority HIGH
 
+Changing the `id` property renames the task. It fails if a task with the new ID already exists, unless `--force` is given, which replaces that task:
+
+    git task set 1 id 42
+    git task set 1 id 42 --force
+
 ### replace
 
 Search and replace within property values:
@@ -177,6 +182,8 @@ Delete a property:
 Edit task property in the default git editor.
 
     git task edit 1 description
+
+Editing the `id` property follows the same rules as `set`, including `--force`.
 
 For Windows, we recommend anything, but `notepad`. `Notepad++` (a separate installation) is just fine.
 You can set it up this way:

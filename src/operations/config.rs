@@ -130,7 +130,7 @@ fn rename_numeric_tasks_with_jira_project() -> bool {
                     _ => continue,
                 };
                 let new_id = format!("{project}-{id}");
-                match gittask::update_task_id(&id, &new_id) {
+                match gittask::update_task_id(&id, &new_id, false) {
                     Ok(_) => {
                         println!("Task ID {id} -> {new_id} updated");
                         renamed += 1;

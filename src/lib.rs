@@ -631,9 +631,9 @@ fn get_next_id_in(repo: &Repository, ref_path: &str) -> Result<String, String> {
     Ok((result + 1).to_string())
 }
 
-pub fn update_task_id(id: &str, new_id: &str) -> Result<(), String> {
+pub fn update_task_id(id: &str, new_id: &str, force: bool) -> Result<(), String> {
     let mut task = find_task(&id)?.ok_or_else(|| format!("Task ID {id} not found"))?;
-    if id != new_id && find_task(&new_id)?.is_some() {
+    if !force && id != new_id && find_task(&new_id)?.is_some() {
         return Err(format!("Task ID {new_id} already exists"));
     }
     task.set_id(new_id.to_string());
@@ -1368,7 +1368,7 @@ mod test {
         let task_b = create_task(task_b).unwrap();
         let id_b = task_b.get_id().unwrap();
 
-        let result = update_task_id(&id_b, &id_a);
+        let result = update_task_id(&id_b, &id_a, false);
         assert!(result.is_err(), "renaming onto an existing task id must fail");
         assert_eq!(find_task(&id_a).unwrap().unwrap().get_property("name").unwrap(), "Task A");
         assert_eq!(find_task(&id_b).unwrap().unwrap().get_property("name").unwrap(), "Task B");
@@ -1377,9 +1377,23 @@ mod test {
     }
 
     #[test]
+    fn test_update_task_id_force_overwrites_existing_target() {
+        let _repo = testing::TestRepo::new();
+        let task_a = Task::construct_task("Task A".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let id_a = create_task(task_a).unwrap().get_id().unwrap();
+        let task_b = Task::construct_task("Task B".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let id_b = create_task(task_b).unwrap().get_id().unwrap();
+
+        let result = update_task_id(&id_b, &id_a, true);
+        assert_eq!(result, Ok(()));
+        assert_eq!(find_task(&id_a).unwrap().unwrap().get_property("name").unwrap(), "Task B", "the forced rename must replace the task owning the id");
+        assert!(find_task(&id_b).unwrap().is_none(), "the old id must be gone");
+    }
+
+    #[test]
     fn test_update_task_id_nonexistent() {
         let _repo = testing::TestRepo::new();
-        let result = update_task_id("99999", "99998");
+        let result = update_task_id("99999", "99998", false);
         assert!(result.is_err());
     }
 
@@ -1463,7 +1477,7 @@ mod test {
         let task = create_result.unwrap();
         let id = task.get_id().unwrap();
 
-        let result = update_task_id(&id, &id);
+        let result = update_task_id(&id, &id, false);
         assert!(result.is_ok());
 
         let find_result = find_task(&id);

@@ -140,6 +140,9 @@ enum Command {
         /// Also push task to the remote source (e.g., GitHub)
         #[arg(short, long)]
         push: bool,
+        /// Overwrite an existing task when changing the ID
+        #[arg(short, long)]
+        force: bool,
         /// Use this remote if there are several of them
         #[arg(short, long)]
         remote: Option<String>,
@@ -199,6 +202,9 @@ enum Command {
         id: String,
         /// property name
         prop_name: String,
+        /// Overwrite an existing task when changing the ID
+        #[arg(short, long)]
+        force: bool,
     },
     /// Add or delete comments
     Comment {
@@ -830,10 +836,10 @@ fn main() -> ExitCode {
         Some(Command::Create { name, description, no_desc, push, remote, connector_type: connector, project }) => task_create(name, description, no_desc, push, &remote, &connector, &project),
         Some(Command::Status { ids, status, create, push, remote, connector_type: connector, project, no_color }) => task_status(ids, status, create, push, &remote, &connector, &project, no_color),
         Some(Command::Get { id, prop_name }) => task_get(id, prop_name),
-        Some(Command::Set { ids, prop_name, value, push, remote, connector_type: connector, project, no_color }) => task_set(ids, prop_name, value, push, &remote, &connector, &project, no_color),
+        Some(Command::Set { ids, prop_name, value, push, force, remote, connector_type: connector, project, no_color }) => task_set(ids, prop_name, value, push, force, &remote, &connector, &project, no_color),
         Some(Command::Replace { ids, prop_name, search, replace, regex, push, remote, connector_type: connector, project, no_color }) => task_replace(ids, prop_name, search, replace, regex, push, &remote, &connector, &project, no_color),
         Some(Command::Unset { ids, prop_name }) => task_unset(ids, prop_name),
-        Some(Command::Edit { id, prop_name }) => task_edit(id, prop_name),
+        Some(Command::Edit { id, prop_name, force }) => task_edit(id, prop_name, force),
         Some(Command::Comment { subcommand }) => task_comment(subcommand),
         Some(Command::Subtask { subcommand }) => task_subtask(subcommand),
         Some(Command::Label { subcommand }) => task_label(subcommand),
