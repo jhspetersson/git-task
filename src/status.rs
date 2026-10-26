@@ -112,11 +112,11 @@ impl StatusManager {
             return Err("Status name and shortcut can't contain comma".to_string());
         }
 
-        if self.statuses.iter().any(|s| s.name == name) {
+        if self.statuses.iter().any(|s| s.name.eq_ignore_ascii_case(&name)) {
             return Err("Status with this name already exists".to_string());
         }
 
-        if self.statuses.iter().any(|s| s.shortcut == shortcut) {
+        if self.statuses.iter().any(|s| s.shortcut.eq_ignore_ascii_case(&shortcut)) {
             return Err("Status with this shortcut already exists".to_string());
         }
 
@@ -211,9 +211,16 @@ impl StatusManager {
         if self.statuses.iter().any(|saved_status| saved_status.name == *status) {
             return status.clone();
         }
-        self.statuses.iter().find_map(|saved_status| {
-            if status == saved_status.shortcut.as_str() { Some(saved_status.name.clone()) } else { None }
-        }).unwrap_or(status.clone())
+        if let Some(saved_status) = self.statuses.iter().find(|s| s.shortcut == *status) {
+            return saved_status.name.clone();
+        }
+        if let Some(saved_status) = self.statuses.iter().find(|s| s.name.eq_ignore_ascii_case(status)) {
+            return saved_status.name.clone();
+        }
+        if let Some(saved_status) = self.statuses.iter().find(|s| s.shortcut.eq_ignore_ascii_case(status)) {
+            return saved_status.name.clone();
+        }
+        status.clone()
     }
 
     pub fn resolve_status(&self, status: &str) -> Result<String, String> {
@@ -302,7 +309,7 @@ impl StatusManager {
                         }
 
                         let prev_value = saved_status.name.clone();
-                        if statuses.iter().find(|s| s.name == value.to_string() && s.name != saved_status.name).is_some() {
+                        if statuses.iter().find(|s| s.name.eq_ignore_ascii_case(value) && s.name != saved_status.name).is_some() {
                             Err("Name already exists for another status".to_string())
                         } else {
                             saved_status.name = value.clone();
@@ -314,7 +321,7 @@ impl StatusManager {
                             return Err("Status shortcut can't contain comma".to_string());
                         }
 
-                        if statuses.iter().find(|s| s.shortcut == value.to_string() && s.name != saved_status.name).is_some() {
+                        if statuses.iter().find(|s| s.shortcut.eq_ignore_ascii_case(value) && s.name != saved_status.name).is_some() {
                             Err("Shortcut already exists for another status".to_string())
                         } else {
                             saved_status.shortcut = value.clone(); Ok(None)
@@ -411,6 +418,34 @@ mod tests {
         assert_eq!(manager.resolve_status("c"), Ok("c".to_string()));
         assert_eq!(manager.resolve_status("x"), Ok("c".to_string()), "its own shortcut still works");
         assert_eq!(manager.resolve_status("CLOSED"), Ok("CLOSED".to_string()), "the other status is still reachable by name");
+    }
+
+    #[test]
+    fn test_status_lookup_is_case_insensitive() {
+        let manager = StatusManager { statuses: make_test_statuses() };
+
+        assert_eq!(manager.resolve_status("open"), Ok("OPEN".to_string()), "lower-case name resolves to the canonical name");
+        assert_eq!(manager.resolve_status("Closed"), Ok("CLOSED".to_string()), "mixed-case name resolves to the canonical name");
+        assert_eq!(manager.resolve_status("O"), Ok("OPEN".to_string()), "upper-case shortcut resolves to the canonical name");
+        assert_eq!(manager.get_full_status_name(&"nope".to_string()), "nope", "unknown input is returned unchanged");
+    }
+
+    #[test]
+    fn test_exact_matches_win_over_case_insensitive_ones() {
+        let mut statuses = make_test_statuses();
+        statuses.push(Status {
+            name: String::from("open"),
+            shortcut: String::from("C"),
+            color: String::from("Blue"),
+            style: None,
+            is_done: false,
+        });
+        let manager = StatusManager { statuses };
+
+        assert_eq!(manager.resolve_status("open"), Ok("open".to_string()), "exact name beats a case-insensitive name");
+        assert_eq!(manager.resolve_status("OPEN"), Ok("OPEN".to_string()));
+        assert_eq!(manager.resolve_status("C"), Ok("open".to_string()), "exact shortcut beats a case-insensitive shortcut");
+        assert_eq!(manager.resolve_status("c"), Ok("CLOSED".to_string()));
     }
 
     #[test]

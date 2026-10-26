@@ -229,13 +229,18 @@ pub(crate) fn task_replace(
                         success = false;
                         continue;
                     }
-                    if prop_name == "status" {
-                        if let Err(e) = StatusManager::new().resolve_status(&new_value) {
-                            eprintln!("Task ID {id}: {e}");
-                            success = false;
-                            continue;
+                    let new_value = if prop_name == "status" {
+                        match StatusManager::new().resolve_status(&new_value) {
+                            Ok(canonical) => canonical,
+                            Err(e) => {
+                                eprintln!("Task ID {id}: {e}");
+                                success = false;
+                                continue;
+                            }
                         }
-                    }
+                    } else {
+                        new_value
+                    };
                     task.set_property(&prop_name, &new_value);
                     match gittask::update_task(task) {
                         Ok(_) => {
