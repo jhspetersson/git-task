@@ -544,42 +544,55 @@ pub fn clear_tasks() -> Result<u64, String> {
     Ok(task_count)
 }
 
-pub fn create_task(mut task: Task) -> Result<Task, String> {
+pub fn create_task(task: Task) -> Result<Task, String> {
+    let mut tasks = write_tasks(vec![task], |ids| format!("Create task {}", ids.join(", ")))?;
+    Ok(tasks.pop().unwrap())
+}
+
+pub fn import_tasks(tasks: Vec<Task>) -> Result<Vec<Task>, String> {
+    write_tasks(tasks, |ids| format!("Import task {}", ids.join(", ")))
+}
+
+fn write_tasks(mut tasks: Vec<Task>, message: impl Fn(&[String]) -> String) -> Result<Vec<Task>, String> {
+    if tasks.is_empty() {
+        return Ok(tasks);
+    }
     let repo = open_repo()?;
     let ref_path = get_ref_path();
     let task_ref_result = repo.find_reference(&ref_path);
-    let source_tree = match task_ref_result {
-        Ok(ref reference) => {
-            match reference.peel_to_tree() {
-                Ok(tree) => Some(tree),
-                _ => None
+    let source_tree = task_ref_result.as_ref().ok().and_then(|reference| reference.peel_to_tree().ok());
+    let mut next_id = get_next_id_in(&repo, &ref_path).ok().and_then(|id| id.parse::<i64>().ok()).unwrap_or(1);
+
+    let mut treebuilder = map_err!(repo.treebuilder(source_tree.as_ref()));
+    let mut ids = vec![];
+    for task in tasks.iter_mut() {
+        if task.get_id().is_none() {
+            task.set_id(next_id.to_string());
+        }
+        let id = task.get_id().unwrap();
+        if let Ok(numeric) = id.parse::<i64>() {
+            if numeric >= next_id {
+                next_id = numeric + 1;
             }
         }
-        _ => { None }
-    };
-
-    if task.get_id().is_none() {
-        let id = get_next_id_in(&repo, &ref_path).unwrap_or_else(|_| "1".to_string());
-        task.set_id(id);
+        let content = serde_json::to_string(&*task).unwrap();
+        let oid = map_err!(repo.blob(content.as_bytes()));
+        map_err!(treebuilder.insert(&id, oid, FileMode::Blob.into()));
+        ids.push(id);
     }
-    let string_content = serde_json::to_string(&task).unwrap();
-    let content = string_content.as_bytes();
-    let oid = map_err!(repo.blob(content));
-    let mut treebuilder = map_err!(repo.treebuilder(source_tree.as_ref()));
-    map_err!(treebuilder.insert(&task.get_id().unwrap(), oid, FileMode::Blob.into()));
     let tree_oid = map_err!(treebuilder.write());
 
     let me = &map_err!(repo.signature());
     let mut parents = vec![];
-    if task_ref_result.is_ok() {
-        let parent_commit = map_err!(task_ref_result).peel_to_commit();
-        if parent_commit.is_ok() {
-            parents.push(map_err!(parent_commit));
+    if let Ok(reference) = task_ref_result {
+        if let Ok(parent_commit) = reference.peel_to_commit() {
+            parents.push(parent_commit);
         }
     }
-    map_err!(repo.commit(Some(&ref_path), me, me, format!("Create task {}", &task.get_id().unwrap_or_else(|| String::from("?"))).as_str(), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
+    ids.sort_by(|a, b| compare_ids(a, b));
+    map_err!(repo.commit(Some(&ref_path), me, me, &message(&ids), &map_err!(repo.find_tree(tree_oid)), &parents.iter().collect::<Vec<_>>()));
 
-    Ok(task)
+    Ok(tasks)
 }
 
 pub fn update_task(task: Task) -> Result<String, String> {
@@ -1356,6 +1369,49 @@ mod test {
         assert!(result.is_err(), "updating a nonexistent subtask id must fail");
 
         let _ = delete_tasks(&[&id]);
+    }
+
+    fn commit_count() -> usize {
+        let repo = open_repo().unwrap();
+        let mut commit = repo.find_reference(&get_ref_path()).unwrap().peel_to_commit().unwrap();
+        let mut count = 1;
+        while let Some(parent) = commit.parents().next() {
+            count += 1;
+            commit = parent;
+        }
+        count
+    }
+
+    #[test]
+    fn test_import_tasks_writes_one_commit_for_the_whole_batch() {
+        let _repo = testing::TestRepo::new();
+        let mut with_id = Task::construct_task("With id".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        with_id.set_id("7".to_string());
+        let without_id = Task::construct_task("Without id".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        let another = Task::construct_task("Another".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+
+        let imported = import_tasks(vec![with_id, without_id, another]).unwrap();
+
+        let ids: Vec<String> = imported.iter().map(|t| t.get_id().unwrap()).collect();
+        assert_eq!(ids, vec!["7".to_string(), "8".to_string(), "9".to_string()], "tasks without an id continue after the highest id in the batch");
+        assert_eq!(commit_count(), 1, "a batch must produce a single commit");
+        assert_eq!(find_task("8").unwrap().unwrap().get_property("name").unwrap(), "Without id");
+
+        let mut replaced = Task::construct_task("Replaced".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()));
+        replaced.set_id("7".to_string());
+        import_tasks(vec![replaced, Task::construct_task("Fourth".to_string(), "".to_string(), "OPEN".to_string(), Some(get_current_timestamp()))]).unwrap();
+
+        assert_eq!(commit_count(), 2);
+        assert_eq!(find_task("7").unwrap().unwrap().get_property("name").unwrap(), "Replaced", "an imported task overwrites the one with the same id");
+        assert_eq!(find_task("10").unwrap().unwrap().get_property("name").unwrap(), "Fourth");
+        assert_eq!(list_tasks().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn test_import_tasks_with_an_empty_batch_writes_nothing() {
+        let _repo = testing::TestRepo::new();
+        assert_eq!(import_tasks(vec![]).unwrap().len(), 0);
+        assert!(open_repo().unwrap().find_reference(&get_ref_path()).is_err(), "no commit must be created for an empty batch");
     }
 
     #[test]

@@ -371,6 +371,7 @@ fn import_from_input(ids: Option<String>, input: &String) -> bool {
     if let Ok(tasks) = serde_json::from_str::<Vec<Task>>(input) {
         let ids = ids.map(parse_ids);
         let mut success = true;
+        let mut to_import = vec![];
 
         for task in tasks {
             let id = match task.get_id() {
@@ -388,12 +389,16 @@ fn import_from_input(ids: Option<String>, input: &String) -> bool {
                 }
             }
 
-            match gittask::create_task(task) {
-                Ok(_) => println!("Task ID {id} imported"),
-                Err(e) => {
-                    eprintln!("ERROR: {e}");
-                    success = false;
-                }
+            to_import.push(task);
+        }
+
+        match gittask::import_tasks(to_import) {
+            Ok(imported) => for task in imported {
+                println!("Task ID {} imported", task.get_id().unwrap());
+            },
+            Err(e) => {
+                eprintln!("ERROR: {e}");
+                success = false;
             }
         }
         success
@@ -483,6 +488,7 @@ fn pull_targets(
                 if tasks.is_empty() {
                     success_message("No tasks found".to_string());
                 } else {
+                    let mut to_write = vec![];
                     for mut task in tasks {
                         let task_id = task.get_id().unwrap();
                         if fetch_subtasks {
@@ -495,7 +501,7 @@ fn pull_targets(
                             }
                         }
                         match import_remote_task(task, no_comments, fetch_subtasks, !no_labels) {
-                            Ok(Some(id)) => println!("Task ID {id} updated"),
+                            Ok(Some(task)) => to_write.push(task),
                             Ok(None) => println!("Task ID {task_id} skipped, nothing to update"),
                             Err(e) => {
                                 eprintln!("ERROR: {e}");
@@ -503,6 +509,7 @@ fn pull_targets(
                             }
                         }
                     }
+                    success &= write_imported_tasks(to_write);
                 }
             },
             Err(e) => {
@@ -639,7 +646,7 @@ fn pull_task(
                 }
             }
             match import_remote_task(task, no_comments, fetch_subtasks, !no_labels) {
-                Ok(Some(id)) => println!("Task ID {id} updated"),
+                Ok(Some(task)) => success &= write_imported_tasks(vec![task]),
                 Ok(None) => println!("Task ID {id} skipped, nothing to update"),
                 Err(e) => {
                     eprintln!("ERROR: {e}");
@@ -659,7 +666,19 @@ fn pull_task(
     success
 }
 
-fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool, with_labels: bool) -> Result<Option<String>, String> {
+fn write_imported_tasks(tasks: Vec<Task>) -> bool {
+    match gittask::import_tasks(tasks) {
+        Ok(written) => {
+            for task in written {
+                println!("Task ID {} updated", task.get_id().unwrap());
+            }
+            true
+        },
+        Err(e) => error_message(format!("ERROR: {e}")),
+    }
+}
+
+fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool, with_labels: bool) -> Result<Option<Task>, String> {
     match gittask::find_task(&remote_task.get_id().unwrap()) {
         Ok(Some(mut local_task)) => {
             let subtasks_equal = !with_subtasks
@@ -692,16 +711,10 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool,
                     local_task.set_labels(remote_task.get_labels().clone().unwrap_or_default());
                 }
 
-                match gittask::update_task(local_task) {
-                    Ok(id) => Ok(Some(id)),
-                    Err(e) => Err(e),
-                }
+                Ok(Some(local_task))
             }
         },
-        Ok(None) => match gittask::create_task(remote_task) {
-            Ok(local_task) => Ok(Some(local_task.get_id().unwrap())),
-            Err(e) => Err(e),
-        },
+        Ok(None) => Ok(Some(remote_task)),
         Err(e) => Err(e)
     }
 }
