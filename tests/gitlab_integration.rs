@@ -250,6 +250,27 @@ fn push_creates_the_issue_once_and_adopts_its_iid() {
 }
 
 #[test]
+fn push_creates_a_closed_task_as_a_closed_issue() {
+    let gitlab = gitlab_or_skip!();
+    let project = gitlab.create_project("push-closed");
+    let repo = local_repo(&gitlab, &project);
+
+    run(&gitlab, &repo, &["create", "Pushed closed from CI", "Closed on creation"]);
+    run(&gitlab, &repo, &["status", "1", "CLOSED"]);
+    run(&gitlab, &repo, &["set", "1", "id", "500"]);
+    run(&gitlab, &repo, &["push", "500"]);
+
+    let issues = gitlab.issues(&project);
+    assert_eq!(issues.len(), 1, "exactly one issue must be created, got {issues:?}");
+    let (iid, title, state) = &issues[0];
+    assert_eq!(title, "Pushed closed from CI");
+    assert_eq!(state, "closed", "a task pushed with a done status must be created closed");
+
+    let out = run(&gitlab, &repo, &["push", &iid.to_string()]);
+    assert!(out.contains("Nothing to sync"), "the closed issue must already match the local task: {out}");
+}
+
+#[test]
 fn pull_imports_the_issue_with_its_comment_and_label_but_not_system_notes() {
     let gitlab = gitlab_or_skip!();
     let project = gitlab.create_project("pull");

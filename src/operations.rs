@@ -1011,6 +1011,25 @@ fn push_task(
                     }
                 }
 
+                let local_status = local_task.get_property("status").unwrap_or(&empty_string);
+                let starting_status = &task_statuses[0];
+                if local_status != starting_status {
+                    let mut created_task = local_task.clone();
+                    created_task.set_id(id.clone());
+                    let state = if status_manager.is_done(local_status) {
+                        RemoteTaskState::Closed(local_status.to_string(), starting_status.to_string())
+                    } else {
+                        RemoteTaskState::Open(local_status.to_string(), starting_status.to_string())
+                    };
+                    match connector.update_remote_task(&user, &repo, &created_task, None, state) {
+                        Ok(_) => println!("{}: {} -> {}", id, status_manager.format_status(starting_status, no_color), status_manager.format_status(local_status, no_color)),
+                        Err(e) => {
+                            eprintln!("ERROR: could not set status of REMOTE task ID {id}: {e}");
+                            success = false;
+                        }
+                    }
+                }
+
                 if !no_comments {
                     sync_local_comments(&connector, &user, &repo, &id, &local_task, &[], &mut success);
                 }

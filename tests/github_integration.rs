@@ -339,6 +339,30 @@ fn push_creates_the_issue_once_and_adopts_its_number() {
 }
 
 #[test]
+fn push_creates_a_closed_task_as_a_closed_issue() {
+    let github = github_or_skip!();
+    let suffix = unique_suffix();
+    let title = format!("Pushed closed from CI {suffix}");
+    let repo = local_repo(&github);
+
+    run(&github, &repo, &["create", &title, "Closed on creation"]);
+    run(&github, &repo, &["status", "1", "CLOSED"]);
+    run(&github, &repo, &["set", "1", "id", "999999998"]);
+    let out = run(&github, &repo, &["push", "999999998"]);
+    assert!(out.contains("Created REMOTE task ID"), "the first push must create the issue: {out}");
+
+    let ids = local_task_ids(&repo);
+    assert_eq!(ids.len(), 1);
+    let number: u64 = ids[0].parse().expect("issue number");
+    let issue = github.issue(number);
+    assert_eq!(issue["title"], title);
+    assert_eq!(issue["state"], "closed", "a task pushed with a done status must be created closed");
+
+    let out = run(&github, &repo, &["push", &ids[0]]);
+    assert!(out.contains("Nothing to sync"), "the closed issue must already match the local task: {out}");
+}
+
+#[test]
 fn pull_imports_the_issue_with_its_comment_and_label() {
     let github = github_or_skip!();
     let suffix = unique_suffix();
