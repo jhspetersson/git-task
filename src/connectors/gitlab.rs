@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use gitlab::api::issues::{IssueScope, IssueState};
 use gitlab::api::projects::issues::IssueStateEvent;
@@ -430,6 +431,8 @@ fn prepare_labels(client: &Gitlab, user: &String, repo: &String, labels: &Vec<La
     }
 }
 
+static CLIENTS: OnceLock<Mutex<HashMap<(bool, String, String), Gitlab>>> = OnceLock::new();
+
 fn get_client(token: &str) -> Result<Gitlab, String> {
     let base_url = get_base_url();
     let (insecure, rest) = match base_url.strip_prefix("http://") {
@@ -440,8 +443,15 @@ fn get_client(token: &str) -> Result<Gitlab, String> {
         "" => "gitlab.com".to_string(),
         host => host.to_string(),
     };
+    let key = (insecure, host.clone(), token.to_string());
+    let clients = CLIENTS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some(client) = clients.lock().unwrap().get(&key) {
+        return Ok(client.clone());
+    }
     let client = if insecure { Gitlab::new_insecure(&host, token) } else { Gitlab::new(&host, token) };
-    client.map_err(|e| format!("Could not connect to GitLab at {host}: {e}"))
+    let client = client.map_err(|e| format!("Could not connect to GitLab at {host}: {e}"))?;
+    clients.lock().unwrap().insert(key, client.clone());
+    Ok(client)
 }
 
 fn parse_task_id(task_id: &str) -> Result<u64, String> {
@@ -528,6 +538,51 @@ mod test {
         let result = list_issue_comments(&client, &"no-such-user".to_string(), &"no-such-repo".to_string(), 999999);
 
         assert!(result.is_err(), "a failed note fetch must not look like an issue without notes, got {} notes", result.as_ref().map(|c| c.len()).unwrap_or(0));
+    }
+
+    fn stub_gitlab_server() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub server");
+        let addr = listener.local_addr().unwrap();
+        let user_requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = user_requests.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = match stream { Ok(s) => s, Err(_) => continue };
+                let mut head = Vec::new();
+                let mut buf = [0u8; 1024];
+                let header_end = [13u8, 10, 13, 10];
+                while !head.windows(4).any(|w| w == header_end) {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => head.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let request_line = String::from_utf8_lossy(&head).lines().next().unwrap_or_default().to_string();
+                if request_line.contains("/api/v4/user") {
+                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                }
+                let crlf = [13u8, 10];
+                let response = [b"HTTP/1.1 200 OK".as_slice(), &crlf, b"Content-Length: 2", &crlf, b"Connection: close", &crlf, &crlf, b"{}"].concat();
+                let _ = stream.write_all(&response);
+            }
+        });
+        (format!("http://{addr}"), user_requests)
+    }
+
+    #[test]
+    fn test_get_client_is_reused_per_host_and_token() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (url, user_requests) = stub_gitlab_server();
+        gittask::set_config_value("task.gitlab.url", &url).unwrap();
+
+        get_client("reuse-token").expect("first client");
+        get_client("reuse-token").expect("second client");
+        get_client("reuse-token").expect("third client");
+        assert_eq!(user_requests.load(std::sync::atomic::Ordering::SeqCst), 1, "the same host and token must authenticate only once");
+
+        get_client("another-token").expect("client for another token");
+        assert_eq!(user_requests.load(std::sync::atomic::Ordering::SeqCst), 2, "a different token must get its own client");
     }
 
     #[test]
