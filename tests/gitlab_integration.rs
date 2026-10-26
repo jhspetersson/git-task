@@ -353,6 +353,14 @@ fn push_syncs_local_edits_comments_labels_and_closes_the_issue() {
     run(&gitlab, &repo, &["push", &id]);
     assert_eq!(gitlab.notes(&project, iid).len(), 1, "a repeated push must not duplicate the comment");
 
+    let note_id = notes[0].0.to_string();
+    run(&gitlab, &repo, &["comment", "set", &id, &note_id, "Comment edited locally"]);
+    let out = run(&gitlab, &repo, &["push", &id]);
+    assert!(out.contains("Updated REMOTE comment ID"), "push must update the edited comment: {out}");
+    let notes = gitlab.notes(&project, iid);
+    assert_eq!(notes.len(), 1, "editing a comment must not create another one");
+    assert_eq!(notes[0].1, "Comment edited locally");
+
     run(&gitlab, &repo, &["set", &id, "status", "CLOSED"]);
     run(&gitlab, &repo, &["push", &id]);
     assert_eq!(gitlab.issue(&project, iid)["state"], "closed");

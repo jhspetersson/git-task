@@ -977,8 +977,8 @@ fn push_task(
             }
         }
         if !no_comments {
-            let remote_comment_ids: Vec<String> = remote_task.get_comments().as_ref().unwrap_or(&vec![]).iter().filter_map(|comment| comment.get_id()).collect();
-            anything_synced |= sync_local_comments(&connector, &user, &repo, &id, &local_task, &remote_comment_ids, &mut success);
+            let remote_comments = remote_task.get_comments().as_ref().map(Vec::as_slice).unwrap_or(&[]);
+            anything_synced |= sync_local_comments(&connector, &user, &repo, &id, &local_task, remote_comments, &mut success);
         }
         if sync_subtasks {
             anything_synced |= sync_local_subtasks(&connector, &user, &repo, &id, &local_task, &status_manager, &task_statuses, &mut success);
@@ -1122,9 +1122,12 @@ fn sync_local_comments(
     repo: &String,
     task_id: &String,
     local_task: &Task,
-    remote_comment_ids: &[String],
+    remote_comments: &[Comment],
     success: &mut bool,
 ) -> bool {
+    let remote_texts: HashMap<String, String> = remote_comments.iter()
+        .filter_map(|comment| comment.get_id().map(|id| (id, comment.get_text())))
+        .collect();
     let mut synced = false;
     let mut id_updates = vec![];
     for comment in local_task.get_comments().as_ref().unwrap_or(&vec![]) {
@@ -1136,7 +1139,20 @@ fn sync_local_comments(
                 continue;
             }
         };
-        if remote_comment_ids.contains(&local_id) {
+        if let Some(remote_text) = remote_texts.get(&local_id) {
+            let local_text = comment.get_text();
+            if local_text != *remote_text {
+                match connector.update_remote_comment(user, repo, task_id, &local_id, &local_text) {
+                    Ok(_) => {
+                        println!("Updated REMOTE comment ID {local_id}");
+                        synced = true;
+                    },
+                    Err(e) => {
+                        eprintln!("ERROR updating REMOTE comment ID {local_id}: {e}");
+                        *success = false;
+                    }
+                }
+            }
             continue;
         }
         match connector.create_remote_comment(user, repo, task_id, comment) {

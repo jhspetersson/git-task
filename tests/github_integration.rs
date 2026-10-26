@@ -453,6 +453,14 @@ fn push_syncs_local_edits_comments_labels_and_subtasks() {
     assert_eq!(github.comments(number).len(), 1, "a repeated push must not duplicate the comment");
     assert_eq!(github.sub_issues(number).len(), 1, "a repeated push must not duplicate the sub-issue");
 
+    let comment_id = comments[0].0.to_string();
+    run(&github, &repo, &["comment", "set", &id, &comment_id, "Comment edited locally"]);
+    let out = run(&github, &repo, &["push", &id]);
+    assert!(out.contains("Updated REMOTE comment ID"), "push must update the edited comment: {out}");
+    let comments = github.comments(number);
+    assert_eq!(comments.len(), 1, "editing a comment must not create another one");
+    assert_eq!(comments[0].1, "Comment edited locally");
+
     github.close_issue(subs[0].number);
     github.close_issue(number);
 }
