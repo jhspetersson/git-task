@@ -1001,12 +1001,14 @@ fn push_task(
         match connector.create_remote_task(&user, &repo, &local_task) {
             Ok(id) => {
                 println!("Sync: Created REMOTE task ID {id}");
-                if local_task.get_id().unwrap() != id {
-                    match gittask::update_task_id(&local_task.get_id().unwrap(), &id) {
-                        Ok(_) => println!("Task ID {} -> {} updated", local_task.get_id().unwrap(), id),
+                let local_id = local_task.get_id().unwrap();
+                if local_id != id {
+                    match gittask::update_task_id(&local_id, &id) {
+                        Ok(_) => println!("Task ID {local_id} -> {id} updated"),
                         Err(e) => {
-                            eprintln!("ERROR: {e}");
-                            success = false;
+                            eprintln!("ERROR: could not rename LOCAL task ID {local_id} to {id}: {e}");
+                            eprintln!("REMOTE task ID {id} has been created but LOCAL task ID {local_id} still points nowhere, resolve the conflict manually");
+                            return false;
                         }
                     }
                 }
@@ -1976,6 +1978,35 @@ mod tests {
         assert_eq!(fake.created_tasks(), 1);
         assert!(gittask::find_task(&id).unwrap().is_none(), "the local task must adopt the new remote id");
         assert!(gittask::find_task("77").unwrap().is_some());
+    }
+
+    #[test]
+    fn test_push_task_stops_when_the_remote_id_collides_with_another_local_task() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut other = gittask::Task::new("Other".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        other.set_id("77".to_string());
+        other.add_comment(Some("1".to_string()), HashMap::new(), "unrelated comment".to_string());
+        gittask::create_task(other).unwrap();
+        let mut local = gittask::Task::new("Local".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        local.add_comment(Some("1".to_string()), HashMap::new(), "local comment".to_string());
+        let id = gittask::create_task(local).unwrap().get_id().unwrap();
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(None));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+
+        let result = push_task(&connector, &"u".to_string(), &"r".to_string(), &id, false, false, true, &StatusManager::new(), &statuses, true);
+
+        assert!(!result, "a push that cannot adopt the remote id must fail");
+        assert_eq!(fake.created_tasks(), 1);
+        let other = gittask::find_task("77").unwrap().unwrap();
+        assert_eq!(comment_ids(&other), vec!["1".to_string()], "the unrelated task that owns the colliding id must not be touched");
+        assert_eq!(other.get_property("name").unwrap(), "Other");
+        let local = gittask::find_task(&id).unwrap().expect("the local task must keep its id");
+        assert_eq!(comment_ids(&local), vec!["1".to_string()], "nothing must be synced against the wrong task");
+    }
+
+    fn comment_ids(task: &Task) -> Vec<String> {
+        task.get_comments().clone().unwrap_or_default().iter().filter_map(|c| c.get_id()).collect()
     }
 
     fn label_names(task: &Task) -> Vec<String> {
