@@ -1442,11 +1442,11 @@ fn make_comparison(first: &Task, second: &Task, prop: &str, value_type: &str) ->
             match value_type {
                 "integer" | "datetime" => {
                     let first_value = match first.get_property(prop) {
-                        Some(value) => value.parse::<u64>().unwrap_or(0),
+                        Some(value) => value.parse::<i64>().unwrap_or(0),
                         _ => 0,
                     };
                     let second_value = match second.get_property(prop) {
-                        Some(value) => value.parse::<u64>().unwrap_or(0),
+                        Some(value) => value.parse::<i64>().unwrap_or(0),
                         _ => 0,
                     };
 
@@ -1848,6 +1848,24 @@ mod tests {
         task_b.set_property("created", "10");
         let result = make_comparison(&task_a, &task_b, "created", "datetime");
         assert_eq!(result, std::cmp::Ordering::Less, "datetime comparison should be numeric, not lexicographic (9 < 10)");
+    }
+
+    #[test]
+    fn test_make_comparison_integer_handles_negative_values() {
+        let _repo = gittask::testing::TestRepo::new();
+        let with_priority = |value: &str| {
+            let mut task = gittask::Task::new(value.to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+            task.set_property("priority", value);
+            task
+        };
+        let zero = with_priority("0");
+        let minus_one = with_priority("-1");
+        let minus_ten = with_priority("-10");
+
+        assert_eq!(make_comparison(&minus_ten, &minus_one, "priority", "integer"), std::cmp::Ordering::Less, "-10 < -1");
+        assert_eq!(make_comparison(&minus_one, &zero, "priority", "integer"), std::cmp::Ordering::Less, "-1 < 0");
+        assert_eq!(make_comparison(&zero, &minus_ten, "priority", "integer"), std::cmp::Ordering::Greater, "0 > -10");
+        assert_eq!(make_comparison(&minus_one, &minus_one, "priority", "integer"), std::cmp::Ordering::Equal);
     }
 
     #[test]
