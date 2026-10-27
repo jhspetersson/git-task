@@ -535,7 +535,7 @@ Subtasks are synchronized using Redmine's `parent_issue_id`: a local subtask is 
 
 ## License
 
-MIT
+GPL-3.0-or-later. See [LICENSE](LICENSE) for the full text.
 
 ---
 

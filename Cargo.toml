@@ -9,7 +9,7 @@ documentation = "https://github.com/jhspetersson/git-task/blob/master/README.md"
 homepage = "https://github.com/jhspetersson/git-task"
 repository = "https://github.com/jhspetersson/git-task"
 readme = "README.md"
-license = "MIT"
+license = "GPL-3.0-or-later"
 edition = "2024"
 
 [lib]
