@@ -559,6 +559,21 @@ Tasks carry their project in the `project_id` property. Change it and push to mo
 
 Subtasks are synchronized using Redmine's `parent_issue_id`: a local subtask is created as a regular issue whose parent is the task, and children are listed via the `parent_id` filter.
 
+### Custom fields
+
+Redmine custom fields are synchronized as task properties, without any configuration: every custom field of an issue becomes a property named after the field (`Story Points` becomes `story_points`), lists are joined with commas. Pulling fills the properties from the fields that hold a value; pushing writes a property back when it differs from Redmine, and an empty property clears the field. A property missing locally leaves the field alone, and a field that is empty in Redmine leaves the local property alone.
+
+To see the fields in use in the project, or to pin the mapping to specific field ids:
+
+    git task config fields list
+    git task config fields save
+
+`save` writes the mapping to `task.redmine.fields` as a comma separated list of `property=<field id>[:type]`, where the type is `string` (default) or `multi` for list fields. Once this option is set, only the listed fields are synchronized:
+
+    git task config set task.redmine.fields "points=3,tags=7:multi"
+
+Values are passed to Redmine as text, so dates, numbers and booleans (`1`/`0`) use the format Redmine itself shows.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) for the full text.

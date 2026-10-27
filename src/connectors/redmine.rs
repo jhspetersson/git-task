@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use redmine_api::api::custom_fields::{CustomField, CustomFieldEssentialsWithValue};
 use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue, DeleteIssue, IssueInclude, IssueStatusFilter};
 use redmine_api::api::issue_statuses::{ListIssueStatuses, IssueStatusesWrapper, IssueStatus};
 use redmine_api::api::projects::{GetProject, ListProjects, Project, ProjectWrapper};
@@ -10,7 +11,7 @@ use serde::Serialize;
 
 use gittask::{Task, Comment, Label, Subtask};
 
-use crate::connectors::{status_names_match, RemoteConnector, RemoteTaskState};
+use crate::connectors::{property_name, status_names_match, RemoteConnector, RemoteField, RemoteTaskState, BUILT_IN_PROPERTIES};
 
 #[derive(Debug, Clone, Serialize)]
 struct UpdateJournalInner {
@@ -46,6 +47,27 @@ impl Endpoint for UpdateJournal {
     }
 }
 
+/// Writes custom field values the `UpdateIssue` builder cannot express (lists).
+struct UpdateCustomFields {
+    issue_id: u64,
+    fields: Vec<serde_json::Value>,
+}
+
+impl Endpoint for UpdateCustomFields {
+    fn method(&self) -> Method {
+        Method::PUT
+    }
+
+    fn endpoint(&self) -> Cow<'static, str> {
+        format!("issues/{}.json", self.issue_id).into()
+    }
+
+    fn body(&self) -> Result<Option<(&'static str, Vec<u8>)>, redmine_api::Error> {
+        let body = serde_json::json!({"issue": {"custom_fields": self.fields}});
+        Ok(Some(("application/json", serde_json::to_vec(&body)?)))
+    }
+}
+
 pub struct RedmineRemoteConnector;
 
 impl RemoteConnector for RedmineRemoteConnector {
@@ -58,6 +80,7 @@ impl RemoteConnector for RedmineRemoteConnector {
             "task.redmine.url".to_string(),
             "task.redmine.api.key".to_string(),
             "task.redmine.project.id".to_string(),
+            "task.redmine.fields".to_string(),
         ])
     }
 
@@ -69,6 +92,15 @@ impl RemoteConnector for RedmineRemoteConnector {
 
     fn remote_for_project(&self, _url: &str, project: &str) -> Option<(String, String)> {
         configured_url().map(|_| (String::new(), project.to_string()))
+    }
+
+    fn fields_config_option(&self) -> Option<String> {
+        Some("task.redmine.fields".to_string())
+    }
+
+    fn discover_remote_fields(&self, domain: &String, project: &String) -> Result<Vec<RemoteField>, String> {
+        let redmine = get_redmine_instance(domain)?;
+        discover_project_fields(&redmine, project)
     }
 
     fn list_remote_tasks(
@@ -83,6 +115,7 @@ impl RemoteConnector for RedmineRemoteConnector {
     ) -> Result<Vec<Task>, String> {
         let redmine = get_redmine_instance(domain)?;
         let project_id = resolve_project_id(&redmine, project)?;
+        let mappings = get_field_mappings()?;
         let status_filter = match &state {
             RemoteTaskState::Open(status, _) | RemoteTaskState::Closed(status, _) => {
                 if let Ok(Some(status_id)) = get_status_id_by_name(&redmine, status) {
@@ -117,7 +150,7 @@ impl RemoteConnector for RedmineRemoteConnector {
 
         let mut tasks = Vec::new();
         for issue in issues {
-            let mut task = issue_to_task(&issue)?;
+            let mut task = issue_to_task(&issue, mappings.as_deref())?;
 
             if with_comments {
                 let mut builder = GetIssue::builder();
@@ -155,7 +188,7 @@ impl RemoteConnector for RedmineRemoteConnector {
             None => return Ok(None),
         };
 
-        let mut task = issue_to_task(&issue)?;
+        let mut task = issue_to_task(&issue, get_field_mappings()?.as_deref())?;
 
         if with_comments {
             append_journals_as_comments(&issue, &mut task);
@@ -186,6 +219,19 @@ impl RemoteConnector for RedmineRemoteConnector {
         let IssueWrapper { issue } = redmine
             .json_response_body::<_, IssueWrapper<Issue>>(&endpoint)
             .map_err(|e| e.to_string())?;
+
+        // The new issue lists the custom fields of its tracker, which is what the
+        // discovered mapping needs; the values follow in a second request.
+        let mappings = get_field_mappings()?.unwrap_or_else(|| discover_field_mappings(issue.custom_fields.iter().flatten()));
+        let (single, multiple) = custom_field_changes(&issue, task.get_all_properties(), &mappings);
+        if !single.is_empty() {
+            let mut update = UpdateIssue::builder();
+            update.id(issue.id);
+            update.custom_fields(single);
+            let endpoint = update.build().map_err(|e| e.to_string())?;
+            redmine.ignore_response_body(&endpoint).map_err(|e| format!("Issue #{} created, but its custom fields could not be set: {e}", issue.id))?;
+        }
+        push_multi_value_fields(&redmine, issue.id, multiple)?;
 
         Ok(issue.id.to_string())
     }
@@ -248,10 +294,16 @@ impl RemoteConnector for RedmineRemoteConnector {
             .parse::<u64>()
             .map_err(|e| format!("Invalid task id '{}': {}", task.get_id().unwrap(), e))?;
 
-        get_issue_in_project(&redmine, project, task.get_property("project_id"), id, None)?.ok_or_else(|| format!("Issue #{id} not found in project '{project}'"))?;
+        let issue = get_issue_in_project(&redmine, project, task.get_property("project_id"), id, None)?.ok_or_else(|| format!("Issue #{id} not found in project '{project}'"))?;
 
         let mut builder = UpdateIssue::builder();
         builder.id(id);
+
+        let mappings = get_field_mappings()?.unwrap_or_else(|| discover_field_mappings(issue.custom_fields.iter().flatten()));
+        let (single, multiple) = custom_field_changes(&issue, task.get_all_properties(), &mappings);
+        if !single.is_empty() {
+            builder.custom_fields(single);
+        }
 
         if let Some(name) = task.get_property("name") { builder.subject(name.clone()); }
         if let Some(desc) = task.get_property("description") { builder.description(desc.clone()); }
@@ -275,7 +327,8 @@ impl RemoteConnector for RedmineRemoteConnector {
         }
 
         let update_endpoint = builder.build().map_err(|e| e.to_string())?;
-        redmine.ignore_response_body(&update_endpoint).map_err(|e| e.to_string())
+        redmine.ignore_response_body(&update_endpoint).map_err(|e| e.to_string())?;
+        push_multi_value_fields(&redmine, id, multiple)
     }
 
     fn update_remote_comment(&self, domain: &String, _project: &String, _task_id: &String, comment_id: &String, text: &String) -> Result<(), String> {
@@ -557,7 +610,9 @@ fn collect_pages<T>(limit: usize, mut fetch: impl FnMut(u64, u64) -> Result<(Vec
     Ok(collected)
 }
 
-fn issue_to_task(issue: &Issue) -> Result<Task, String> {
+/// Converts an issue into a task. Custom fields follow `mappings`, or, when none are
+/// configured, a mapping discovered from the custom fields of the issue itself.
+fn issue_to_task(issue: &Issue, mappings: Option<&[FieldMapping]>) -> Result<Task, String> {
     let mut props = HashMap::new();
     props.insert("name".to_string(), issue.subject.clone().unwrap_or_else(|| String::new()));
     props.insert("status".to_string(), issue.status.name.clone());
@@ -571,8 +626,171 @@ fn issue_to_task(issue: &Issue) -> Result<Task, String> {
 
     let project_id = issue.project.id;
     props.insert("project_id".to_string(), project_id.to_string());
-    
+
+    let discovered;
+    let mappings = match mappings {
+        Some(mappings) => mappings,
+        None => {
+            discovered = discover_field_mappings(issue.custom_fields.iter().flatten());
+            &discovered
+        }
+    };
+    for mapping in mappings {
+        if let Some(value) = custom_field(issue, mapping.field).and_then(field_value_text) {
+            props.insert(mapping.property.clone(), value);
+        }
+    }
+
     Task::from_properties(issue.id.to_string(), props).map_err(|e| e.to_string())
+}
+
+/// One `property=<field id>[:type]` entry of `task.redmine.fields`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FieldMapping {
+    property: String,
+    field: u64,
+    /// Whether the field takes a list of values; `None` means "as the issue says".
+    multiple: Option<bool>,
+}
+
+/// Parses `task.redmine.fields`: comma separated `property=<field id>[:string|multi]` entries,
+/// for example `points=3,tags=7:multi`.
+pub(crate) fn parse_field_mappings(spec: &str) -> Result<Vec<FieldMapping>, String> {
+    let mut mappings: Vec<FieldMapping> = vec![];
+    for entry in spec.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        let invalid = || format!("Invalid Redmine field mapping '{entry}': expected property=<field id>[:string|multi]");
+        let (property, target) = entry.split_once('=').ok_or_else(invalid)?;
+        let property = property.trim();
+        let (field, kind) = match target.split_once(':') {
+            Some((field, kind)) => (field.trim(), Some(kind.trim().to_ascii_lowercase())),
+            None => (target.trim(), None),
+        };
+        let field: u64 = field.parse().map_err(|_| invalid())?;
+        let multiple = match kind.as_deref() {
+            None => None,
+            Some("string" | "text") => Some(false),
+            Some("multi" | "list") => Some(true),
+            Some(other) => return Err(format!("Invalid Redmine field mapping '{entry}': unknown type '{other}' (expected string or multi)")),
+        };
+        if property.is_empty() {
+            return Err(invalid());
+        }
+        if BUILT_IN_PROPERTIES.contains(&property) {
+            return Err(format!("Invalid Redmine field mapping '{entry}': '{property}' is a built-in property"));
+        }
+        if mappings.iter().any(|m| m.property == property) {
+            return Err(format!("Invalid Redmine field mapping '{entry}': property '{property}' is mapped twice"));
+        }
+        if mappings.iter().any(|m| m.field == field) {
+            return Err(format!("Invalid Redmine field mapping '{entry}': field {field} is mapped twice"));
+        }
+        mappings.push(FieldMapping { property: property.to_string(), field, multiple });
+    }
+    Ok(mappings)
+}
+
+/// The mappings configured in `task.redmine.fields`, or `None` when the option is not set
+/// and the mapping is discovered from the issues instead.
+fn get_field_mappings() -> Result<Option<Vec<FieldMapping>>, String> {
+    match gittask::get_config_value("task.redmine.fields") {
+        Ok(spec) => parse_field_mappings(&spec).map(Some),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Maps every custom field of the given issues to a property named after it. Names are
+/// derived in field id order, with the id appended on a clash with another field or a
+/// built-in property.
+fn discover_field_mappings<'a>(fields: impl Iterator<Item = &'a CustomFieldEssentialsWithValue>) -> Vec<FieldMapping> {
+    let mut seen: Vec<&CustomFieldEssentialsWithValue> = vec![];
+    for field in fields {
+        if !seen.iter().any(|f| f.id == field.id) {
+            seen.push(field);
+        }
+    }
+    seen.sort_by_key(|f| f.id);
+    let mut mappings: Vec<FieldMapping> = vec![];
+    for field in seen {
+        let mut property = property_name(&field.name);
+        if BUILT_IN_PROPERTIES.contains(&property.as_str()) || mappings.iter().any(|m| m.property == property) {
+            property = format!("{property}_{}", field.id);
+        }
+        mappings.push(FieldMapping { property, field: field.id, multiple: Some(field.multiple.unwrap_or(false)) });
+    }
+    mappings
+}
+
+fn custom_field(issue: &Issue, id: u64) -> Option<&CustomFieldEssentialsWithValue> {
+    issue.custom_fields.iter().flatten().find(|field| field.id == id)
+}
+
+/// The non-empty values of a field, joined for a multi-value one; `None` when empty.
+fn field_value_text(field: &CustomFieldEssentialsWithValue) -> Option<String> {
+    let values = field_values(field);
+    if values.is_empty() { None } else { Some(values.join(", ")) }
+}
+
+fn field_values(field: &CustomFieldEssentialsWithValue) -> Vec<String> {
+    field.value.iter().flatten().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_string()).collect()
+}
+
+fn split_values(text: &str) -> Vec<String> {
+    text.split(',').map(str::trim).filter(|v| !v.is_empty()).map(str::to_string).collect()
+}
+
+/// The custom field values a task wants changed on its issue: single values for the
+/// `UpdateIssue` builder, lists for `UpdateCustomFields`. Properties the task does not
+/// have, and values equal to the issue's, are left alone; an empty property clears the field.
+fn custom_field_changes(issue: &Issue, properties: &HashMap<String, String>, mappings: &[FieldMapping]) -> (Vec<CustomField<'static>>, Vec<serde_json::Value>) {
+    let mut single = vec![];
+    let mut multiple = vec![];
+    for mapping in mappings {
+        let Some(local) = properties.get(&mapping.property) else { continue };
+        let current = custom_field(issue, mapping.field);
+        let is_list = mapping.multiple.or_else(|| current.and_then(|f| f.multiple)).unwrap_or(false);
+        if is_list {
+            let wanted = split_values(local);
+            if current.map(field_values).unwrap_or_default() != wanted {
+                multiple.push(serde_json::json!({"id": mapping.field, "value": wanted}));
+            }
+        } else if current.and_then(field_value_text).unwrap_or_default() != local.trim() {
+            single.push(CustomField { id: mapping.field, name: None, value: Cow::Owned(local.trim().to_string()) });
+        }
+    }
+    (single, multiple)
+}
+
+fn push_multi_value_fields(redmine: &Redmine, issue_id: u64, fields: Vec<serde_json::Value>) -> Result<(), String> {
+    if fields.is_empty() {
+        return Ok(());
+    }
+    redmine.ignore_response_body(&UpdateCustomFields { issue_id, fields })
+        .map_err(|e| format!("Could not set the list custom fields of issue #{issue_id}: {e}"))
+}
+
+/// The custom fields holding a value on the (first page of) issues of a project.
+fn discover_project_fields(redmine: &Redmine, project: &String) -> Result<Vec<RemoteField>, String> {
+    let project_id = resolve_project_id(redmine, project)?;
+    let mut builder = ListIssues::builder();
+    builder.project_id(vec![project_id]);
+    builder.status_id(IssueStatusFilter::All);
+    let endpoint = builder.build().map_err(|e| e.to_string())?;
+    let issues = redmine
+        .json_response_body_page::<_, Issue>(&endpoint, 0, REDMINE_PAGE_SIZE)
+        .map_err(|e| e.to_string())?
+        .values;
+    let fields: Vec<&CustomFieldEssentialsWithValue> = issues.iter().flat_map(|issue| issue.custom_fields.iter().flatten()).collect();
+    let used: Vec<u64> = fields.iter().filter(|f| field_value_text(f).is_some()).map(|f| f.id).collect();
+    Ok(discover_field_mappings(fields.iter().copied())
+        .into_iter()
+        .filter(|mapping| used.contains(&mapping.field))
+        .map(|mapping| RemoteField {
+            name: fields.iter().find(|f| f.id == mapping.field).map(|f| f.name.clone()).unwrap_or_default(),
+            kind: if mapping.multiple == Some(true) { "multi" } else { "string" }.to_string(),
+            property: mapping.property,
+            id: mapping.field.to_string(),
+        })
+        .collect())
 }
 
 fn append_journals_as_comments(issue: &Issue, task: &mut Task) {
@@ -1015,7 +1233,7 @@ mod tests {
     #[test]
     fn an_issue_without_notes_yields_an_empty_comment_list_not_none() {
         let issue = issue_with_journals("[]");
-        let mut task = issue_to_task(&issue).unwrap();
+        let mut task = issue_to_task(&issue, None).unwrap();
         assert!(task.get_comments().is_none(), "a freshly mapped issue has no comment list yet");
 
         append_journals_as_comments(&issue, &mut task);
@@ -1034,7 +1252,7 @@ mod tests {
             { "id": 13, "user": { "id": 1, "name": "Admin" }, "notes": "A real comment", "private_notes": false,
               "created_on": "2026-10-16T10:03:00Z", "updated_on": "2026-10-16T10:03:00Z", "details": [] }
         ]"#);
-        let mut task = issue_to_task(&issue).unwrap();
+        let mut task = issue_to_task(&issue, None).unwrap();
 
         append_journals_as_comments(&issue, &mut task);
 
@@ -1043,5 +1261,118 @@ mod tests {
         assert_eq!(comments.len(), 1, "only the journal with notes must become a comment, got {texts:?}");
         assert_eq!(comments[0].get_id(), Some("13".to_string()));
         assert_eq!(comments[0].get_text(), "A real comment");
+    }
+
+    fn issue_with_custom_fields(id: u64, custom_fields: &str) -> Issue {
+        let json = format!(r#"{{
+            "id": {id},
+            "project": {{ "id": 1, "name": "CI" }},
+            "tracker": {{ "id": 1, "name": "Bug" }},
+            "status": {{ "id": 1, "name": "New", "is_closed": false }},
+            "priority": {{ "id": 2, "name": "Normal" }},
+            "author": {{ "id": 1, "name": "Admin" }},
+            "subject": "Fields",
+            "description": "",
+            "start_date": null,
+            "due_date": null,
+            "closed_on": null,
+            "done_ratio": 0,
+            "estimated_hours": null,
+            "created_on": "2026-10-16T10:00:00Z",
+            "updated_on": "2026-10-16T10:00:00Z",
+            "custom_fields": {custom_fields}
+        }}"#);
+        serde_json::from_str(&json).expect("issue JSON")
+    }
+
+    const SAMPLE_FIELDS: &str = r#"[
+        {"id": 3, "name": "Story Points", "value": "5"},
+        {"id": 7, "name": "Tags", "multiple": true, "value": ["a", "b"]},
+        {"id": 8, "name": "Empty", "value": ""},
+        {"id": 9, "name": "Status", "value": "shipped"},
+        {"id": 12, "name": "Story points", "value": "8"}
+    ]"#;
+
+    fn props(entries: &[(&str, &str)]) -> HashMap<String, String> {
+        entries.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    #[test]
+    fn parse_redmine_field_mappings() {
+        let mappings = parse_field_mappings(" points = 3 , tags=7:multi,title=9:string").unwrap();
+        assert_eq!(mappings, vec![
+            FieldMapping { property: "points".to_string(), field: 3, multiple: None },
+            FieldMapping { property: "tags".to_string(), field: 7, multiple: Some(true) },
+            FieldMapping { property: "title".to_string(), field: 9, multiple: Some(false) },
+        ]);
+        for spec in ["points", "points=abc", "=3", "points=3:number", "project_id=3", "a=3,a=4", "a=3,b=3"] {
+            let error = parse_field_mappings(spec).unwrap_err();
+            assert!(error.starts_with("Invalid Redmine field mapping"), "{spec}: {error}");
+        }
+    }
+
+    #[test]
+    fn custom_fields_become_properties_named_after_them_when_nothing_is_configured() {
+        let task = issue_to_task(&issue_with_custom_fields(7, SAMPLE_FIELDS), None).unwrap();
+        assert_eq!(task.get_property("story_points").map(String::as_str), Some("5"));
+        assert_eq!(task.get_property("tags").map(String::as_str), Some("a, b"), "lists are joined");
+        assert_eq!(task.get_property("empty"), None, "an empty field sets no property");
+        assert_eq!(task.get_property("status").map(String::as_str), Some("New"), "built-in properties are never overwritten");
+        assert_eq!(task.get_property("status_9").map(String::as_str), Some("shipped"), "a clash with a built-in property appends the field id");
+        assert_eq!(task.get_property("story_points_12").map(String::as_str), Some("8"), "a clash with another field appends the field id");
+    }
+
+    #[test]
+    fn configured_mappings_select_the_custom_fields() {
+        let mappings = parse_field_mappings("points=3,labels=7").unwrap();
+        let task = issue_to_task(&issue_with_custom_fields(7, SAMPLE_FIELDS), Some(&mappings)).unwrap();
+        assert_eq!(task.get_property("points").map(String::as_str), Some("5"));
+        assert_eq!(task.get_property("labels").map(String::as_str), Some("a, b"));
+        assert_eq!(task.get_property("story_points"), None);
+        assert_eq!(task.get_property("status_9"), None);
+    }
+
+    #[test]
+    fn only_changed_custom_fields_are_pushed() {
+        let issue = issue_with_custom_fields(7, SAMPLE_FIELDS);
+        let mappings = discover_field_mappings(issue.custom_fields.iter().flatten());
+
+        let unchanged = props(&[("story_points", "5"), ("tags", "a,b"), ("empty", ""), ("other", "x")]);
+        let (single, multiple) = custom_field_changes(&issue, &unchanged, &mappings);
+        assert!(single.is_empty() && multiple.is_empty(), "equal values (and differently spaced lists) are not written back: {single:?} {multiple:?}");
+
+        let edited = props(&[("story_points", "8"), ("tags", "b, c"), ("empty", "now set"), ("status_9", "")]);
+        let (single, multiple) = custom_field_changes(&issue, &edited, &mappings);
+        let singles: Vec<(u64, String)> = single.iter().map(|f| (f.id, f.value.to_string())).collect();
+        assert_eq!(singles, vec![(3, "8".to_string()), (8, "now set".to_string()), (9, String::new())], "an empty property clears the field");
+        assert_eq!(multiple, vec![serde_json::json!({"id": 7, "value": ["b", "c"]})]);
+
+        let configured = parse_field_mappings("tags=7:multi,points=3").unwrap();
+        let (single, multiple) = custom_field_changes(&issue, &props(&[("tags", ""), ("points", "5")]), &configured);
+        assert!(single.is_empty());
+        assert_eq!(multiple, vec![serde_json::json!({"id": 7, "value": []})], "an empty list property clears the list");
+    }
+
+    #[test]
+    fn discover_project_fields_lists_the_fields_with_values_across_the_issues() {
+        let (redmine, requests) = stub_redmine(|method, path| match (method, path) {
+            ("GET", "/projects/ci.json") => (200, format!(r#"{{"project":{}}}"#, project_json(1, "ci", "CI"))),
+            ("GET", "/issues.json") => (200, format!(r#"{{"issues":[{},{}],"total_count":2,"offset":0,"limit":100}}"#,
+                issue_json(1, r#"[{"id": 3, "name": "Story Points", "value": "5"}, {"id": 7, "name": "Tags", "multiple": true, "value": []}]"#),
+                issue_json(2, r#"[{"id": 3, "name": "Story Points", "value": ""}, {"id": 7, "name": "Tags", "multiple": true, "value": ["x"]}, {"id": 8, "name": "Never set", "value": ""}]"#))),
+            _ => (404, r#"{"errors":["Not found"]}"#.to_string()),
+        });
+
+        let fields = discover_project_fields(&redmine, &"ci".to_string()).unwrap();
+
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /projects/ci.json", "GET /issues.json"]);
+        assert_eq!(fields, vec![
+            RemoteField { property: "story_points".to_string(), id: "3".to_string(), kind: "string".to_string(), name: "Story Points".to_string() },
+            RemoteField { property: "tags".to_string(), id: "7".to_string(), kind: "multi".to_string(), name: "Tags".to_string() },
+        ]);
+    }
+
+    fn issue_json(id: u64, custom_fields: &str) -> String {
+        format!(r#"{{"id":{id},"project":{{"id":1,"name":"CI"}},"tracker":{{"id":1,"name":"Bug"}},"status":{{"id":1,"name":"New","is_closed":false}},"priority":{{"id":2,"name":"Normal"}},"author":{{"id":1,"name":"Admin"}},"subject":"Fields","description":"","start_date":null,"due_date":null,"closed_on":null,"done_ratio":0,"estimated_hours":null,"created_on":"2026-10-16T10:00:00Z","updated_on":"2026-10-16T10:00:00Z","custom_fields":{custom_fields}}}"#)
     }
 }

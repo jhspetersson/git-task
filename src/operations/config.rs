@@ -64,6 +64,15 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool, forc
                 Err(e) => error_message(format!("ERROR: {e}"))
             }
         },
+        "task.redmine.fields" => {
+            if let Err(e) = crate::connectors::redmine::parse_field_mappings(&value) {
+                return error_message(format!("ERROR: {e}"));
+            }
+            match gittask::set_config_value(&param, &value) {
+                Ok(_) => success_message(format!("{param} has been updated")),
+                Err(e) => error_message(format!("ERROR: {e}"))
+            }
+        },
         "task.list.columns" => {
             match gittask::set_config_value(&param, &value) {
                 Ok(_) => success_message(format!("{param} has been updated")),

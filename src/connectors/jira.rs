@@ -11,7 +11,7 @@ use tokio::runtime::Runtime;
 use gittask::{Task, Comment, Label, Subtask};
 
 use crate::connectors::adf;
-use crate::connectors::{status_names_match, RemoteConnector, RemoteField, RemoteTaskState};
+use crate::connectors::{property_name, status_names_match, RemoteConnector, RemoteField, RemoteTaskState, BUILT_IN_PROPERTIES};
 
 pub struct JiraRemoteConnector;
 
@@ -1024,8 +1024,6 @@ pub(crate) struct FieldMapping {
     kind: Option<FieldKind>,
 }
 
-const BUILT_IN_PROPERTIES: [&str; 6] = ["id", "name", "description", "status", "created", "author"];
-
 /// Parses `task.jira.fields`: comma separated `property=field[:type]` entries, for example
 /// `points=customfield_10016:number,team=customfield_10001:option`.
 pub(crate) fn parse_field_mappings(spec: &str) -> Result<Vec<FieldMapping>, String> {
@@ -1176,20 +1174,6 @@ fn field_kind_from_schema(schema: &jira_v3_openapi::models::JsonTypeBean) -> Opt
         ("version", _) | ("component", _) | ("array", Some("version")) | ("array", Some("component")) => Some(FieldKind::Named),
         _ => None,
     }
-}
-
-/// `Story point estimate` becomes `story_point_estimate`.
-fn property_name(field_name: &str) -> String {
-    let mut name = String::new();
-    for c in field_name.chars() {
-        if c.is_alphanumeric() {
-            name.extend(c.to_lowercase());
-        } else if !name.is_empty() && !name.ends_with('_') {
-            name.push('_');
-        }
-    }
-    let name = name.trim_end_matches('_');
-    if name.is_empty() { "field".to_string() } else { name.to_string() }
 }
 
 /// Copies the mapped Jira fields of an issue into task properties.

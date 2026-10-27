@@ -2,7 +2,7 @@ mod adf;
 mod github;
 mod gitlab;
 pub(crate) mod jira;
-mod redmine;
+pub(crate) mod redmine;
 
 use gittask::{Comment, Label, Subtask, Task};
 use crate::connectors::github::GithubRemoteConnector;
@@ -15,6 +15,24 @@ pub enum RemoteTaskState {
     All,
     Open(String, String),
     Closed(String, String),
+}
+
+/// Properties a connector fills itself; a custom field cannot be mapped onto one of them.
+pub(crate) const BUILT_IN_PROPERTIES: [&str; 7] = ["id", "name", "description", "status", "created", "author", "project_id"];
+
+/// Derives a property name from a remote field name: `Story point estimate` becomes
+/// `story_point_estimate`.
+pub(crate) fn property_name(field_name: &str) -> String {
+    let mut name = String::new();
+    for c in field_name.chars() {
+        if c.is_alphanumeric() {
+            name.extend(c.to_lowercase());
+        } else if !name.is_empty() && !name.ends_with('_') {
+            name.push('_');
+        }
+    }
+    let name = name.trim_end_matches('_');
+    if name.is_empty() { "field".to_string() } else { name.to_string() }
 }
 
 /// A custom field of a remote project, as it is mapped to a task property.
