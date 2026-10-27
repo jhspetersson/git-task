@@ -435,13 +435,11 @@ static CLIENTS: OnceLock<Mutex<HashMap<(bool, String, String), Gitlab>>> = OnceL
 
 fn get_client(token: &str) -> Result<Gitlab, String> {
     let base_url = get_base_url();
-    let (insecure, rest) = match base_url.strip_prefix("http://") {
-        Some(rest) => (true, rest),
-        None => (false, base_url.strip_prefix("https://").unwrap_or(&base_url)),
-    };
-    let host = match rest.split('/').next().unwrap_or("") {
-        "" => "gitlab.com".to_string(),
-        host => host.to_string(),
+    let (insecure, host, path) = split_base_url(&base_url);
+    let host = match (host, path) {
+        ("", _) => "gitlab.com".to_string(),
+        (host, "") => host.to_string(),
+        (host, path) => format!("{host}/{path}"),
     };
     let key = (insecure, host.clone(), token.to_string());
     let clients = CLIENTS.get_or_init(|| Mutex::new(HashMap::new()));
@@ -478,24 +476,29 @@ fn get_token() -> Result<String, String> {
 /// (a GitLab served under a sub-path), HTTP remotes must include it; SSH remotes
 /// never do.
 fn parse_remote_url(base_url: &str, url: &str) -> Option<(String, String)> {
-    let without_scheme = base_url
-        .strip_prefix("https://")
-        .or_else(|| base_url.strip_prefix("http://"))
-        .unwrap_or(base_url);
-    let (host, path) = match without_scheme.split_once('/') {
-        Some((host, path)) => (host, path.trim_matches('/')),
-        None => (without_scheme, ""),
-    };
+    let (_, host, path) = split_base_url(base_url);
     if host.is_empty() {
         return None;
     }
     let host = regex::escape(host);
     let http_prefix = if path.is_empty() { String::new() } else { regex::escape(path) + "/" };
     let pattern = format!(
-        "(?i)^(?:https?://(?:[^@/]+@)?{host}/{http_prefix}|ssh://(?:[^@/]+@)?{host}(?::\\d+)?/|[^@/:]+@{host}:)(?P<user>[a-zA-Z0-9._-]+)/(?P<repo>[a-zA-Z0-9._-]+?)(?:\\.git)?/?$"
+        "(?i)^(?:https?://(?:[^@/]+@)?{host}/{http_prefix}|ssh://(?:[^@/]+@)?{host}(?::\\d+)?/|[^@/:]+@{host}:)(?P<user>[a-zA-Z0-9._-]+(?:/[a-zA-Z0-9._-]+)*)/(?P<repo>[a-zA-Z0-9._-]+?)(?:\\.git)?/?$"
     );
     let caps = Regex::new(&pattern).ok()?.captures(url)?;
     Some((caps.name("user")?.as_str().to_string(), caps.name("repo")?.as_str().to_string()))
+}
+
+/// Splits a base URL into (insecure, host, path prefix without surrounding slashes).
+fn split_base_url(base_url: &str) -> (bool, &str, &str) {
+    let (insecure, without_scheme) = match base_url.strip_prefix("http://") {
+        Some(rest) => (true, rest),
+        None => (false, base_url.strip_prefix("https://").unwrap_or(base_url)),
+    };
+    match without_scheme.split_once('/') {
+        Some((host, path)) => (insecure, host, path.trim_matches('/')),
+        None => (insecure, without_scheme, ""),
+    }
 }
 
 fn get_base_url() -> String {
@@ -540,12 +543,12 @@ mod test {
         assert!(result.is_err(), "a failed note fetch must not look like an issue without notes, got {} notes", result.as_ref().map(|c| c.len()).unwrap_or(0));
     }
 
-    fn stub_gitlab_server() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    fn stub_gitlab_server() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub server");
         let addr = listener.local_addr().unwrap();
-        let user_requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let counter = user_requests.clone();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = requests.clone();
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let mut stream = match stream { Ok(s) => s, Err(_) => continue };
@@ -559,30 +562,68 @@ mod test {
                     }
                 }
                 let request_line = String::from_utf8_lossy(&head).lines().next().unwrap_or_default().to_string();
-                if request_line.contains("/api/v4/user") {
-                    counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                }
+                let path = request_line.split_whitespace().nth(1).unwrap_or_default().split('?').next().unwrap_or_default().to_string();
+                log.lock().unwrap().push(path);
                 let crlf = [13u8, 10];
                 let response = [b"HTTP/1.1 200 OK".as_slice(), &crlf, b"Content-Length: 2", &crlf, b"Connection: close", &crlf, &crlf, b"{}"].concat();
                 let _ = stream.write_all(&response);
             }
         });
-        (format!("http://{addr}"), user_requests)
+        (format!("http://{addr}"), requests)
+    }
+
+    fn user_requests(requests: &std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> usize {
+        requests.lock().unwrap().iter().filter(|p| p.ends_with("/api/v4/user")).count()
     }
 
     #[test]
     fn test_get_client_is_reused_per_host_and_token() {
         let _repo = gittask::testing::TestRepo::new();
-        let (url, user_requests) = stub_gitlab_server();
+        let (url, requests) = stub_gitlab_server();
         gittask::set_config_value("task.gitlab.url", &url).unwrap();
 
         get_client("reuse-token").expect("first client");
         get_client("reuse-token").expect("second client");
         get_client("reuse-token").expect("third client");
-        assert_eq!(user_requests.load(std::sync::atomic::Ordering::SeqCst), 1, "the same host and token must authenticate only once");
+        assert_eq!(user_requests(&requests), 1, "the same host and token must authenticate only once");
 
         get_client("another-token").expect("client for another token");
-        assert_eq!(user_requests.load(std::sync::atomic::Ordering::SeqCst), 2, "a different token must get its own client");
+        assert_eq!(user_requests(&requests), 2, "a different token must get its own client");
+    }
+
+    #[test]
+    fn test_get_client_keeps_the_path_prefix_of_the_base_url() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (url, requests) = stub_gitlab_server();
+        gittask::set_config_value("task.gitlab.url", &format!("{url}/gitlab")).unwrap();
+
+        get_client("prefix-token").expect("client");
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.as_slice(), ["/gitlab/api/v4/user"], "the API must be addressed under the configured prefix");
+    }
+
+    #[test]
+    fn test_remote_url_accepts_subgroups() {
+        let expected = Some(("group/subgroup".to_string(), "project".to_string()));
+        for url in [
+            "https://gitlab.com/group/subgroup/project.git",
+            "https://gitlab.com/group/subgroup/project",
+            "git@gitlab.com:group/subgroup/project.git",
+            "ssh://git@gitlab.com:2222/group/subgroup/project.git",
+        ] {
+            assert_eq!(parse_remote_url("https://gitlab.com/", url), expected, "{url}");
+        }
+        assert_eq!(
+            parse_remote_url("https://gitlab.com/", "https://gitlab.com/a/b/c/d/e.git"),
+            Some(("a/b/c/d".to_string(), "e".to_string())),
+            "any nesting depth keeps the whole namespace"
+        );
+        assert_eq!(
+            parse_remote_url("https://git.example.com/gitlab/", "https://git.example.com/gitlab/group/subgroup/project.git"),
+            expected,
+            "the path prefix is not part of the namespace"
+        );
     }
 
     #[test]
@@ -627,7 +668,6 @@ mod test {
             "https://github.com/jhspetersson/fselect.git",
             "https://gitlabXcom/jhspetersson/fselect.git",
             "https://gitlab.com.evil.org/jhspetersson/fselect.git",
-            "https://gitlab.com/jhspetersson/fselect/extra",
         ] {
             assert_eq!(parse_remote_url("https://gitlab.com/", url), None, "{url} must not match the gitlab.com base");
         }

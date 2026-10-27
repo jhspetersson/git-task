@@ -81,6 +81,26 @@ impl GitLab {
         }
     }
 
+    /// Creates `git-task-<tag>-<suffix>/sub/<project>`: a top-level group, a subgroup
+    /// inside it and a project inside the subgroup.
+    fn create_project_in_subgroup(&self, tag: &str) -> Project {
+        let suffix = unique_suffix();
+        let group_path = format!("git-task-{tag}-{suffix}");
+        let group = self.post("/groups", json!({ "name": group_path, "path": group_path, "visibility": "private" }));
+        let group_id = group["id"].as_u64().expect("group id");
+        let subgroup = self.post("/groups", json!({ "name": "sub", "path": "sub", "parent_id": group_id, "visibility": "private" }));
+        let subgroup_id = subgroup["id"].as_u64().expect("subgroup id");
+        let project = self.post("/projects", json!({ "name": "nested", "namespace_id": subgroup_id, "visibility": "private" }));
+        let path_with_namespace = project["path_with_namespace"].as_str().expect("path_with_namespace");
+        let (namespace, path) = path_with_namespace.rsplit_once('/').expect("namespace/path");
+        assert_eq!(namespace, format!("{group_path}/sub"), "the project must live in a subgroup");
+        Project {
+            id: project["id"].as_u64().expect("project id"),
+            namespace: namespace.to_string(),
+            path: path.to_string(),
+        }
+    }
+
     fn create_issue(&self, project: &Project, title: &str, description: &str) -> u64 {
         let issue = self.post(&format!("/projects/{}/issues", project.id), json!({ "title": title, "description": description }));
         issue["iid"].as_u64().expect("issue iid")
@@ -268,6 +288,28 @@ fn push_creates_a_closed_task_as_a_closed_issue() {
 
     let out = run(&gitlab, &repo, &["push", &iid.to_string()]);
     assert!(out.contains("Nothing to sync"), "the closed issue must already match the local task: {out}");
+}
+
+#[test]
+fn pull_and_push_work_for_a_project_in_a_subgroup() {
+    let gitlab = gitlab_or_skip!();
+    let project = gitlab.create_project_in_subgroup("subgroup");
+    let iid = gitlab.create_issue(&project, "Nested issue", "Lives in a subgroup");
+    let repo = local_repo(&gitlab, &project);
+
+    let out = run(&gitlab, &repo, &["pull", &iid.to_string()]);
+    assert!(!out.contains("No passing remotes"), "a subgroup remote must be recognised: {out}");
+    assert_eq!(local_task_ids(&repo), vec![iid.to_string()]);
+    assert_eq!(local_task(&repo, &iid.to_string())["props"]["name"], "Nested issue");
+
+    run(&gitlab, &repo, &["create", "Pushed into a subgroup", "From CI"]);
+    let local_id = local_task_ids(&repo).into_iter().find(|id| id != &iid.to_string()).expect("the created task");
+    let out = run(&gitlab, &repo, &["push", &local_id]);
+    assert!(out.contains("Created REMOTE task ID"), "the task must be created in the nested project: {out}");
+
+    let issues = gitlab.issues(&project);
+    assert_eq!(issues.len(), 2, "the pushed task must land in the subgroup project, got {issues:?}");
+    assert!(issues.iter().any(|(_, title, _)| title == "Pushed into a subgroup"));
 }
 
 #[test]
