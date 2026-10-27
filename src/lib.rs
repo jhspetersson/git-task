@@ -615,6 +615,10 @@ pub fn update_task(task: Task) -> Result<String, String> {
     Ok(task.get_id().unwrap())
 }
 
+pub fn update_tasks(tasks: Vec<Task>) -> Result<Vec<Task>, String> {
+    write_tasks(tasks, |ids| format!("Update task {}", ids.join(", ")))
+}
+
 fn get_next_id() -> Result<String, String> {
     let repo = open_repo()?;
     let ref_path = get_ref_path();
