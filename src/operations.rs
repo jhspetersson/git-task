@@ -475,8 +475,9 @@ fn pull_targets(
         }
         println!("Pulling tasks from {user}/{repo}...");
         let fetch_subtasks = !no_subtasks && connector.supports_subtasks();
+        let fetch_labels = !no_labels && connector.supports_labels();
 
-        match connector.list_remote_tasks(&user, &repo, !no_comments, !no_labels, remaining, state.clone(), task_statuses) {
+        match connector.list_remote_tasks(&user, &repo, !no_comments, fetch_labels, remaining, state.clone(), task_statuses) {
             Ok(tasks) => {
                 let tasks: Vec<Task> = match remaining {
                     Some(budget) => tasks.into_iter().take(budget).collect(),
@@ -500,7 +501,7 @@ fn pull_targets(
                                 }
                             }
                         }
-                        match import_remote_task(task, no_comments, fetch_subtasks, !no_labels) {
+                        match import_remote_task(task, no_comments, fetch_subtasks, fetch_labels) {
                             Ok(Some(task)) => to_write.push(task),
                             Ok(None) => println!("Task ID {task_id} skipped, nothing to update"),
                             Err(e) => {
@@ -633,8 +634,9 @@ fn pull_task(
     task_statuses: &Vec<String>,
 ) -> bool {
     let fetch_subtasks = !no_subtasks && connector.supports_subtasks();
+    let fetch_labels = !no_labels && connector.supports_labels();
     let mut success = true;
-    match connector.get_remote_task(user, repo, id, !no_comments, !no_labels, task_statuses) {
+    match connector.get_remote_task(user, repo, id, !no_comments, fetch_labels, task_statuses) {
         Ok(Some(mut task)) => {
             if fetch_subtasks {
                 match connector.list_remote_subtasks(user, repo, id, task_statuses) {
@@ -645,7 +647,7 @@ fn pull_task(
                     }
                 }
             }
-            match import_remote_task(task, no_comments, fetch_subtasks, !no_labels) {
+            match import_remote_task(task, no_comments, fetch_subtasks, fetch_labels) {
                 Ok(Some(task)) => success &= write_imported_tasks(vec![task]),
                 Ok(None) => println!("Task ID {id} skipped, nothing to update"),
                 Err(e) => {
@@ -958,7 +960,8 @@ fn push_task(
         }
     };
     println!("Sync: LOCAL task ID {id} found");
-    let remote_task = match connector.get_remote_task(user, repo, id, !no_comments, !no_labels, task_statuses) {
+    let sync_labels = !no_labels && connector.supports_labels();
+    let remote_task = match connector.get_remote_task(user, repo, id, !no_comments, sync_labels, task_statuses) {
         Ok(remote_task) => remote_task,
         Err(e) => {
             eprintln!("ERROR: could not fetch REMOTE task ID {id}: {e}");
@@ -978,7 +981,7 @@ fn push_task(
 
         let mut anything_synced = false;
         let status_changed = !status_names_match(local_status, remote_status);
-        let labels_changed = !no_labels && label_names(local_task.get_labels()) != label_names(remote_task.get_labels());
+        let labels_changed = sync_labels && label_names(local_task.get_labels()) != label_names(remote_task.get_labels());
         if local_name != remote_name || local_text != remote_text || status_changed || labels_changed {
             anything_synced = true;
             if status_changed {
@@ -994,7 +997,7 @@ fn push_task(
                 &user,
                 &repo,
                 &local_task,
-                if !no_labels { local_task.get_labels().into() } else { None },
+                if sync_labels { local_task.get_labels().into() } else { None },
                 state
             ) {
                 Ok(_) => {
@@ -1019,13 +1022,13 @@ fn push_task(
     } else {
         eprintln!("Sync: REMOTE task ID {id} NOT found");
 
-        let local_task = match no_labels {
-            true => {
+        let local_task = match sync_labels {
+            false => {
                 let mut local_task = local_task;
                 local_task.set_labels(vec![]);
                 local_task
             },
-            false => local_task
+            true => local_task
         };
 
         match connector.create_remote_task(&user, &repo, &local_task) {
@@ -1872,6 +1875,7 @@ mod tests {
         remote_tasks: std::sync::Mutex<HashMap<String, Vec<Task>>>,
         list_limits: std::sync::Mutex<Vec<(String, Option<usize>)>>,
         subtask_updates: std::sync::Mutex<Vec<String>>,
+        labels_supported: std::sync::atomic::AtomicBool,
     }
 
     impl FakeConnector {
@@ -1888,6 +1892,7 @@ mod tests {
                 remote_tasks: std::sync::Mutex::new(HashMap::new()),
                 list_limits: std::sync::Mutex::new(vec![]),
                 subtask_updates: std::sync::Mutex::new(vec![]),
+                labels_supported: std::sync::atomic::AtomicBool::new(true),
             }))
         }
 
@@ -1937,6 +1942,7 @@ mod tests {
         fn delete_remote_comment(&self, _: &String, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
         fn delete_remote_label(&self, _: &String, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
         fn supports_subtasks(&self) -> bool { true }
+        fn supports_labels(&self) -> bool { self.labels_supported.load(std::sync::atomic::Ordering::SeqCst) }
         fn list_remote_subtasks(&self, _: &String, _: &String, _: &String, _: &Vec<String>) -> Result<Vec<Subtask>, String> { Ok(vec![]) }
         fn create_remote_subtask(&self, _: &String, _: &String, _: &String, _: &Subtask, _: bool) -> Result<String, String> { Ok(self.next()) }
         fn update_remote_subtask(&self, _: &String, _: &String, _: &String, subtask: &Subtask, _: bool) -> Result<(), String> {
@@ -2244,6 +2250,42 @@ mod tests {
         let ids = gittask::find_task(&id).unwrap().unwrap().get_subtasks().clone().unwrap()
             .iter().map(|s| s.get_id().unwrap()).collect::<Vec<_>>();
         assert_eq!(ids, vec!["10".to_string(), "11".to_string()], "the remote ids must be recorded even though the status update failed, so a retry does not create duplicates");
+    }
+
+    #[test]
+    fn test_pull_keeps_local_labels_when_the_connector_cannot_sync_them() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        local.set_labels(vec![Label::new("urgent".to_string(), None, None)]);
+        let id = gittask::create_task(local).unwrap().get_id().unwrap();
+        let mut remote = remote_task(&id);
+        remote.set_property("name", "Renamed remotely");
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        fake.labels_supported.store(false, std::sync::atomic::Ordering::SeqCst);
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+
+        assert!(pull_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, false, true, &vec!["OPEN".to_string(), "CLOSED".to_string()]));
+
+        let pulled = gittask::find_task(&id).unwrap().unwrap();
+        assert_eq!(pulled.get_property("name").unwrap(), "Renamed remotely", "the rest of the task must still be pulled");
+        assert_eq!(label_names(&pulled), vec!["urgent".to_string()], "a connector without label support must not wipe local labels");
+    }
+
+    #[test]
+    fn test_pull_takes_remote_labels_when_the_connector_syncs_them() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        local.set_labels(vec![Label::new("urgent".to_string(), None, None)]);
+        let id = gittask::create_task(local).unwrap().get_id().unwrap();
+        let mut remote = remote_task(&id);
+        remote.set_property("name", "Parent");
+        remote.set_labels(vec![]);
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+
+        assert!(pull_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, false, true, &vec!["OPEN".to_string(), "CLOSED".to_string()]));
+
+        assert!(label_names(&gittask::find_task(&id).unwrap().unwrap()).is_empty(), "a label removed remotely must be removed locally when the connector syncs labels");
     }
 
     #[test]

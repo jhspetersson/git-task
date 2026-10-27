@@ -48,6 +48,10 @@ pub trait RemoteConnector {
         false
     }
 
+    fn supports_labels(&self) -> bool {
+        true
+    }
+
     #[allow(unused)]
     fn list_remote_subtasks(&self, user: &String, repo: &String, task_id: &String, task_statuses: &Vec<String>) -> Result<Vec<Subtask>, String> {
         Err(format!("Subtasks are not supported for {}", self.type_name()))

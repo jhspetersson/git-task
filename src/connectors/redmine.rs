@@ -320,6 +320,10 @@ impl RemoteConnector for RedmineRemoteConnector {
         true
     }
 
+    fn supports_labels(&self) -> bool {
+        false
+    }
+
     fn list_remote_subtasks(&self, domain: &String, _project: &String, task_id: &String, _task_statuses: &Vec<String>) -> Result<Vec<Subtask>, String> {
         let redmine = get_redmine_instance(domain)?;
 
@@ -520,6 +524,7 @@ fn issue_to_task(issue: &Issue) -> Result<Task, String> {
 }
 
 fn append_journals_as_comments(issue: &Issue, task: &mut Task) {
+    task.set_comments(vec![]);
     if let Some(journals) = &issue.journals {
         for j in journals {
             if let Some(text) = j.notes.as_ref().filter(|text| !text.trim().is_empty()) {
@@ -558,6 +563,17 @@ mod tests {
             "journals": {journals}
         }}"#);
         serde_json::from_str(&json).expect("issue JSON")
+    }
+
+    #[test]
+    fn an_issue_without_notes_yields_an_empty_comment_list_not_none() {
+        let issue = issue_with_journals("[]");
+        let mut task = issue_to_task(&issue).unwrap();
+        assert!(task.get_comments().is_none(), "a freshly mapped issue has no comment list yet");
+
+        append_journals_as_comments(&issue, &mut task);
+
+        assert!(matches!(task.get_comments(), Some(comments) if comments.is_empty()), "a successful fetch with no notes must say so explicitly, so a locally kept comment is removed on pull");
     }
 
     #[test]
