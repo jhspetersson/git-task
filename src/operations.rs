@@ -681,8 +681,12 @@ fn write_imported_tasks(tasks: Vec<Task>) -> bool {
 fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool, with_labels: bool) -> Result<Option<Task>, String> {
     match gittask::find_task(&remote_task.get_id().unwrap()) {
         Ok(Some(mut local_task)) => {
+            let merged_subtasks = match (with_subtasks, remote_task.get_subtasks()) {
+                (true, Some(remote_subtasks)) => Some(merge_subtasks(local_task.get_subtasks(), remote_subtasks)),
+                _ => None,
+            };
             let subtasks_equal = !with_subtasks
-                || subtasks_are_equal(local_task.get_subtasks(), remote_task.get_subtasks());
+                || subtasks_are_equal(local_task.get_subtasks(), &merged_subtasks);
             let labels_equal = !with_labels
                 || label_names(local_task.get_labels()) == label_names(remote_task.get_labels());
 
@@ -702,10 +706,8 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool,
                         local_task.set_comments(comments.to_vec());
                     }
                 }
-                if with_subtasks {
-                    if let Some(subtasks) = remote_task.get_subtasks() {
-                        local_task.set_subtasks(subtasks.to_vec());
-                    }
+                if let Some(subtasks) = merged_subtasks {
+                    local_task.set_subtasks(subtasks);
                 }
                 if with_labels {
                     local_task.set_labels(remote_task.get_labels().clone().unwrap_or_default());
@@ -723,6 +725,29 @@ fn label_names(labels: &Option<Vec<Label>>) -> Vec<String> {
     let mut names = labels.as_ref().map(|labels| labels.iter().map(|l| l.get_name()).collect::<Vec<_>>()).unwrap_or_default();
     names.sort();
     names
+}
+
+/// Takes the remote subtasks as the authority for which subtasks exist and for their
+/// name and status, but keeps the properties a matching local subtask carries that
+/// the remote does not know about.
+fn merge_subtasks(local: &Option<Vec<Subtask>>, remote: &[Subtask]) -> Vec<Subtask> {
+    let local_by_id: HashMap<String, &Subtask> = local.iter().flatten()
+        .filter_map(|subtask| subtask.get_id().map(|id| (id, subtask)))
+        .collect();
+    remote.iter().map(|remote_subtask| {
+        match remote_subtask.get_id().and_then(|id| local_by_id.get(&id)) {
+            Some(local_subtask) => {
+                let mut merged = (*local_subtask).clone();
+                merged.set_name(remote_subtask.get_name().to_string());
+                merged.set_status(remote_subtask.get_status().to_string());
+                for (key, value) in remote_subtask.get_all_properties() {
+                    merged.set_property(key, value);
+                }
+                merged
+            },
+            None => remote_subtask.clone(),
+        }
+    }).collect()
 }
 
 fn subtasks_are_equal(local: &Option<Vec<Subtask>>, remote: &Option<Vec<Subtask>>) -> bool {
@@ -1100,9 +1125,17 @@ fn sync_local_subtasks(
                 Ok(remote_id) => {
                     println!("Created REMOTE subtask ID {remote_id}");
                     if local_id != remote_id {
-                        id_updates.push((local_id, remote_id));
+                        id_updates.push((local_id, remote_id.clone()));
                     }
                     synced = true;
+                    if subtask.get_status() != task_statuses[0] {
+                        let mut created = subtask.clone();
+                        created.set_id(remote_id.clone());
+                        if let Err(e) = connector.update_remote_subtask(user, repo, task_id, &created, is_done) {
+                            eprintln!("ERROR: REMOTE subtask ID {remote_id} was created but its status could not be set: {e}");
+                            *success = false;
+                        }
+                    }
                 },
                 Err(e) => {
                     eprintln!("ERROR creating REMOTE subtask: {e}");
@@ -1838,6 +1871,7 @@ mod tests {
         updates: std::sync::Mutex<Vec<Option<Vec<Label>>>>,
         remote_tasks: std::sync::Mutex<HashMap<String, Vec<Task>>>,
         list_limits: std::sync::Mutex<Vec<(String, Option<usize>)>>,
+        subtask_updates: std::sync::Mutex<Vec<String>>,
     }
 
     impl FakeConnector {
@@ -1853,6 +1887,7 @@ mod tests {
                 updates: std::sync::Mutex::new(vec![]),
                 remote_tasks: std::sync::Mutex::new(HashMap::new()),
                 list_limits: std::sync::Mutex::new(vec![]),
+                subtask_updates: std::sync::Mutex::new(vec![]),
             }))
         }
 
@@ -1904,6 +1939,10 @@ mod tests {
         fn supports_subtasks(&self) -> bool { true }
         fn list_remote_subtasks(&self, _: &String, _: &String, _: &String, _: &Vec<String>) -> Result<Vec<Subtask>, String> { Ok(vec![]) }
         fn create_remote_subtask(&self, _: &String, _: &String, _: &String, _: &Subtask, _: bool) -> Result<String, String> { Ok(self.next()) }
+        fn update_remote_subtask(&self, _: &String, _: &String, _: &String, subtask: &Subtask, _: bool) -> Result<(), String> {
+            self.subtask_updates.lock().unwrap().push(subtask.get_id().unwrap_or_default());
+            Err("transition rejected".to_string())
+        }
     }
 
     fn push_with_lookup(lookup: Result<Option<Task>, String>) -> (bool, &'static FakeConnector, String) {
@@ -2184,6 +2223,70 @@ mod tests {
         let ids = gittask::find_task(&id).unwrap().unwrap().get_subtasks().clone().unwrap()
             .iter().map(|s| (s.get_name().to_string(), s.get_id().unwrap())).collect::<Vec<_>>();
         assert_eq!(ids, vec![("A".to_string(), "2".to_string()), ("B".to_string(), "3".to_string())], "each subtask must end up with the id the remote returned for it");
+    }
+
+    #[test]
+    fn test_sync_local_subtasks_keeps_the_remote_id_when_the_status_cannot_be_applied() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut task = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task.add_subtask(None, "Open child".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        task.add_subtask(None, "Closed child".to_string(), "CLOSED".to_string(), HashMap::new()).unwrap();
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+        let fake = FakeConnector::leaked_with_lookup(10, Err("not used".to_string()));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let mut success = true;
+
+        sync_local_subtasks(&connector, &"u".to_string(), &"r".to_string(), &id, &task, &StatusManager::new(), &vec!["OPEN".to_string(), "CLOSED".to_string()], &mut success);
+
+        assert!(!success, "a rejected status change must fail the push");
+        assert_eq!(*fake.subtask_updates.lock().unwrap(), vec!["11".to_string()], "only the subtask whose status differs from the starting one needs a status update, addressed by its remote id");
+        let ids = gittask::find_task(&id).unwrap().unwrap().get_subtasks().clone().unwrap()
+            .iter().map(|s| s.get_id().unwrap()).collect::<Vec<_>>();
+        assert_eq!(ids, vec!["10".to_string(), "11".to_string()], "the remote ids must be recorded even though the status update failed, so a retry does not create duplicates");
+    }
+
+    #[test]
+    fn test_import_remote_task_keeps_local_subtask_properties() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        local.add_subtask(Some("5".to_string()), "Child".to_string(), "OPEN".to_string(), HashMap::from([
+            ("estimate".to_string(), "3d".to_string()),
+            ("owner".to_string(), "alice".to_string()),
+        ])).unwrap();
+        local.add_subtask(Some("6".to_string()), "Gone remotely".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        let local = gittask::create_task(local).unwrap();
+        let mut remote = remote_task(&local.get_id().unwrap());
+        remote.set_property("name", "Parent");
+        remote.add_subtask(Some("5".to_string()), "Child renamed".to_string(), "CLOSED".to_string(), HashMap::from([
+            ("created".to_string(), "123".to_string()),
+        ])).unwrap();
+        remote.add_subtask(Some("7".to_string()), "New child".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+
+        let merged = import_remote_task(remote, true, true, false).unwrap().expect("the task has changed");
+
+        let subtasks = merged.get_subtasks().clone().unwrap();
+        let summary: Vec<(String, String, String)> = subtasks.iter().map(|s| (s.get_id().unwrap(), s.get_name().to_string(), s.get_status().to_string())).collect();
+        assert_eq!(summary, vec![
+            ("5".to_string(), "Child renamed".to_string(), "CLOSED".to_string()),
+            ("7".to_string(), "New child".to_string(), "OPEN".to_string()),
+        ], "the remote decides which subtasks exist and what they are called");
+        assert_eq!(subtasks[0].get_property("estimate").map(String::as_str), Some("3d"), "a property the connector does not manage must survive the pull");
+        assert_eq!(subtasks[0].get_property("owner").map(String::as_str), Some("alice"));
+        assert_eq!(subtasks[0].get_property("created").map(String::as_str), Some("123"), "properties the remote provides are taken from it");
+    }
+
+    #[test]
+    fn test_import_remote_task_reports_nothing_to_do_when_only_local_subtask_properties_differ() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        local.add_subtask(Some("5".to_string()), "Child".to_string(), "OPEN".to_string(), HashMap::from([("owner".to_string(), "alice".to_string())])).unwrap();
+        let local = gittask::create_task(local).unwrap();
+        let mut remote = remote_task(&local.get_id().unwrap());
+        remote.set_property("name", "Parent");
+        remote.add_subtask(Some("5".to_string()), "Child".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+
+        assert!(import_remote_task(remote, true, true, false).unwrap().is_none(), "local-only properties must not look like a remote change");
     }
 
     #[test]

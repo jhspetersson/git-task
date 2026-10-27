@@ -16,9 +16,12 @@ pub(crate) fn task_config_status_delete(name: String, force: bool) -> bool {
 
     if !force {
         if let Ok(tasks) = gittask::list_tasks() {
-            let task_exists = tasks.iter().any(|task| task.get_property("status").map_or(false, |s| s == name.as_str()));
-            if task_exists {
-                return error_message("Can't delete a status, some tasks still have it. Use --force option to override.".to_string());
+            let in_use = tasks.iter().any(|task| {
+                task.get_property("status").map_or(false, |s| s == name.as_str())
+                    || task.get_subtasks().iter().flatten().any(|subtask| subtask.get_status() == name.as_str())
+            });
+            if in_use {
+                return error_message("Can't delete a status, some tasks or subtasks still have it. Use --force option to override.".to_string());
             }
         }
     }
@@ -95,6 +98,20 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
+
+    #[test]
+    fn test_deleting_a_status_still_used_by_a_subtask_needs_force() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut parent = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        parent.add_subtask(Some("1".to_string()), "Done child".to_string(), "CLOSED".to_string(), HashMap::new()).unwrap();
+        gittask::create_task(parent).unwrap();
+
+        assert!(!task_config_status_delete("CLOSED".to_string(), false), "a status used only by a subtask must not be deleted silently");
+        assert!(StatusManager::new().resolve_status("CLOSED").is_ok());
+
+        assert!(task_config_status_delete("CLOSED".to_string(), true));
+        assert!(StatusManager::new().resolve_status("CLOSED").is_err());
+    }
 
     #[test]
     fn test_renaming_a_status_migrates_tasks_and_their_subtasks() {

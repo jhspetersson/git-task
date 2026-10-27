@@ -226,7 +226,7 @@ impl RemoteConnector for GithubRemoteConnector {
         RUNTIME.block_on(list_sub_issues(user, repo, task_id.parse().map_err(|e: std::num::ParseIntError| e.to_string())?, task_statuses))
     }
 
-    fn create_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask: &Subtask, is_done: bool) -> Result<String, String> {
+    fn create_remote_subtask(&self, user: &String, repo: &String, task_id: &String, subtask: &Subtask, _is_done: bool) -> Result<String, String> {
         if get_token_from_env().is_none() {
             return Err("Could not find GITHUB_TOKEN environment variable.".to_string());
         }
@@ -246,10 +246,6 @@ impl RemoteConnector for GithubRemoteConnector {
 
         RUNTIME.block_on(add_sub_issue(user, repo, parent_number, sub_number))
             .map_err(|e| format!("Issue #{sub_number} was created but could not be linked to #{parent_number}: {e}"))?;
-
-        if is_done {
-            RUNTIME.block_on(update_sub_issue(user, repo, sub_number, subtask.get_name(), IssueState::Closed))?;
-        }
 
         Ok(sub_number.to_string())
     }

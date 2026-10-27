@@ -825,16 +825,10 @@ async fn create_subtask(config: &Configuration, project: &str, parent_key: &str,
         ])),
         ..Default::default()
     };
-    let key = match issues_api::create_issue(config, issue_details, None).await {
-        Ok(response) => response.key.ok_or_else(|| "Failed to create subtask: no key returned.".to_string())?,
-        Err(e) => return Err(format!("Failed to create subtask: {}", e)),
-    };
-
-    if !subtask.get_status().is_empty() {
-        let current_status = fetch_current_status(config, &key).await?;
-        ensure_status(config, &key, current_status.as_deref(), subtask.get_status()).await?;
+    match issues_api::create_issue(config, issue_details, None).await {
+        Ok(response) => response.key.ok_or_else(|| "Failed to create subtask: no key returned.".to_string()),
+        Err(e) => Err(format!("Failed to create subtask: {}", e)),
     }
-    Ok(key)
 }
 
 async fn ensure_status(config: &Configuration, issue_key: &str, current_status: Option<&str>, wanted_status: &str) -> Result<(), String> {
@@ -1098,34 +1092,13 @@ mod tests {
     }
 
     #[test]
-    fn test_create_subtask_applies_the_requested_status() {
-        let (config, requests) = stub_jira(jira_subtask_flow("To Do", 204));
-
-        let result = RUNTIME.block_on(create_subtask(&config, "ABC", "ABC-1", &subtask_with_status("DONE")));
-
-        assert_eq!(result, Ok("ABC-2".to_string()));
-        let requests = requests.lock().unwrap();
-        assert_eq!(requests.first().map(String::as_str), Some("POST /rest/api/3/issue"));
-        assert!(requests.contains(&"POST /rest/api/3/issue/ABC-2/transitions".to_string()), "the new subtask must be transitioned, got {requests:?}");
-    }
-
-    #[test]
-    fn test_create_subtask_fails_when_the_status_cannot_be_applied() {
-        let (config, _requests) = stub_jira(jira_subtask_flow("To Do", 403));
-
-        let result = RUNTIME.block_on(create_subtask(&config, "ABC", "ABC-1", &subtask_with_status("DONE")));
-
-        assert!(result.as_ref().is_err_and(|e| e.contains("Failed to transition ABC-2")), "unexpected result: {result:?}");
-    }
-
-    #[test]
-    fn test_create_subtask_skips_the_transition_when_jira_starts_in_the_wanted_status() {
+    fn test_create_subtask_only_creates_the_issue_and_returns_its_key() {
         let (config, requests) = stub_jira(jira_subtask_flow("To Do", 403));
 
-        let result = RUNTIME.block_on(create_subtask(&config, "ABC", "ABC-1", &subtask_with_status("to-do")));
+        let result = RUNTIME.block_on(create_subtask(&config, "ABC", "ABC-1", &subtask_with_status("DONE")));
 
         assert_eq!(result, Ok("ABC-2".to_string()));
-        assert!(!requests.lock().unwrap().iter().any(|r| r.ends_with("/transitions")));
+        assert_eq!(requests.lock().unwrap().as_slice(), ["POST /rest/api/3/issue"], "the status is applied by the caller once the key is recorded, so a rejected transition cannot lose the key");
     }
 
     #[test]
