@@ -71,6 +71,10 @@ impl RemoteConnector for RedmineRemoteConnector {
         }
     }
 
+    fn remote_for_project(&self, _url: &str, project: &str) -> Option<(String, String)> {
+        gittask::get_config_value("task.redmine.url").ok().map(|_| (String::new(), project.to_string()))
+    }
+
     fn list_remote_tasks(
         &self,
         domain: &String,
@@ -423,10 +427,10 @@ impl RemoteConnector for RedmineRemoteConnector {
 }
 
 fn get_issue_in_project(redmine: &Redmine, project: &String, local_project: Option<&String>, issue_id: u64, include: Option<Vec<IssueInclude>>) -> Result<Option<Issue>, String> {
-    let mut accepted_projects = vec![resolve_project_id(redmine, project)?];
-    if let Some(local_project) = local_project {
-        accepted_projects.push(resolve_project_id(redmine, local_project)?);
-    }
+    let required_project = match local_project {
+        Some(_) => None,
+        None => Some(resolve_project_id(redmine, project)?),
+    };
 
     let mut builder = GetIssue::builder();
     builder.id(issue_id);
@@ -440,7 +444,7 @@ fn get_issue_in_project(redmine: &Redmine, project: &String, local_project: Opti
         Err(e) => return Err(e.to_string()),
     };
 
-    if !accepted_projects.contains(&issue.project.id) {
+    if required_project.is_some_and(|required| issue.project.id != required) {
         eprintln!("Issue #{issue_id} belongs to project '{}' (id {}), not to project '{project}'", issue.project.name, issue.project.id);
         return Ok(None);
     }
@@ -813,6 +817,55 @@ mod tests {
 
         assert_eq!(result, Ok(()));
         assert_eq!(requests.lock().unwrap().as_slice(), ["GET /issues/7.json", "PUT /issues/7.json"]);
+    }
+
+    #[test]
+    fn a_second_move_finds_the_issue_in_the_project_of_the_first_move() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, requests) = stub_redmine(redmine_issue_in_project(2));
+        configure_stub(&redmine);
+        local_task_in_project("3");
+
+        let found = RedmineRemoteConnector.get_remote_task(&String::new(), &"1".to_string(), &"7".to_string(), false, false, &vec![]);
+        let found = found.unwrap().expect("a task bound to a Redmine issue must find it wherever it currently is");
+        assert_eq!(found.get_property("project_id"), Some(&"2".to_string()));
+
+        let task = gittask::find_task(&"7".to_string()).unwrap().unwrap();
+        let result = RedmineRemoteConnector.update_remote_task(&String::new(), &"1".to_string(), &task, None, RemoteTaskState::All);
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /issues/7.json", "GET /issues/7.json", "PUT /issues/7.json"]);
+    }
+
+    #[test]
+    fn an_explicit_project_selects_the_redmine_remote_even_when_it_is_not_configured() {
+        let _repo = gittask::testing::TestRepo::new();
+        gittask::set_config_value("task.redmine.url", "http://127.0.0.1:1/").unwrap();
+        gittask::set_config_value("task.redmine.api.key", "key").unwrap();
+        gittask::set_config_value("task.redmine.project.id", "1").unwrap();
+        let remotes = vec!["https://example.invalid/git-task/ci.git".to_string()];
+
+        let targets = crate::connectors::get_matching_remote_connectors(remotes.clone(), &Some("redmine".to_string()), &Some("2".to_string()), false);
+        let projects: Vec<&String> = targets.iter().map(|(_, _, project)| project).collect();
+        assert_eq!(projects, vec!["2"], "--project must select the requested Redmine project");
+
+        let targets = crate::connectors::get_matching_remote_connectors(remotes, &Some("redmine".to_string()), &None, false);
+        let projects: Vec<&String> = targets.iter().map(|(_, _, project)| project).collect();
+        assert_eq!(projects, vec!["1"], "without --project the configured project stays the default");
+    }
+
+    #[test]
+    fn an_explicit_project_needs_only_the_redmine_url() {
+        let _repo = gittask::testing::TestRepo::new();
+        gittask::set_config_value("task.redmine.url", "http://127.0.0.1:1/").unwrap();
+        let remotes = vec!["https://example.invalid/git-task/ci.git".to_string()];
+
+        let targets = crate::connectors::get_matching_remote_connectors(remotes.clone(), &Some("redmine".to_string()), &Some("ops".to_string()), false);
+        assert_eq!(targets.len(), 1, "a project given explicitly does not need task.redmine.project.id");
+        assert_eq!(targets[0].2, "ops");
+
+        let targets = crate::connectors::get_matching_remote_connectors(remotes, &Some("redmine".to_string()), &None, false);
+        assert!(targets.is_empty(), "without a default project there is no default target");
     }
 
     fn issue_with_journals(journals: &str) -> Issue {

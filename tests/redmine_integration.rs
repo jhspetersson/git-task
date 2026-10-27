@@ -304,6 +304,28 @@ fn moving_an_issue_between_projects_keeps_syncing_the_same_issue() {
 }
 
 #[test]
+fn consecutive_moves_keep_following_the_same_issue() {
+    let redmine = redmine_or_skip!();
+    let first = redmine.create_project("hop-1");
+    let second = redmine.create_project("hop-2");
+    let third = redmine.create_project("hop-3");
+    let id = redmine.create_issue(first, "Hopping issue");
+    let repo = local_repo(&redmine, first);
+    run(&repo, &["pull", &id.to_string()]);
+
+    run(&repo, &["set", &id.to_string(), "project_id", &second.to_string(), "--push"]);
+    run(&repo, &["set", &id.to_string(), "project_id", &third.to_string(), "--push"]);
+
+    assert_eq!(redmine.issue(id)["project"]["id"], third, "the second move must move the same issue again");
+    assert!(redmine.issues_in_project(second).is_empty(), "the issue must leave the second project");
+    assert_eq!(redmine.issues_in_project(third).len(), 1, "the second move must not create a duplicate");
+    assert_eq!(local_task_ids(&repo), vec![id.to_string()], "the local task must keep its id");
+
+    run(&repo, &["pull", &id.to_string(), "--project", &third.to_string()]);
+    assert_eq!(local_task(&repo, &id.to_string())["props"]["project_id"], third.to_string());
+}
+
+#[test]
 fn pull_imports_the_issue_with_its_status_and_comment() {
     let redmine = redmine_or_skip!();
     let project = redmine.create_project("pull");

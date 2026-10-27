@@ -33,6 +33,9 @@ pub trait RemoteConnector {
     fn supports_multiple_projects(&self) -> bool {
         false
     }
+    fn remote_for_project(&self, url: &str, project: &str) -> Option<(String, String)> {
+        self.supports_remotes(url).into_iter().find(|(_, p)| p.eq_ignore_ascii_case(project))
+    }
     fn list_remote_tasks(&self, user: &String, repo: &String, with_comments: bool, with_labels: bool, limit: Option<usize>, state: RemoteTaskState, task_statuses: &Vec<String>) -> Result<Vec<Task>, String>;
     fn get_remote_task(&self, user: &String, repo: &String, task_id: &String, with_comments: bool, with_labels: bool, task_statuses: &Vec<String>) -> Result<Option<Task>, String>;
     fn create_remote_task(&self, user: &String, repo: &String, task: &Task) -> Result<String, String>;
@@ -103,19 +106,13 @@ pub fn get_matching_remote_connectors(remotes: Vec<String>,
                 }
             }
 
-            let targets = if project.is_some() || all_projects {
-                connector.supports_remotes(&remote)
-            } else {
-                connector.supports_remote(&remote).into_iter().collect()
+            let targets = match project {
+                Some(project) => connector.remote_for_project(&remote, project).into_iter().collect(),
+                None if all_projects => connector.supports_remotes(&remote),
+                None => connector.supports_remote(&remote).into_iter().collect(),
             };
 
             for (user, repo) in targets {
-                if let Some(project) = project {
-                    if !repo.eq_ignore_ascii_case(project) {
-                        continue;
-                    }
-                }
-
                 let duplicate = result.iter().any(|(c, u, r)| {
                     c.type_name() == connector.type_name() && *u == user && *r == repo
                 });
