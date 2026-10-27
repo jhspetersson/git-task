@@ -979,10 +979,17 @@ fn push_task(
         let mut anything_synced = false;
         let status_changed = !status_names_match(local_status, remote_status);
         let labels_changed = sync_labels && label_names(local_task.get_labels()) != label_names(remote_task.get_labels());
-        if local_name != remote_name || local_text != remote_text || status_changed || labels_changed {
+        let project_changed = match (local_task.get_property("project_id"), remote_task.get_property("project_id")) {
+            (Some(local_project), Some(remote_project)) => local_project != remote_project,
+            _ => false,
+        };
+        if local_name != remote_name || local_text != remote_text || status_changed || labels_changed || project_changed {
             anything_synced = true;
             if status_changed {
                 println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
+            }
+            if project_changed {
+                println!("{}: project {} -> {}", id, remote_task.get_property("project_id").unwrap(), local_task.get_property("project_id").unwrap());
             }
             let state = if status_manager.is_done(local_status) {
                 RemoteTaskState::Closed(local_status.to_string(), remote_status.to_string())
@@ -2241,6 +2248,42 @@ mod tests {
         assert_eq!(updates.len(), 1, "a label-only change must still update the remote task");
         let sent = updates[0].clone().unwrap_or_default().iter().map(|l| l.get_name()).collect::<Vec<_>>();
         assert_eq!(sent, vec!["bug".to_string()]);
+    }
+
+    #[test]
+    fn test_push_task_sends_project_only_changes() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap();
+        local.set_property("project_id", "2");
+        let local = gittask::create_task(local).unwrap();
+        let id = local.get_id().unwrap();
+        let mut remote = local.clone();
+        remote.set_property("project_id", "1");
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+
+        assert!(push_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, true, true, &StatusManager::new(), &statuses, true));
+
+        assert_eq!(fake.updates().len(), 1, "a project-only change must still update the remote task");
+    }
+
+    #[test]
+    fn test_push_task_ignores_a_local_project_the_connector_does_not_report() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap();
+        local.set_property("project_id", "2");
+        let local = gittask::create_task(local).unwrap();
+        let id = local.get_id().unwrap();
+        let mut remote = local.clone();
+        remote.delete_property("project_id");
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+
+        assert!(push_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, true, true, &StatusManager::new(), &statuses, true));
+
+        assert!(fake.updates().is_empty(), "a connector that does not manage projects must not see a change");
     }
 
     #[test]

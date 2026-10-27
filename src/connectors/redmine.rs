@@ -373,8 +373,7 @@ impl RemoteConnector for RedmineRemoteConnector {
         builder.subject(subtask.get_name().to_string());
         builder.parent_issue_id(parent_id);
 
-        if !subtask.get_status().is_empty()
-            && let Ok(Some(status_id)) = get_status_id_by_name(&redmine, subtask.get_status()) {
+        if let Some(status_id) = subtask_status_id(&redmine, subtask)? {
             builder.status_id(status_id);
         }
 
@@ -398,8 +397,7 @@ impl RemoteConnector for RedmineRemoteConnector {
         builder.id(id);
         builder.subject(subtask.get_name().to_string());
 
-        if !subtask.get_status().is_empty()
-            && let Ok(Some(status_id)) = get_status_id_by_name(&redmine, subtask.get_status()) {
+        if let Some(status_id) = subtask_status_id(&redmine, subtask)? {
             builder.status_id(status_id);
         }
 
@@ -491,6 +489,18 @@ fn get_redmine_instance(domain: &String) -> Result<Redmine, String> {
     let url = get_base_url(domain)?;
     let api_key = get_api_key()?;
     Redmine::new(client, url.parse().map_err(|e| format!("Invalid Redmine URL '{url}': {e}"))?, &*api_key).map_err(|e| e.to_string())
+}
+
+fn subtask_status_id(redmine: &Redmine, subtask: &Subtask) -> Result<Option<u64>, String> {
+    let status = subtask.get_status();
+    if status.is_empty() {
+        return Ok(None);
+    }
+    let status_id = get_status_id_by_name(redmine, status).map_err(|e| format!("Failed to look up Redmine status '{status}': {e}"))?;
+    if status_id.is_none() {
+        eprintln!("WARNING: no Redmine status matches '{status}', remote subtask status left unchanged");
+    }
+    Ok(status_id)
 }
 
 fn get_status_id_by_name(redmine: &Redmine, name: &str) -> Result<Option<u64>, String> {
@@ -661,6 +671,66 @@ mod tests {
         let result = resolve_project_id(&redmine, &"nope".to_string());
 
         assert_eq!(result, Err("Project 'nope' not found on Redmine server".to_string()));
+    }
+
+    fn redmine_statuses(status_code: u16) -> impl Fn(&str, &str) -> (u16, String) + Send + 'static {
+        move |method, path| {
+            if path == "/issue_statuses.json" {
+                (status_code, r#"{"issue_statuses":[{"id":1,"name":"New","is_closed":false},{"id":5,"name":"Closed","is_closed":true}]}"#.to_string())
+            } else if method == "PUT" && path == "/issues/7.json" {
+                (204, String::new())
+            } else {
+                (404, r#"{"errors":["Not found"]}"#.to_string())
+            }
+        }
+    }
+
+    fn subtask(status: &str) -> Subtask {
+        Subtask::new(Some("7".to_string()), "Child".to_string(), status.to_string(), HashMap::new())
+    }
+
+    #[test]
+    fn subtask_status_id_resolves_a_matching_status() {
+        let (redmine, _requests) = stub_redmine(redmine_statuses(200));
+
+        assert_eq!(subtask_status_id(&redmine, &subtask("CLOSED")), Ok(Some(5)));
+        assert_eq!(subtask_status_id(&redmine, &subtask("REVIEW")), Ok(None), "an unknown status name is reported as missing, not as an error");
+        assert_eq!(subtask_status_id(&redmine, &subtask("")), Ok(None));
+    }
+
+    #[test]
+    fn subtask_status_id_propagates_a_failed_lookup() {
+        let (redmine, _requests) = stub_redmine(redmine_statuses(403));
+
+        let result = subtask_status_id(&redmine, &subtask("CLOSED"));
+
+        assert!(result.as_ref().is_err_and(|e| e.starts_with("Failed to look up Redmine status 'CLOSED'")), "{result:?}");
+    }
+
+    #[test]
+    fn update_remote_subtask_fails_instead_of_dropping_the_status_when_the_lookup_fails() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, requests) = stub_redmine(redmine_statuses(403));
+        gittask::set_config_value("task.redmine.url", redmine.redmine_url().as_str()).unwrap();
+        gittask::set_config_value("task.redmine.api.key", "key").unwrap();
+
+        let result = RedmineRemoteConnector.update_remote_subtask(&String::new(), &"1".to_string(), &"1".to_string(), &subtask("CLOSED"), true);
+
+        assert!(result.is_err(), "{result:?}");
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /issue_statuses.json"], "no update may be sent once the status could not be resolved");
+    }
+
+    #[test]
+    fn update_remote_subtask_sends_the_resolved_status() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, requests) = stub_redmine(redmine_statuses(200));
+        gittask::set_config_value("task.redmine.url", redmine.redmine_url().as_str()).unwrap();
+        gittask::set_config_value("task.redmine.api.key", "key").unwrap();
+
+        let result = RedmineRemoteConnector.update_remote_subtask(&String::new(), &"1".to_string(), &"1".to_string(), &subtask("CLOSED"), true);
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /issue_statuses.json", "PUT /issues/7.json"]);
     }
 
     fn issue_with_journals(journals: &str) -> Issue {
