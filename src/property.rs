@@ -266,14 +266,14 @@ impl PropertyManager {
     }
 
     fn find_cond_format<'a>(cond_format: &'a Option<Vec<PropertyCondFormat>>, context: &'a HashMap<String, String>, properties: &Vec<Property>) -> Option<(&'a String, &'a Option<String>)> {
-        let mut eval_context = HashMapContext::new();
+        let mut eval_context: HashMapContext = HashMapContext::new();
         context.into_iter().for_each(|(k, v)| {
             let property = properties.iter().find(|p| p.name == k.as_str());
             match property {
                 Some(property) => {
                     match property.value_type {
                         PropertyValueType::Integer | PropertyValueType::DateTime => {
-                            eval_context.set_value(k.into(), v.clone().parse::<i64>().unwrap_or(0).into()).unwrap();
+                            eval_context.set_value(k.into(), evalexpr::Value::from_int(v.clone().parse::<i64>().unwrap_or(0))).unwrap();
                         },
                         _ => {
                             eval_context.set_value(k.into(), v.clone().into()).unwrap();

@@ -549,7 +549,7 @@ fn task_matches(
     }
 
     if let Some(filter) = filter {
-        let mut eval_context = HashMapContext::new();
+        let mut eval_context: HashMapContext = HashMapContext::new();
         let context = extract_task_context(&task);
 
         for (k, v) in context {
@@ -561,7 +561,7 @@ fn task_matches(
 
             if is_integer {
                 if let Ok(i) = v.parse::<i64>() {
-                    eval_context.set_value(k.into(), i.into()).unwrap();
+                    eval_context.set_value(k.into(), evalexpr::Value::from_int(i)).unwrap();
                 } else {
                     eval_context.set_value(k.into(), v.into()).unwrap();
                 }
@@ -1889,7 +1889,7 @@ mod tests {
 
     #[test]
     fn test_filter_context_datetime_is_numeric() {
-        let mut eval_context = evalexpr::HashMapContext::new();
+        let mut eval_context: evalexpr::HashMapContext = evalexpr::HashMapContext::new();
         let created_value = "1000000";
 
         let is_numeric = matches!(PropertyValueType::DateTime, PropertyValueType::Integer | PropertyValueType::DateTime);
