@@ -266,7 +266,11 @@ fn without_mark(kind: MarkKind, marks: &Marks) -> Marks {
 /// Renders marked text runs, nesting shared marks so "**a *b* c**" comes out
 /// as one bold span rather than three.
 fn render_runs(runs: &[(String, Marks)]) -> String {
-    for kind in [MarkKind::Link, MarkKind::Strong, MarkKind::Em, MarkKind::Strike] {
+    // A mark every run carries goes outermost, so "*one**two***" rather than "*one****two***".
+    let kinds = [MarkKind::Link, MarkKind::Strong, MarkKind::Em, MarkKind::Strike];
+    let shared = |kind: &MarkKind| runs.iter().all(|(_, m)| has_mark(*kind, m));
+    let order = kinds.iter().filter(|k| shared(k)).chain(kinds.iter().filter(|k| !shared(k)));
+    for &kind in order {
         if !runs.iter().any(|(_, m)| has_mark(kind, m)) {
             continue;
         }
@@ -328,7 +332,7 @@ fn escape_text(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     for (i, c) in chars.iter().enumerate() {
         match c {
-            '\\' | '*' | '`' | '[' => { out.push('\\'); out.push(*c); }
+            '\\' | '*' | '`' | '[' | ']' => { out.push('\\'); out.push(*c); }
             '~' if chars.get(i + 1) == Some(&'~') || (i > 0 && chars[i - 1] == '~') => { out.push('\\'); out.push('~'); }
             '_' => {
                 let word_before = i > 0 && chars[i - 1].is_alphanumeric();
@@ -358,7 +362,7 @@ fn escape_line_starts(text: &str) -> String {
 
 fn starts_block(line: &str) -> bool {
     let t = line.trim_start();
-    t.starts_with('#') || t.starts_with('>') || t.starts_with('|') || t.starts_with("```")
+    t.starts_with('#') || t.starts_with('>') || t.starts_with('|') || opening_fence(t).is_some()
         || list_marker(line).is_some() || is_rule(line)
 }
 
@@ -440,7 +444,9 @@ fn leading_backticks(line: &str) -> usize {
 /// Length of the fence if the (left-trimmed) line opens a fenced code block.
 fn opening_fence(trimmed: &str) -> Option<usize> {
     let fence = leading_backticks(trimmed);
-    (fence >= 3).then_some(fence)
+    // As in CommonMark, the info string of a backtick fence cannot contain backticks,
+    // so a line such as "```a ` b```" holds an inline code span, not a block.
+    (fence >= 3 && !trimmed[fence..].contains('`')).then_some(fence)
 }
 
 /// A closing fence has at least as many backticks as the opening one and nothing else.
@@ -451,7 +457,7 @@ fn closes_fence(line: &str, fence: usize) -> bool {
 
 fn interrupts_paragraph(line: &str) -> bool {
     let t = line.trim_start();
-    t.starts_with("```") || heading(t).is_some() || is_rule(line) || t.starts_with('>') || list_marker(line).is_some()
+    opening_fence(t).is_some() || heading(t).is_some() || is_rule(line) || t.starts_with('>') || list_marker(line).is_some()
 }
 
 fn heading(line: &str) -> Option<(usize, &str)> {
@@ -522,16 +528,23 @@ fn list_marker(line: &str) -> Option<(usize, ListKind, usize, bool)> {
     let rest = &line[indent..];
     let (kind, marker_len) = if rest.starts_with("- ") || rest.starts_with("* ") || rest.starts_with("+ ") {
         (ListKind::Bullet, 2)
+    } else if matches!(rest, "-" | "*" | "+") {
+        // An empty item: the marker alone, as the renderer writes it.
+        (ListKind::Bullet, 1)
     } else {
         let digits = rest.chars().take_while(char::is_ascii_digit).count();
         if digits == 0 || digits > 9 {
             return None;
         }
         let after = &rest[digits..];
-        if !(after.starts_with(". ") || after.starts_with(") ")) {
+        let marker_len = if after.starts_with(". ") || after.starts_with(") ") {
+            digits + 2
+        } else if after == "." || after == ")" {
+            digits + 1
+        } else {
             return None;
-        }
-        (ListKind::Ordered(rest[..digits].parse().unwrap_or(1)), digits + 2)
+        };
+        (ListKind::Ordered(rest[..digits].parse().unwrap_or(1)), marker_len)
     };
     let after = &rest[marker_len..];
     if kind == ListKind::Bullet {
@@ -703,33 +716,38 @@ fn parse_inline_into(chars: &[char], marks: &Marks, nodes: &mut Vec<Value>) {
             }
             '*' | '~' | '_' => {
                 let run = chars[i..].iter().take_while(|x| **x == c).count();
-                let triple = c == '*' && run == 3;
-                let double = run >= 2 && c != '_' && !triple;
-                let delim: Vec<char> = if triple { vec![c; 3] } else if double { vec![c, c] } else { vec![c] };
                 let valid = if c == '_' {
                     // Underscores only mark emphasis at word boundaries (snake_case stays literal).
                     i == 0 || !chars[i - 1].is_alphanumeric()
                 } else {
-                    c != '~' || double
+                    c != '~' || run >= 2
                 };
-                let start = i + delim.len();
-                let close = if valid && start < chars.len() && !chars[start].is_whitespace() {
-                    find_seq(chars, start, &delim).filter(|end| *end > start && !chars[end - 1].is_whitespace()
-                        && (c != '_' || chars.get(end + 1).is_none_or(|n| !n.is_alphanumeric())))
-                } else {
-                    None
-                };
+                let mut close = None;
+                if valid {
+                    for width in opener_widths(chars, i, run) {
+                        let start = i + width;
+                        if start >= chars.len() || chars[start].is_whitespace() {
+                            continue;
+                        }
+                        let found = find_closer(chars, i, run, start, width).filter(|end| *end > start && !chars[end - 1].is_whitespace()
+                            && (c != '_' || chars.get(end + width).is_none_or(|n| !n.is_alphanumeric())));
+                        if let Some(end) = found {
+                            close = Some((width, end));
+                            break;
+                        }
+                    }
+                }
                 match close {
-                    Some(end) => {
+                    Some((width, end)) => {
                         flush(&mut buf, nodes);
-                        let inner = match (c, double, triple) {
-                            ('*', _, true) => Marks { strong: true, em: true, ..marks.clone() },
-                            ('*', true, _) => Marks { strong: true, ..marks.clone() },
-                            ('~', _, _) => Marks { strike: true, ..marks.clone() },
+                        let inner = match (c, width) {
+                            ('~', _) => Marks { strike: true, ..marks.clone() },
+                            ('*', 3) => Marks { strong: true, em: true, ..marks.clone() },
+                            ('*', 2) => Marks { strong: true, ..marks.clone() },
                             _ => Marks { em: true, ..marks.clone() },
                         };
-                        parse_inline_into(&chars[start..end], &inner, nodes);
-                        i = end + delim.len();
+                        parse_inline_into(&chars[i + width..end], &inner, nodes);
+                        i = end + width;
                     }
                     None => {
                         buf.push(c);
@@ -762,20 +780,98 @@ fn find_backtick_run(chars: &[char], from: usize, length: usize) -> Option<usize
     None
 }
 
-/// Finds the next occurrence of `seq` at or after `from`, skipping backslash-escaped
-/// punctuation so that `\*` inside `*a\*b*` does not close the emphasis.
-fn find_seq(chars: &[char], from: usize, seq: &[char]) -> Option<usize> {
+/// The delimiter widths to try for an opening run. A `***` run is bold-italic when a
+/// `***` closes it; otherwise the first closing run decides which mark is the inner one
+/// (`***a** b*` is italic around bold, `***a* b**` bold around italic).
+fn opener_widths(chars: &[char], opener: usize, run: usize) -> Vec<usize> {
+    match (chars[opener], run) {
+        ('_', _) => vec![1],
+        ('~', _) => vec![2],
+        (_, 1) => vec![1],
+        (_, 2) => vec![2],
+        (c, 3) => if next_run_length(chars, opener + 3, c) >= 2 { vec![3, 1, 2] } else { vec![3, 2, 1] },
+        _ => vec![2],
+    }
+}
+
+/// Length of the first run of `c` at or after `from`, skipping escaped punctuation.
+fn next_run_length(chars: &[char], from: usize, c: char) -> usize {
     let mut j = from;
-    while j + seq.len() <= chars.len() {
+    while j < chars.len() {
         if chars[j] == '\\' && chars.get(j + 1).is_some_and(|n| n.is_ascii_punctuation()) {
             j += 2;
-        } else if chars[j..j + seq.len()] == *seq {
-            return Some(j);
+        } else if chars[j] == c {
+            return chars[j..].iter().take_while(|x| **x == c).count();
         } else {
             j += 1;
         }
     }
-    None
+    0
+}
+
+/// Finds where the emphasis opened by the run at `opener` (`run` characters long, of which
+/// `width` are used) closes, returning the index of the first closing character. Escaped
+/// punctuation never closes. When the closing run is longer than needed, the surplus goes
+/// inside if that leaves the inner delimiters balanced, so `**one*two***` is bold "one"
+/// followed by bold-italic "two".
+fn find_closer(chars: &[char], opener: usize, run: usize, from: usize, width: usize) -> Option<usize> {
+    let c = chars[opener];
+    let opener_can_close = opener > 0 && !chars[opener - 1].is_whitespace();
+    let mut fallback = None;
+    // The unused characters of the opening run belong to the inner text, not to a closer.
+    let mut j = from.max(opener + run);
+    while j < chars.len() {
+        if chars[j] == '\\' && chars.get(j + 1).is_some_and(|n| n.is_ascii_punctuation()) {
+            j += 2;
+            continue;
+        }
+        if chars[j] != c {
+            j += 1;
+            continue;
+        }
+        let length = chars[j..].iter().take_while(|x| **x == c).count();
+        let can_open = chars.get(j + length).is_some_and(|n| !n.is_whitespace());
+        // CommonMark's rule of three: a run that could also open emphasis does not close
+        // an opener when the two run lengths add up to a multiple of three.
+        let rule_of_three = (can_open || opener_can_close) && (run + length).is_multiple_of(3) && !(run.is_multiple_of(3) && length.is_multiple_of(3));
+        if length >= width && !rule_of_three {
+            if let Some(end) = (j..=j + length - width).find(|end| delimiters_balanced(&chars[from..*end], c)) {
+                return Some(end);
+            }
+            fallback.get_or_insert(j);
+        }
+        j += length;
+    }
+    fallback
+}
+
+/// Whether the runs of `c` in `chars` pair up as openers and closers, ignoring escapes.
+fn delimiters_balanced(chars: &[char], c: char) -> bool {
+    let mut open: Vec<usize> = vec![];
+    let mut j = 0;
+    while j < chars.len() {
+        if chars[j] == '\\' && chars.get(j + 1).is_some_and(|n| n.is_ascii_punctuation()) {
+            j += 2;
+        } else if chars[j] == c {
+            let mut length = chars[j..].iter().take_while(|x| **x == c).count();
+            j += length;
+            while length > 0 {
+                let Some(top) = open.last_mut() else { break };
+                let used = length.min(*top);
+                *top -= used;
+                length -= used;
+                if *top == 0 {
+                    open.pop();
+                }
+            }
+            if length > 0 {
+                open.push(length);
+            }
+        } else {
+            j += 1;
+        }
+    }
+    open.is_empty()
 }
 
 /// For a '[' at `start`, returns (index of ']', index of ')') of a `[label](href)` link.
@@ -1139,5 +1235,86 @@ mod tests {
             markdown_to_adf(r"*a\\*")["content"][0]["content"][0],
             json!({"type": "text", "text": r"a\", "marks": [{"type": "em"}]})
         );
+    }
+
+    fn marked(t: &str, marks: &[&str]) -> Value {
+        json!({"type": "text", "text": t, "marks": marks.iter().map(|m| json!({"type": m})).collect::<Vec<_>>()})
+    }
+
+    fn mark_names(node: &Value) -> Vec<String> {
+        let mut names: Vec<String> = node["marks"].as_array().map(|marks| marks.iter().filter_map(|m| m["type"].as_str().map(str::to_string)).collect()).unwrap_or_default();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn test_nested_strong_and_em_survive_the_round_trip() {
+        let adf = doc(vec![para(vec![marked("one", &["strong"]), marked("two", &["strong", "em"])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "**one*two***");
+        let content = &markdown_to_adf(&md)["content"][0]["content"];
+        assert_eq!(content.as_array().unwrap().len(), 2, "{content}");
+        assert_eq!((content[0]["text"].as_str(), mark_names(&content[0])), (Some("one"), vec!["strong".to_string()]));
+        assert_eq!((content[1]["text"].as_str(), mark_names(&content[1])), (Some("two"), vec!["em".to_string(), "strong".to_string()]));
+
+        let adf = doc(vec![para(vec![marked("one", &["em"]), marked("two", &["em", "strong"])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "*one**two***");
+        let content = &markdown_to_adf(&md)["content"][0]["content"];
+        assert_eq!((content[0]["text"].as_str(), mark_names(&content[0])), (Some("one"), vec!["em".to_string()]));
+        assert_eq!((content[1]["text"].as_str(), mark_names(&content[1])), (Some("two"), vec!["em".to_string(), "strong".to_string()]));
+
+        // Bold-italic at the start of an emphasized or bold span.
+        let adf = doc(vec![para(vec![marked("a", &["em", "strong"]), marked(" b", &["em"])])]);
+        assert_eq!(adf_to_markdown(&adf), "***a** b*");
+        let content = &markdown_to_adf("***a** b*")["content"][0]["content"];
+        assert_eq!((content[0]["text"].as_str(), mark_names(&content[0])), (Some("a"), vec!["em".to_string(), "strong".to_string()]));
+        assert_eq!((content[1]["text"].as_str(), mark_names(&content[1])), (Some(" b"), vec!["em".to_string()]));
+        let content = &markdown_to_adf("***a* b**")["content"][0]["content"];
+        assert_eq!((content[0]["text"].as_str(), mark_names(&content[0])), (Some("a"), vec!["em".to_string(), "strong".to_string()]));
+        assert_eq!((content[1]["text"].as_str(), mark_names(&content[1])), (Some(" b"), vec!["strong".to_string()]));
+
+        for md in ["**one*two***", "*one**two***", "***a** b*", "***a* b**", "**a *b***", "***both***"] {
+            round_trip(md);
+        }
+    }
+
+    #[test]
+    fn test_link_labels_with_brackets_survive_the_round_trip() {
+        let adf = doc(vec![para(vec![json!({"type": "text", "text": "[docs]", "marks": [{"type": "link", "attrs": {"href": "https://example.com"}}]})])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, r"[\[docs\]](https://example.com)");
+        let node = &markdown_to_adf(&md)["content"][0]["content"][0];
+        assert_eq!(node["text"], "[docs]");
+        assert_eq!(mark_names(node), vec!["link".to_string()]);
+        round_trip(&md);
+        round_trip(r"see \[not a link\] here");
+    }
+
+    #[test]
+    fn test_inline_code_with_mixed_backticks_at_the_start_of_a_paragraph() {
+        let adf = doc(vec![para(vec![marked("a ` b `` c", &["code"]), text(" tail")])]);
+        let md = adf_to_markdown(&adf);
+        assert!(md.starts_with("```"), "{md}");
+        assert_eq!(markdown_to_adf(&md), adf, "a code span is not a fence");
+        round_trip(&md);
+        // A one-line span that looks like a fence is inline code, as in CommonMark.
+        assert_eq!(markdown_to_adf("```foo```"), doc(vec![para(vec![marked("foo", &["code"])])]));
+        // A real fence still opens a block.
+        assert_eq!(markdown_to_adf("```rust\nfn x() {}\n```")["content"][0]["type"], "codeBlock");
+    }
+
+    #[test]
+    fn test_empty_list_items_survive_the_round_trip() {
+        let item = |content: Vec<Value>| json!({"type": "listItem", "content": content});
+        let adf = doc(vec![json!({"type": "bulletList", "content": [item(vec![para(vec![text("a")])]), item(vec![para(vec![])])]})]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "- a\n-");
+        assert_eq!(markdown_to_adf(&md), adf);
+        round_trip("1. a\n2.\n3. c");
+        round_trip("-");
+        // A paragraph consisting of a dash alone is escaped so it does not become a list.
+        round_trip(r"\-");
+        assert_eq!(adf_to_markdown(&doc(vec![para(vec![text("-")])])), r"\-");
     }
 }
