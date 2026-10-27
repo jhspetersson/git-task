@@ -573,7 +573,7 @@ fn parse_list(lines: &[&str]) -> (Value, usize) {
                         break;
                     }
                     if l_indent > base_indent {
-                        let strip = l_indent.min(indent + offset);
+                        let strip = indent_boundary(l, indent + offset);
                         items.last_mut().unwrap().0.push(l[strip..].to_string());
                         i += 1;
                     } else {
@@ -614,6 +614,20 @@ fn parse_list(lines: &[&str]) -> (Value, usize) {
         ListKind::Task => json!({"type": "taskList", "attrs": {"localId": next_local_id()}, "content": item_nodes}),
     };
     (node, i)
+}
+
+/// Byte index just past the leading whitespace of `line`, stopping once `max_bytes` is
+/// reached. Whitespace characters are consumed whole, so the result is always a char
+/// boundary even for multi-byte whitespace such as U+2003 (em space).
+fn indent_boundary(line: &str, max_bytes: usize) -> usize {
+    let mut end = 0;
+    for (idx, ch) in line.char_indices() {
+        if !ch.is_whitespace() || idx >= max_bytes {
+            break;
+        }
+        end = idx + ch.len_utf8();
+    }
+    end
 }
 
 fn same_kind(a: ListKind, b: ListKind) -> bool {
@@ -748,8 +762,20 @@ fn find_backtick_run(chars: &[char], from: usize, length: usize) -> Option<usize
     None
 }
 
+/// Finds the next occurrence of `seq` at or after `from`, skipping backslash-escaped
+/// punctuation so that `\*` inside `*a\*b*` does not close the emphasis.
 fn find_seq(chars: &[char], from: usize, seq: &[char]) -> Option<usize> {
-    (from..chars.len().saturating_sub(seq.len() - 1)).find(|&j| &chars[j..j + seq.len()] == seq)
+    let mut j = from;
+    while j + seq.len() <= chars.len() {
+        if chars[j] == '\\' && chars.get(j + 1).is_some_and(|n| n.is_ascii_punctuation()) {
+            j += 2;
+        } else if chars[j..j + seq.len()] == *seq {
+            return Some(j);
+        } else {
+            j += 1;
+        }
+    }
+    None
 }
 
 /// For a '[' at `start`, returns (index of ']', index of ')') of a `[label](href)` link.
@@ -1076,5 +1102,42 @@ mod tests {
         assert_eq!(content[1], text(" and "));
         assert_eq!(content[2], json!({"type": "text", "text": "`x`", "marks": [{"type": "code"}]}));
         assert_eq!(content[3], text(" done"));
+    }
+
+    #[test]
+    fn test_unicode_indented_continuation_line_does_not_panic() {
+        // An em space (U+2003) is three bytes; stripping must never cut inside it.
+        let md = "- item\n\u{2003}continued";
+        let adf = markdown_to_adf(md);
+        let item = &adf["content"][0]["content"][0];
+        assert_eq!(item["type"], "listItem");
+        assert_eq!(adf_to_markdown(&adf), "- item\n  continued");
+        // Other multi-byte whitespace as well, mixed with ASCII.
+        markdown_to_adf("1. one\n\u{3000}\u{3000}two\n\n\u{a0} three");
+        markdown_to_adf("- a\n  - b\n\u{2003}\u{2003}\u{2003}c");
+    }
+
+    #[test]
+    fn test_escaped_delimiters_inside_emphasis_are_literal() {
+        let adf = doc(vec![para(vec![json!({"type": "text", "text": "a*b", "marks": [{"type": "em"}]})])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, r"*a\*b*");
+        assert_eq!(markdown_to_adf(&md), adf, "an escaped asterisk must not close the emphasis");
+        round_trip(&md);
+        // Adding a paragraph (as a user editing the pulled description would) keeps the original intact.
+        let edited = format!("{md}\n\nmore");
+        assert_eq!(adf_to_markdown(&markdown_to_adf(&edited)), edited);
+        // Same for strong, strike and underscores, and an escaped backslash right before the closer.
+        for original in [r"**a\*\*b**", r"~~a\~\~b~~", r"*a\\*"] {
+            round_trip(original);
+        }
+        assert_eq!(
+            markdown_to_adf(r"_a\_b_")["content"][0]["content"][0],
+            json!({"type": "text", "text": "a_b", "marks": [{"type": "em"}]})
+        );
+        assert_eq!(
+            markdown_to_adf(r"*a\\*")["content"][0]["content"][0],
+            json!({"type": "text", "text": r"a\", "marks": [{"type": "em"}]})
+        );
     }
 }
