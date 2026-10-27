@@ -71,7 +71,11 @@ fn render_block(node: &Value) -> String {
         "codeBlock" => {
             let language = attr_str(node, "language").unwrap_or("");
             let code = plain_text(children(node));
-            format!("```{language}\n{code}\n```")
+            // The fence must be longer than any backtick run opening a line of the code,
+            // otherwise that line would close the block early.
+            let longest_run = code.lines().map(|l| leading_backticks(l.trim_start())).max().unwrap_or(0);
+            let fence = "`".repeat(longest_run.max(2) + 1);
+            format!("{fence}{language}\n{code}\n{fence}")
         }
         "blockquote" | "panel" => render_blocks(children(node)).lines()
             .map(|l| if l.is_empty() { ">".to_string() } else { format!("> {l}") })
@@ -336,7 +340,15 @@ fn escape_text(text: &str) -> String {
 /// Escapes a line that would otherwise start a block (heading, list, quote, rule, table, fence).
 fn escape_line_starts(text: &str) -> String {
     text.split('\n').map(|line| {
-        if starts_block(line) { format!("\\{line}") } else { line.to_string() }
+        if !starts_block(line) {
+            return line.to_string();
+        }
+        // The backslash goes before the first punctuation character of the marker
+        // ("1\. item"), since a backslash before a digit is not an escape.
+        match line.char_indices().find(|(_, c)| c.is_ascii_punctuation()) {
+            Some((at, _)) => format!("{}\\{}", &line[..at], &line[at..]),
+            None => line.to_string(),
+        }
     }).collect::<Vec<_>>().join("\n")
 }
 
@@ -359,11 +371,11 @@ fn parse_blocks(lines: &[&str]) -> Vec<Value> {
 
         if trimmed.is_empty() {
             i += 1;
-        } else if let Some(rest) = trimmed.strip_prefix("```") {
-            let language = rest.trim().to_string();
+        } else if let Some(fence) = opening_fence(trimmed) {
+            let language = trimmed[fence..].trim().to_string();
             let mut code = vec![];
             i += 1;
-            while i < lines.len() && !lines[i].trim_start().starts_with("```") {
+            while i < lines.len() && !closes_fence(lines[i], fence) {
                 code.push(lines[i]);
                 i += 1;
             }
@@ -415,6 +427,22 @@ fn parse_blocks(lines: &[&str]) -> Vec<Value> {
         }
     }
     blocks
+}
+
+fn leading_backticks(line: &str) -> usize {
+    line.chars().take_while(|c| *c == '`').count()
+}
+
+/// Length of the fence if the (left-trimmed) line opens a fenced code block.
+fn opening_fence(trimmed: &str) -> Option<usize> {
+    let fence = leading_backticks(trimmed);
+    (fence >= 3).then_some(fence)
+}
+
+/// A closing fence has at least as many backticks as the opening one and nothing else.
+fn closes_fence(line: &str, fence: usize) -> bool {
+    let t = line.trim();
+    leading_backticks(t) >= fence && t.chars().all(|c| c == '`')
 }
 
 fn interrupts_paragraph(line: &str) -> bool {
@@ -617,7 +645,9 @@ fn parse_inline_into(chars: &[char], marks: &Marks, nodes: &mut Vec<Value>) {
     while i < chars.len() {
         let c = chars[i];
         match c {
-            '\\' if i + 1 < chars.len() => {
+            // As in CommonMark, a backslash escapes only ASCII punctuation;
+            // elsewhere (paths, regexes) it is an ordinary character.
+            '\\' if i + 1 < chars.len() && chars[i + 1].is_ascii_punctuation() => {
                 buf.push(chars[i + 1]);
                 i += 2;
             }
@@ -899,5 +929,48 @@ mod tests {
     #[test]
     fn test_code_block_keeps_markdown_looking_content_verbatim() {
         round_trip("```\n# not a heading\n- not a list\n**not bold**\n```");
+    }
+
+    #[test]
+    fn test_backslashes_before_ordinary_characters_are_literal() {
+        // Paths and regexes typed by a user are not markdown escapes.
+        for original in [r"C:\Users\alice\logs", r"\d+\s+", r"a\ b", r"trailing\"] {
+            let adf = markdown_to_adf(original);
+            assert_eq!(adf["content"][0]["content"][0], text(original), "{original:?} must keep its backslashes");
+        }
+    }
+
+    #[test]
+    fn test_escaped_punctuation_is_still_unescaped() {
+        let adf = markdown_to_adf(r"\*not bold\* and \\ one backslash");
+        assert_eq!(adf["content"][0]["content"][0], text(r"*not bold* and \ one backslash"));
+    }
+
+    #[test]
+    fn test_remote_backslashes_survive_the_round_trip() {
+        for original in [r"C:\Users\alice", r"\d+\s+", r"a\*b", r"\\server\share"] {
+            let adf = doc(vec![para(vec![text(original)])]);
+            assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), adf, "{original:?} must survive the round trip");
+        }
+    }
+
+    #[test]
+    fn test_code_block_containing_fences_survives_the_round_trip() {
+        let code = "Use a fence:\n```sh\nls\n```\nand a longer one:\n````\nx\n````";
+        let adf = doc(vec![json!({"type": "codeBlock", "attrs": {"language": "markdown"}, "content": vec![text(code)]})]);
+
+        let md = adf_to_markdown(&adf);
+        let back = markdown_to_adf(&md);
+
+        assert_eq!(back, adf, "the embedded fences must stay inside the code block\nmarkdown: {md}");
+    }
+
+    #[test]
+    fn test_longer_fences_close_only_on_a_matching_fence() {
+        let adf = markdown_to_adf("`````\n```\ncode\n```\n`````\n\nafter");
+        let blocks = adf["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 2, "{adf}");
+        assert_eq!(blocks[0]["content"][0], text("```\ncode\n```"));
+        assert_eq!(blocks[1], para(vec![text("after")]));
     }
 }
