@@ -531,6 +531,15 @@ Set default connector to use:
 
     git task config set task.default.connector redmine
 
+Set the project new issues are created in (an identifier, a name or a numeric id):
+
+    git task config set task.redmine.project.id my-project
+
+Tasks carry their project in the `project_id` property. Change it and push to move the issue to another project; a pull picks up moves made on the Redmine side:
+
+    git task set 42 project_id other-project --push
+    git task pull 42 --project other-project
+
 Subtasks are synchronized using Redmine's `parent_issue_id`: a local subtask is created as a regular issue whose parent is the task, and children are listed via the `parent_id` filter.
 
 ## License

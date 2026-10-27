@@ -279,6 +279,31 @@ fn push_never_touches_an_issue_from_another_project() {
 }
 
 #[test]
+fn moving_an_issue_between_projects_keeps_syncing_the_same_issue() {
+    let redmine = redmine_or_skip!();
+    let first = redmine.create_project("move-from");
+    let second = redmine.create_project("move-to");
+    let id = redmine.create_issue(first, "Moving issue");
+    let repo = local_repo(&redmine, first);
+    run(&repo, &["pull", &id.to_string()]);
+
+    run(&repo, &["set", &id.to_string(), "project_id", &second.to_string(), "--push"]);
+    run(&repo, &["push", &id.to_string()]);
+
+    assert_eq!(redmine.issue(id)["project"]["id"], second, "the push must move the issue");
+    assert!(redmine.issues_in_project(first).is_empty(), "the issue must leave the first project");
+    assert_eq!(redmine.issues_in_project(second).len(), 1, "a second push must not create a duplicate");
+    assert_eq!(local_task_ids(&repo), vec![id.to_string()]);
+
+    redmine.put(&format!("/issues/{id}.json"), json!({ "issue": { "project_id": first } }));
+    run(&repo, &["pull", &id.to_string(), "--project", &first.to_string()]);
+
+    assert_eq!(local_task(&repo, &id.to_string())["props"]["project_id"], first.to_string(), "a remote move must be pulled");
+    run(&repo, &["push", &id.to_string()]);
+    assert_eq!(redmine.issue(id)["project"]["id"], first, "a push after the pull must not move the issue back");
+}
+
+#[test]
 fn pull_imports_the_issue_with_its_status_and_comment() {
     let redmine = redmine_or_skip!();
     let project = redmine.create_project("pull");

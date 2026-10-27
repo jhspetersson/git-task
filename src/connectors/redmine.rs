@@ -149,7 +149,8 @@ impl RemoteConnector for RedmineRemoteConnector {
         let redmine = get_redmine_instance(domain)?;
         let issue_id = task_id.parse().map_err(|_| format!("Invalid task ID: {task_id}"))?;
         let include = if with_comments { Some(vec![IssueInclude::Journals]) } else { None };
-        let issue = match get_issue_in_project(&redmine, project, issue_id, include)? {
+        let local_project = gittask::find_task(task_id).ok().flatten().and_then(|task| task.get_property("project_id").cloned());
+        let issue = match get_issue_in_project(&redmine, project, local_project.as_ref(), issue_id, include)? {
             Some(issue) => issue,
             None => return Ok(None),
         };
@@ -246,7 +247,7 @@ impl RemoteConnector for RedmineRemoteConnector {
             .parse::<u64>()
             .map_err(|e| format!("Invalid task id '{}': {}", task.get_id().unwrap(), e))?;
 
-        get_issue_in_project(&redmine, project, id, None)?.ok_or_else(|| format!("Issue #{id} not found in project '{project}'"))?;
+        get_issue_in_project(&redmine, project, task.get_property("project_id"), id, None)?.ok_or_else(|| format!("Issue #{id} not found in project '{project}'"))?;
 
         let mut builder = UpdateIssue::builder();
         builder.id(id);
@@ -421,8 +422,11 @@ impl RemoteConnector for RedmineRemoteConnector {
     }
 }
 
-fn get_issue_in_project(redmine: &Redmine, project: &String, issue_id: u64, include: Option<Vec<IssueInclude>>) -> Result<Option<Issue>, String> {
-    let project_id = resolve_project_id(redmine, project)?;
+fn get_issue_in_project(redmine: &Redmine, project: &String, local_project: Option<&String>, issue_id: u64, include: Option<Vec<IssueInclude>>) -> Result<Option<Issue>, String> {
+    let mut accepted_projects = vec![resolve_project_id(redmine, project)?];
+    if let Some(local_project) = local_project {
+        accepted_projects.push(resolve_project_id(redmine, local_project)?);
+    }
 
     let mut builder = GetIssue::builder();
     builder.id(issue_id);
@@ -436,7 +440,7 @@ fn get_issue_in_project(redmine: &Redmine, project: &String, issue_id: u64, incl
         Err(e) => return Err(e.to_string()),
     };
 
-    if issue.project.id != project_id {
+    if !accepted_projects.contains(&issue.project.id) {
         eprintln!("Issue #{issue_id} belongs to project '{}' (id {}), not to project '{project}'", issue.project.name, issue.project.id);
         return Ok(None);
     }
@@ -731,6 +735,84 @@ mod tests {
 
         assert_eq!(result, Ok(()));
         assert_eq!(requests.lock().unwrap().as_slice(), ["GET /issue_statuses.json", "PUT /issues/7.json"]);
+    }
+
+    fn issue_in_project(project_id: u64) -> String {
+        format!(r#"{{"issue":{{"id":7,"project":{{"id":{project_id},"name":"P{project_id}"}},"tracker":{{"id":1,"name":"Bug"}},"status":{{"id":1,"name":"New","is_closed":false}},"priority":{{"id":2,"name":"Normal"}},"author":{{"id":1,"name":"Admin"}},"subject":"Moved","description":"","start_date":null,"due_date":null,"closed_on":null,"done_ratio":0,"estimated_hours":null,"created_on":"2026-10-16T10:00:00Z","updated_on":"2026-10-16T10:00:00Z"}}}}"#)
+    }
+
+    fn redmine_issue_in_project(project_id: u64) -> impl Fn(&str, &str) -> (u16, String) + Send + 'static {
+        move |method, path| {
+            if method == "GET" && path == "/issues/7.json" {
+                (200, issue_in_project(project_id))
+            } else if method == "PUT" && path == "/issues/7.json" {
+                (204, String::new())
+            } else {
+                (404, r#"{"errors":["Not found"]}"#.to_string())
+            }
+        }
+    }
+
+    fn configure_stub(redmine: &Redmine) {
+        gittask::set_config_value("task.redmine.url", redmine.redmine_url().as_str()).unwrap();
+        gittask::set_config_value("task.redmine.api.key", "key").unwrap();
+    }
+
+    fn local_task_in_project(project_id: &str) {
+        let mut task = gittask::Task::new("Moved".to_string(), "".to_string(), "New".to_string()).unwrap();
+        task.set_id("7".to_string());
+        task.set_property("project_id", project_id);
+        gittask::create_task(task).unwrap();
+    }
+
+    #[test]
+    fn get_remote_task_rejects_a_foreign_issue_the_local_task_does_not_claim() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, _requests) = stub_redmine(redmine_issue_in_project(2));
+        configure_stub(&redmine);
+
+        let result = RedmineRemoteConnector.get_remote_task(&String::new(), &"1".to_string(), &"7".to_string(), false, false, &vec![]);
+
+        assert!(matches!(result, Ok(None)), "an issue of another project must not be adopted by a local task that does not point at it");
+    }
+
+    #[test]
+    fn get_remote_task_finds_an_issue_in_the_project_the_local_task_points_at() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, _requests) = stub_redmine(redmine_issue_in_project(2));
+        configure_stub(&redmine);
+        local_task_in_project("2");
+
+        let result = RedmineRemoteConnector.get_remote_task(&String::new(), &"1".to_string(), &"7".to_string(), false, false, &vec![]);
+
+        let task = result.unwrap().expect("the moved issue must still be found after the move");
+        assert_eq!(task.get_property("project_id"), Some(&"2".to_string()));
+    }
+
+    #[test]
+    fn get_remote_task_finds_an_issue_still_in_the_configured_project_before_a_move() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, _requests) = stub_redmine(redmine_issue_in_project(1));
+        configure_stub(&redmine);
+        local_task_in_project("2");
+
+        let result = RedmineRemoteConnector.get_remote_task(&String::new(), &"1".to_string(), &"7".to_string(), false, false, &vec![]);
+
+        assert!(matches!(result, Ok(Some(_))), "the first push of a project change must find the issue where it still is");
+    }
+
+    #[test]
+    fn update_remote_task_updates_an_issue_in_the_project_the_local_task_points_at() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, requests) = stub_redmine(redmine_issue_in_project(2));
+        configure_stub(&redmine);
+        local_task_in_project("2");
+        let task = gittask::find_task(&"7".to_string()).unwrap().unwrap();
+
+        let result = RedmineRemoteConnector.update_remote_task(&String::new(), &"1".to_string(), &task, None, RemoteTaskState::All);
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /issues/7.json", "PUT /issues/7.json"]);
     }
 
     fn issue_with_journals(journals: &str) -> Issue {

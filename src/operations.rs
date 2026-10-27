@@ -691,18 +691,26 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool,
                 || subtasks_are_equal(local_task.get_subtasks(), &merged_subtasks);
             let labels_equal = !with_labels
                 || label_names(local_task.get_labels()) == label_names(remote_task.get_labels());
+            let project_equal = match remote_task.get_property("project_id") {
+                Some(remote_project) => local_task.get_property("project_id") == Some(remote_project),
+                None => true,
+            };
 
             if local_task.get_property("name") == remote_task.get_property("name")
                 && local_task.get_property("description") == remote_task.get_property("description")
                 && local_task.get_property("status") == remote_task.get_property("status")
                 && (no_comments || comments_are_equal(local_task.get_comments(), remote_task.get_comments()))
                 && subtasks_equal
-                && labels_equal {
+                && labels_equal
+                && project_equal {
                 Ok(None)
             } else {
                 local_task.set_property("name", remote_task.get_property("name").map(String::as_str).unwrap_or(""));
                 local_task.set_property("description", remote_task.get_property("description").map(String::as_str).unwrap_or(""));
                 local_task.set_property("status", remote_task.get_property("status").map(String::as_str).unwrap_or(""));
+                if let Some(remote_project) = remote_task.get_property("project_id") {
+                    local_task.set_property("project_id", remote_project);
+                }
                 if !no_comments {
                     if let Some(comments) = remote_task.get_comments() {
                         local_task.set_comments(comments.to_vec());
@@ -2284,6 +2292,41 @@ mod tests {
         assert!(push_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, true, true, &StatusManager::new(), &statuses, true));
 
         assert!(fake.updates().is_empty(), "a connector that does not manage projects must not see a change");
+    }
+
+    #[test]
+    fn test_pull_takes_the_remote_project() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap();
+        local.set_property("project_id", "1");
+        let id = gittask::create_task(local).unwrap().get_id().unwrap();
+        let mut remote = gittask::find_task(&id).unwrap().unwrap();
+        remote.set_property("project_id", "2");
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+
+        assert!(pull_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, true, true, &vec!["OPEN".to_string(), "CLOSED".to_string()]));
+
+        assert_eq!(gittask::find_task(&id).unwrap().unwrap().get_property("project_id"), Some(&"2".to_string()), "a project change on the remote side must be pulled");
+    }
+
+    #[test]
+    fn test_pull_keeps_the_local_project_when_the_connector_does_not_report_one() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Local".to_string(), "same".to_string(), "OPEN".to_string()).unwrap();
+        local.set_property("project_id", "1");
+        let id = gittask::create_task(local).unwrap().get_id().unwrap();
+        let mut remote = gittask::find_task(&id).unwrap().unwrap();
+        remote.set_property("name", "Renamed remotely");
+        remote.delete_property("project_id");
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+
+        assert!(pull_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, true, true, &vec!["OPEN".to_string(), "CLOSED".to_string()]));
+
+        let pulled = gittask::find_task(&id).unwrap().unwrap();
+        assert_eq!(pulled.get_property("name"), Some(&"Renamed remotely".to_string()));
+        assert_eq!(pulled.get_property("project_id"), Some(&"1".to_string()), "a connector without projects must not wipe the local project");
     }
 
     #[test]
