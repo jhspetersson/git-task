@@ -684,18 +684,28 @@ fn next_free_numeric_id(ids: &[Option<String>]) -> String {
     (ids.iter().flatten().filter_map(|id| id.parse::<u64>().ok()).max().unwrap_or(0) + 1).to_string()
 }
 
-fn single_id_update(ids: &[Option<String>], id: &str, new_id: &str) -> Vec<(String, String)> {
-    let mut id_updates = vec![(id.to_string(), new_id.to_string())];
-    if id != new_id && ids.iter().any(|existing| existing.as_deref() == Some(new_id)) {
-        id_updates.push((new_id.to_string(), next_free_numeric_id(ids)));
+/// Extends `id_updates` so that an entry which is not renamed itself but holds an id
+/// another entry is being renamed to moves to a fresh numeric id. Such a holder is a
+/// provisional local entry (one whose own remote creation has not happened yet),
+/// since a remote never hands out an id that is already taken on its side.
+fn with_displacements(ids: &[Option<String>], id_updates: &[(String, String)]) -> Vec<(String, String)> {
+    let mut result = id_updates.to_vec();
+    let mut taken: Vec<Option<String>> = ids.to_vec();
+    taken.extend(id_updates.iter().map(|(_, new)| Some(new.clone())));
+    for (old, new) in id_updates {
+        let renamed_itself = id_updates.iter().any(|(renamed, _)| renamed == new);
+        let held_by_another = old != new && ids.iter().any(|existing| existing.as_deref() == Some(new.as_str()));
+        if held_by_another && !renamed_itself {
+            let fresh = next_free_numeric_id(&taken);
+            taken.push(Some(fresh.clone()));
+            result.push((new.clone(), fresh));
+        }
     }
-    id_updates
+    result
 }
 
 pub fn update_subtask_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
-    let task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?;
-    let ids = task.get_subtasks().as_ref().map(|subtasks| subtasks.iter().map(|s| s.get_id()).collect::<Vec<_>>()).unwrap_or_default();
-    update_subtask_ids(task_id, &single_id_update(&ids, id, new_id))
+    update_subtask_ids(task_id, &[(id.to_string(), new_id.to_string())])
 }
 
 pub fn update_subtask_ids(task_id: &str, id_updates: &[(String, String)]) -> Result<(), String> {
@@ -705,7 +715,7 @@ pub fn update_subtask_ids(task_id: &str, id_updates: &[(String, String)]) -> Res
     let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?;
     let subtasks = task.get_subtasks().clone().unwrap_or_default();
     let ids = subtasks.iter().map(|s| s.get_id()).collect::<Vec<_>>();
-    let new_ids = apply_id_updates(&ids, id_updates, "Subtask")?;
+    let new_ids = apply_id_updates(&ids, &with_displacements(&ids, id_updates), "Subtask")?;
     let updated = subtasks.into_iter().zip(new_ids).map(|(mut subtask, id)| {
         if let Some(id) = id {
             subtask.set_id(id);
@@ -718,9 +728,7 @@ pub fn update_subtask_ids(task_id: &str, id_updates: &[(String, String)]) -> Res
 }
 
 pub fn update_comment_id(task_id: &str, id: &str, new_id: &str) -> Result<(), String> {
-    let task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?;
-    let ids = task.get_comments().as_ref().map(|comments| comments.iter().map(|c| c.get_id()).collect::<Vec<_>>()).unwrap_or_default();
-    update_comment_ids(task_id, &single_id_update(&ids, id, new_id))
+    update_comment_ids(task_id, &[(id.to_string(), new_id.to_string())])
 }
 
 pub fn update_comment_ids(task_id: &str, id_updates: &[(String, String)]) -> Result<(), String> {
@@ -730,7 +738,7 @@ pub fn update_comment_ids(task_id: &str, id_updates: &[(String, String)]) -> Res
     let mut task = find_task(&task_id)?.ok_or_else(|| format!("Task ID {task_id} not found"))?;
     let comments = task.get_comments().clone().unwrap_or_default();
     let ids = comments.iter().map(|c| c.get_id()).collect::<Vec<_>>();
-    let new_ids = apply_id_updates(&ids, id_updates, "Comment")?;
+    let new_ids = apply_id_updates(&ids, &with_displacements(&ids, id_updates), "Comment")?;
     let updated = comments.into_iter().zip(new_ids).map(|(mut comment, id)| {
         if let Some(id) = id {
             comment.set_id(id);
@@ -1147,17 +1155,26 @@ mod test {
     }
 
     #[test]
-    fn test_update_subtask_ids_refuses_duplicates_without_writing() {
+    fn test_update_subtask_ids_displaces_an_untouched_holder_of_a_new_id() {
+        let _repo = testing::TestRepo::new();
+        let task_id = task_with_subtasks(&["A", "B", "C"]);
+
+        update_subtask_ids(&task_id, &[("1".to_string(), "3".to_string())]).unwrap();
+
+        assert_eq!(subtask_ids_by_name(&task_id), vec![("A".to_string(), "3".to_string()), ("B".to_string(), "2".to_string()), ("C".to_string(), "4".to_string())], "a partial batch must still be saved: the unsynced holder of the new id moves to a fresh id");
+    }
+
+    #[test]
+    fn test_update_subtask_ids_refuses_two_updates_onto_the_same_id_without_writing() {
         let _repo = testing::TestRepo::new();
         let task_id = task_with_subtasks(&["A", "B", "C"]);
         let before = open_repo().unwrap().find_reference(&get_ref_path()).unwrap().target().unwrap();
 
-        let result = update_subtask_ids(&task_id, &[("1".to_string(), "3".to_string())]);
+        let result = update_subtask_ids(&task_id, &[("1".to_string(), "9".to_string()), ("2".to_string(), "9".to_string())]);
 
-        assert!(result.is_err(), "renaming onto an id that stays in use must fail");
+        assert!(result.is_err(), "two entries cannot both take the same id");
         let after = open_repo().unwrap().find_reference(&get_ref_path()).unwrap().target().unwrap();
         assert_eq!(before, after, "nothing must be written");
-        assert_eq!(subtask_ids_by_name(&task_id)[0].1, "1");
     }
 
     #[test]
@@ -1181,14 +1198,13 @@ mod test {
     }
 
     #[test]
-    fn test_update_comment_ids_refuses_duplicates_without_writing() {
+    fn test_update_comment_ids_displaces_an_untouched_holder_of_a_new_id() {
         let _repo = testing::TestRepo::new();
         let task_id = task_with_comments(&["first", "second", "third"]);
 
-        let result = update_comment_ids(&task_id, &[("1".to_string(), "3".to_string())]);
+        update_comment_ids(&task_id, &[("1".to_string(), "3".to_string())]).unwrap();
 
-        assert!(result.is_err(), "renaming onto an id that stays in use must fail");
-        assert_eq!(comment_ids_by_text(&task_id)[0].1, "1");
+        assert_eq!(comment_ids_by_text(&task_id), vec![("first".to_string(), "3".to_string()), ("second".to_string(), "2".to_string()), ("third".to_string(), "4".to_string())]);
     }
 
     #[test]

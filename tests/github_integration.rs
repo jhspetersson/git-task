@@ -598,6 +598,13 @@ fn subtask_commands_push_to_the_remote() {
     assert!(github.sub_issues(number).is_empty(), "the sub-issue must be unlinked from the parent");
     assert!(local_subtasks(&repo, &id).is_empty());
 
+    let closed_title = format!("Closed child from CI {suffix}");
+    run(&github, &repo, &["subtask", "add", &id, &closed_title, "--status", "CLOSED", "--push"]);
+    let subs = github.sub_issues(number);
+    assert_eq!(subs.len(), 1, "the closed subtask must be created as a sub-issue");
+    assert_eq!(subs[0].state, "closed", "a subtask added with a done status must be created closed");
+    github.close_issue(subs[0].number);
+
     github.close_issue(number);
 }
 

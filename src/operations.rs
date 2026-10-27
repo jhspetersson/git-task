@@ -1131,13 +1131,9 @@ fn sync_local_subtasks(
                         id_updates.push((local_id, remote_id.clone()));
                     }
                     synced = true;
-                    if subtask.get_status() != task_statuses[0] {
-                        let mut created = subtask.clone();
-                        created.set_id(remote_id.clone());
-                        if let Err(e) = connector.update_remote_subtask(user, repo, task_id, &created, is_done) {
-                            eprintln!("ERROR: REMOTE subtask ID {remote_id} was created but its status could not be set: {e}");
-                            *success = false;
-                        }
+                    if let Err(e) = push_subtask_status(connector, user, repo, task_id, subtask, &remote_id, status_manager) {
+                        eprintln!("ERROR: {e}");
+                        *success = false;
                     }
                 },
                 Err(e) => {
@@ -1157,6 +1153,28 @@ fn sync_local_subtasks(
         }
     }
     synced
+}
+
+/// Applies the status of a freshly created remote subtask when it differs from the
+/// starting status. Creation only sets name and parent, so this runs afterwards, once
+/// the remote id is known, which keeps a rejected status change from losing that id.
+pub(crate) fn push_subtask_status(
+    connector: &Box<&'static dyn RemoteConnector>,
+    user: &String,
+    repo: &String,
+    task_id: &String,
+    subtask: &Subtask,
+    remote_id: &str,
+    status_manager: &StatusManager,
+) -> Result<(), String> {
+    if subtask.get_status() == status_manager.get_starting_status() {
+        return Ok(());
+    }
+    let mut created = subtask.clone();
+    created.set_id(remote_id.to_string());
+    let is_done = status_manager.is_done(subtask.get_status());
+    connector.update_remote_subtask(user, repo, task_id, &created, is_done)
+        .map_err(|e| format!("REMOTE subtask ID {remote_id} was created but its status could not be set: {e}"))
 }
 
 fn sync_local_comments(
@@ -1894,6 +1912,9 @@ mod tests {
         list_limits: std::sync::Mutex<Vec<(String, Option<usize>)>>,
         subtask_updates: std::sync::Mutex<Vec<String>>,
         labels_supported: std::sync::atomic::AtomicBool,
+        failing_subtask: std::sync::Mutex<Option<String>>,
+        created_subtasks: std::sync::Mutex<Vec<Subtask>>,
+        reject_subtask_updates: std::sync::atomic::AtomicBool,
     }
 
     impl FakeConnector {
@@ -1911,6 +1932,9 @@ mod tests {
                 list_limits: std::sync::Mutex::new(vec![]),
                 subtask_updates: std::sync::Mutex::new(vec![]),
                 labels_supported: std::sync::atomic::AtomicBool::new(true),
+                failing_subtask: std::sync::Mutex::new(None),
+                created_subtasks: std::sync::Mutex::new(vec![]),
+                reject_subtask_updates: std::sync::atomic::AtomicBool::new(false),
             }))
         }
 
@@ -1961,11 +1985,23 @@ mod tests {
         fn delete_remote_label(&self, _: &String, _: &String, _: &String, _: &String) -> Result<(), String> { Err("not used".to_string()) }
         fn supports_subtasks(&self) -> bool { true }
         fn supports_labels(&self) -> bool { self.labels_supported.load(std::sync::atomic::Ordering::SeqCst) }
-        fn list_remote_subtasks(&self, _: &String, _: &String, _: &String, _: &Vec<String>) -> Result<Vec<Subtask>, String> { Ok(vec![]) }
-        fn create_remote_subtask(&self, _: &String, _: &String, _: &String, _: &Subtask, _: bool) -> Result<String, String> { Ok(self.next()) }
+        fn list_remote_subtasks(&self, _: &String, _: &String, _: &String, _: &Vec<String>) -> Result<Vec<Subtask>, String> { Ok(self.created_subtasks.lock().unwrap().clone()) }
+        fn create_remote_subtask(&self, _: &String, _: &String, _: &String, subtask: &Subtask, _: bool) -> Result<String, String> {
+            if self.failing_subtask.lock().unwrap().as_deref() == Some(subtask.get_name()) {
+                return Err("remote refused".to_string());
+            }
+            let remote_id = self.next();
+            let mut created = subtask.clone();
+            created.set_id(remote_id.clone());
+            self.created_subtasks.lock().unwrap().push(created);
+            Ok(remote_id)
+        }
         fn update_remote_subtask(&self, _: &String, _: &String, _: &String, subtask: &Subtask, _: bool) -> Result<(), String> {
             self.subtask_updates.lock().unwrap().push(subtask.get_id().unwrap_or_default());
-            Err("transition rejected".to_string())
+            if self.reject_subtask_updates.load(std::sync::atomic::Ordering::SeqCst) {
+                return Err("transition rejected".to_string());
+            }
+            Ok(())
         }
     }
 
@@ -2250,6 +2286,36 @@ mod tests {
     }
 
     #[test]
+    fn test_sync_local_subtasks_saves_the_mapping_when_only_part_of_the_batch_succeeds() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut task = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task.add_subtask(None, "A".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        task.add_subtask(None, "B".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+        let fake = FakeConnector::leaked_with_lookup(2, Err("not used".to_string()));
+        *fake.failing_subtask.lock().unwrap() = Some("B".to_string());
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+        let subtask_ids = |id: &str| gittask::find_task(id).unwrap().unwrap().get_subtasks().clone().unwrap()
+            .iter().map(|s| (s.get_name().to_string(), s.get_id().unwrap())).collect::<Vec<_>>();
+
+        let mut success = true;
+        sync_local_subtasks(&connector, &"u".to_string(), &"r".to_string(), &id, &task, &StatusManager::new(), &statuses, &mut success);
+
+        assert!(!success, "the failed creation must be reported");
+        assert_eq!(subtask_ids(&id), vec![("A".to_string(), "2".to_string()), ("B".to_string(), "3".to_string())], "A must adopt the remote id even though B failed, and B must move off that id");
+
+        *fake.failing_subtask.lock().unwrap() = None;
+        let task = gittask::find_task(&id).unwrap().unwrap();
+        let mut success = true;
+        sync_local_subtasks(&connector, &"u".to_string(), &"r".to_string(), &id, &task, &StatusManager::new(), &statuses, &mut success);
+
+        assert!(success);
+        assert_eq!(subtask_ids(&id), vec![("A".to_string(), "2".to_string()), ("B".to_string(), "3".to_string())], "the retry must only create B, never A again");
+    }
+
+    #[test]
     fn test_sync_local_subtasks_keeps_the_remote_id_when_the_status_cannot_be_applied() {
         let _repo = gittask::testing::TestRepo::new();
         let mut task = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
@@ -2258,6 +2324,7 @@ mod tests {
         let task = gittask::create_task(task).unwrap();
         let id = task.get_id().unwrap();
         let fake = FakeConnector::leaked_with_lookup(10, Err("not used".to_string()));
+        fake.reject_subtask_updates.store(true, std::sync::atomic::Ordering::SeqCst);
         let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
         let mut success = true;
 

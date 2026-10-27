@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use nu_ansi_term::Color::DarkGray;
 
-use crate::operations::{get_user_repo, resolve_project};
+use crate::operations::{get_user_repo, push_subtask_status, resolve_project};
 use crate::status::StatusManager;
 use crate::util::{colorize_string, error_message, get_text_from_editor, success_message};
 
@@ -55,6 +55,10 @@ pub(crate) fn task_subtask_add(
                                                 success = true;
                                             },
                                             Err(e) => eprintln!("ERROR: {e}"),
+                                        }
+                                        if let Err(e) = push_subtask_status(&connector, &user, &repo, &task_id, &subtask, &remote_id, &status_manager) {
+                                            eprintln!("ERROR: {e}");
+                                            success = false;
                                         }
                                     },
                                     Err(e) => eprintln!("ERROR creating REMOTE subtask: {e}"),
