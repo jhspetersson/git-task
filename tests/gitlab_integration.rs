@@ -81,8 +81,6 @@ impl GitLab {
         }
     }
 
-    /// Creates `git-task-<tag>-<suffix>/sub/<project>`: a top-level group, a subgroup
-    /// inside it and a project inside the subgroup.
     fn create_project_in_subgroup(&self, tag: &str) -> Project {
         let suffix = unique_suffix();
         let group_path = format!("git-task-{tag}-{suffix}");

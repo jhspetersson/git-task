@@ -684,10 +684,6 @@ fn next_free_numeric_id(ids: &[Option<String>]) -> String {
     (ids.iter().flatten().filter_map(|id| id.parse::<u64>().ok()).max().unwrap_or(0) + 1).to_string()
 }
 
-/// Extends `id_updates` so that an entry which is not renamed itself but holds an id
-/// another entry is being renamed to moves to a fresh numeric id. Such a holder is a
-/// provisional local entry (one whose own remote creation has not happened yet),
-/// since a remote never hands out an id that is already taken on its side.
 fn with_displacements(ids: &[Option<String>], id_updates: &[(String, String)]) -> Vec<(String, String)> {
     let mut result = id_updates.to_vec();
     let mut taken: Vec<Option<String>> = ids.to_vec();

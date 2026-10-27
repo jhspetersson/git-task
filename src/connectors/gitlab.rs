@@ -489,7 +489,6 @@ fn parse_remote_url(base_url: &str, url: &str) -> Option<(String, String)> {
     Some((caps.name("user")?.as_str().to_string(), caps.name("repo")?.as_str().to_string()))
 }
 
-/// Splits a base URL into (insecure, host, path prefix without surrounding slashes).
 fn split_base_url(base_url: &str) -> (bool, &str, &str) {
     let (insecure, without_scheme) = match base_url.strip_prefix("http://") {
         Some(rest) => (true, rest),

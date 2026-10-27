@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use redmine_api::api::issues::{CreateIssue, GetIssue, Issue, IssueWrapper, ListIssues, UpdateIssue, DeleteIssue, IssueInclude, IssueStatusFilter};
 use redmine_api::api::issue_statuses::{ListIssueStatuses, IssueStatusesWrapper, IssueStatus};
-use redmine_api::api::projects::{Project, ListProjects};
+use redmine_api::api::projects::{GetProject, ListProjects, Project, ProjectWrapper};
 use redmine_api::api::{Endpoint, Redmine};
 use redmine_api::reqwest::Method;
 use serde::Serialize;
@@ -104,12 +104,12 @@ impl RemoteConnector for RedmineRemoteConnector {
         }
         let endpoint = builder.build().map_err(|e| e.to_string())?;
         let issues = match limit {
-            Some(limit) => {
+            Some(limit) => collect_pages(limit, |offset, page_size| {
                 let response = redmine
-                    .json_response_body_page::<_, Issue>(&endpoint, 0, limit as u64)
+                    .json_response_body_page::<_, Issue>(&endpoint, offset, page_size)
                     .map_err(|e| e.to_string())?;
-                response.values
-            },
+                Ok((response.values, response.total_count))
+            })?,
             None => redmine
                 .json_response_body_all_pages::<_, Issue>(&endpoint)
                 .map_err(|e| e.to_string())?
@@ -446,23 +446,43 @@ fn get_issue_in_project(redmine: &Redmine, project: &String, issue_id: u64, incl
     Ok(Some(issue))
 }
 
+static PROJECT_IDS: std::sync::OnceLock<std::sync::Mutex<HashMap<(String, String), u64>>> = std::sync::OnceLock::new();
+
 fn resolve_project_id(redmine: &Redmine, project: &String) -> Result<u64, String> {
     if let Ok(id) = project.parse::<u64>() {
         return Ok(id);
     }
 
+    let key = (redmine.redmine_url().to_string(), project.to_lowercase());
+    let cache = PROJECT_IDS.get_or_init(|| std::sync::Mutex::new(HashMap::new()));
+    if let Some(id) = cache.lock().unwrap().get(&key) {
+        return Ok(*id);
+    }
+
+    let id = match lookup_project_by_identifier(redmine, project) {
+        Some(id) => id,
+        None => find_project_in_listing(redmine, project)?,
+    };
+    cache.lock().unwrap().insert(key, id);
+    Ok(id)
+}
+
+fn lookup_project_by_identifier(redmine: &Redmine, project: &str) -> Option<u64> {
+    let endpoint = GetProject::builder().project_id_or_name(project).build().ok()?;
+    redmine.json_response_body::<_, ProjectWrapper<Project>>(&endpoint).ok().map(|wrapper| wrapper.project.id)
+}
+
+fn find_project_in_listing(redmine: &Redmine, project: &str) -> Result<u64, String> {
     let endpoint = ListProjects::builder().build().map_err(|e| e.to_string())?;
     let projects = redmine
         .json_response_body_all_pages::<_, Project>(&endpoint)
         .map_err(|e| e.to_string())?;
 
     let lower = project.to_lowercase();
-    for p in projects {
-        if p.identifier.to_lowercase() == lower { return Ok(p.id); }
-        if p.name.to_lowercase() == lower { return Ok(p.id); }
-    }
-
-    Err(format!("Project '{}' not found on Redmine server", project))
+    projects.iter()
+        .find(|p| p.identifier.to_lowercase() == lower || p.name.to_lowercase() == lower)
+        .map(|p| p.id)
+        .ok_or_else(|| format!("Project '{}' not found on Redmine server", project))
 }
 
 fn get_redmine_instance(domain: &String) -> Result<Redmine, String> {
@@ -505,6 +525,23 @@ fn get_api_key() -> Result<String, String> {
     }
 }
 
+const REDMINE_PAGE_SIZE: u64 = 100;
+
+fn collect_pages<T>(limit: usize, mut fetch: impl FnMut(u64, u64) -> Result<(Vec<T>, u64), String>) -> Result<Vec<T>, String> {
+    let mut collected = Vec::new();
+    while collected.len() < limit {
+        let remaining = (limit - collected.len()) as u64;
+        let page_size = remaining.min(REDMINE_PAGE_SIZE);
+        let (values, total_count) = fetch(collected.len() as u64, page_size)?;
+        let short_page = (values.len() as u64) < page_size;
+        collected.extend(values);
+        if short_page || collected.len() as u64 >= total_count {
+            break;
+        }
+    }
+    Ok(collected)
+}
+
 fn issue_to_task(issue: &Issue) -> Result<Task, String> {
     let mut props = HashMap::new();
     props.insert("name".to_string(), issue.subject.clone().unwrap_or_else(|| String::new()));
@@ -543,6 +580,89 @@ fn append_journals_as_comments(issue: &Issue, task: &mut Task) {
 mod tests {
     use super::*;
 
+    fn stub_redmine(handler: impl Fn(&str, &str) -> (u16, String) + Send + 'static) -> (Redmine, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub server");
+        let addr = listener.local_addr().unwrap();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = requests.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = match stream { Ok(s) => s, Err(_) => continue };
+                let mut data = Vec::new();
+                let mut buf = [0u8; 4096];
+                let header_end = [13u8, 10, 13, 10];
+                while !data.windows(4).any(|w| w == header_end) {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => data.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let head = String::from_utf8_lossy(&data).to_string();
+                let mut parts = head.lines().next().unwrap_or_default().split_whitespace();
+                let method = parts.next().unwrap_or_default().to_string();
+                let path = parts.next().unwrap_or_default().split('?').next().unwrap_or_default().to_string();
+                log.lock().unwrap().push(format!("{method} {path}"));
+                let (status, body) = handler(&method, &path);
+                let crlf = [13u8, 10];
+                let status_line = format!("HTTP/1.1 {status} {}", if status < 300 { "OK" } else { "Error" });
+                let length = format!("Content-Length: {}", body.len());
+                let response = [status_line.as_bytes(), &crlf, b"Content-Type: application/json", &crlf, length.as_bytes(), &crlf, b"Connection: close", &crlf, &crlf, body.as_bytes()].concat();
+                let _ = stream.write_all(&response);
+            }
+        });
+        let client = redmine_api::reqwest::blocking::Client::new();
+        let redmine = Redmine::new(client, format!("http://{addr}/").parse().unwrap(), "key").unwrap();
+        (redmine, requests)
+    }
+
+    fn project_json(id: u64, identifier: &str, name: &str) -> String {
+        format!(r#"{{"id":{id},"name":"{name}","identifier":"{identifier}","status":1,"created_on":"2026-10-16T10:00:00Z","updated_on":"2026-10-16T10:00:00Z"}}"#)
+    }
+
+    fn redmine_projects(identifier: &'static str, name: &'static str) -> impl Fn(&str, &str) -> (u16, String) + Send + 'static {
+        move |_, path| {
+            if path == format!("/projects/{identifier}.json") {
+                (200, format!(r#"{{"project":{}}}"#, project_json(42, identifier, name)))
+            } else if path == "/projects.json" {
+                (200, format!(r#"{{"projects":[{},{}],"total_count":2,"offset":0,"limit":100}}"#, project_json(7, "other", "Other"), project_json(42, identifier, name)))
+            } else {
+                (404, r#"{"errors":["Not found"]}"#.to_string())
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_project_id_looks_the_identifier_up_directly_and_caches_it() {
+        let (redmine, requests) = stub_redmine(redmine_projects("ci-direct", "Continuous Integration"));
+
+        assert_eq!(resolve_project_id(&redmine, &"ci-direct".to_string()), Ok(42));
+        assert_eq!(resolve_project_id(&redmine, &"ci-direct".to_string()), Ok(42));
+        assert_eq!(resolve_project_id(&redmine, &"CI-Direct".to_string()), Ok(42), "the cache is case-insensitive like the lookup");
+
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /projects/ci-direct.json"], "one direct request, no listing, nothing repeated");
+    }
+
+    #[test]
+    fn resolve_project_id_falls_back_to_the_listing_for_a_project_name() {
+        let (redmine, requests) = stub_redmine(redmine_projects("ci-byname", "Continuous Integration"));
+
+        assert_eq!(resolve_project_id(&redmine, &"continuous integration".to_string()), Ok(42));
+
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 2, "a name is not a URL identifier, so the listing is needed: {requests:?}");
+        assert_eq!(requests[1], "GET /projects.json");
+    }
+
+    #[test]
+    fn resolve_project_id_reports_an_unknown_project() {
+        let (redmine, _requests) = stub_redmine(redmine_projects("ci-unknown", "Continuous Integration"));
+
+        let result = resolve_project_id(&redmine, &"nope".to_string());
+
+        assert_eq!(result, Err("Project 'nope' not found on Redmine server".to_string()));
+    }
+
     fn issue_with_journals(journals: &str) -> Issue {
         let json = format!(r#"{{
             "id": 7,
@@ -563,6 +683,60 @@ mod tests {
             "journals": {journals}
         }}"#);
         serde_json::from_str(&json).expect("issue JSON")
+    }
+
+    fn paged_source(available: u64) -> impl FnMut(u64, u64) -> Result<(Vec<u64>, u64), String> {
+        move |offset, page_size| {
+            let end = (offset + page_size).min(available);
+            Ok(((offset..end).collect(), available))
+        }
+    }
+
+    #[test]
+    fn collect_pages_requests_further_pages_until_the_limit_is_reached() {
+        let mut requests = vec![];
+        let mut source = paged_source(500);
+        let issues = collect_pages(150, |offset, page_size| {
+            requests.push((offset, page_size));
+            source(offset, page_size)
+        }).unwrap();
+
+        assert_eq!(issues.len(), 150, "a limit above the page maximum must span several pages");
+        assert_eq!(issues.first(), Some(&0));
+        assert_eq!(issues.last(), Some(&149));
+        assert_eq!(requests, vec![(0, 100), (100, 50)], "the second page must ask only for what is still missing");
+    }
+
+    #[test]
+    fn collect_pages_stops_when_redmine_runs_out_of_issues() {
+        let mut requests = vec![];
+        let mut source = paged_source(120);
+        let issues = collect_pages(150, |offset, page_size| {
+            requests.push((offset, page_size));
+            source(offset, page_size)
+        }).unwrap();
+
+        assert_eq!(issues.len(), 120);
+        assert_eq!(requests, vec![(0, 100), (100, 50)], "no request must be made once the total count is reached");
+    }
+
+    #[test]
+    fn collect_pages_makes_a_single_request_for_a_small_limit() {
+        let mut requests = vec![];
+        let mut source = paged_source(500);
+        let issues = collect_pages(40, |offset, page_size| {
+            requests.push((offset, page_size));
+            source(offset, page_size)
+        }).unwrap();
+
+        assert_eq!(issues.len(), 40);
+        assert_eq!(requests, vec![(0, 40)]);
+    }
+
+    #[test]
+    fn collect_pages_propagates_a_failed_page() {
+        let result = collect_pages::<u64>(150, |offset, _| if offset == 0 { Ok(((0..100).collect(), 500)) } else { Err("boom".to_string()) });
+        assert_eq!(result, Err("boom".to_string()));
     }
 
     #[test]

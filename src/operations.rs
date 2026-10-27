@@ -729,9 +729,6 @@ fn label_names(labels: &Option<Vec<Label>>) -> Vec<String> {
     names
 }
 
-/// Takes the remote subtasks as the authority for which subtasks exist and for their
-/// name and status, but keeps the properties a matching local subtask carries that
-/// the remote does not know about.
 fn merge_subtasks(local: &Option<Vec<Subtask>>, remote: &[Subtask]) -> Vec<Subtask> {
     let local_by_id: HashMap<String, &Subtask> = local.iter().flatten()
         .filter_map(|subtask| subtask.get_id().map(|id| (id, subtask)))
@@ -1155,9 +1152,6 @@ fn sync_local_subtasks(
     synced
 }
 
-/// Applies the status of a freshly created remote subtask when it differs from the
-/// starting status. Creation only sets name and parent, so this runs afterwards, once
-/// the remote id is known, which keeps a rejected status change from losing that id.
 pub(crate) fn push_subtask_status(
     connector: &Box<&'static dyn RemoteConnector>,
     user: &String,
