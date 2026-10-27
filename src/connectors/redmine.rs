@@ -62,17 +62,13 @@ impl RemoteConnector for RedmineRemoteConnector {
     }
 
     fn supports_remote(&self, _url: &str) -> Option<(String, String)> {
-        match gittask::get_config_value("task.redmine.url") {
-            Ok(_) => match gittask::get_config_value("task.redmine.project.id") {
-                Ok(project_id) => Some((String::new(), project_id)),
-                _ => None,
-            }
-            _ => None,
-        }
+        configured_url()?;
+        let project_id = gittask::get_config_value("task.redmine.project.id").ok()?;
+        Some((String::new(), project_id))
     }
 
     fn remote_for_project(&self, _url: &str, project: &str) -> Option<(String, String)> {
-        gittask::get_config_value("task.redmine.url").ok().map(|_| (String::new(), project.to_string()))
+        configured_url().map(|_| (String::new(), project.to_string()))
     }
 
     fn list_remote_tasks(
@@ -168,13 +164,14 @@ impl RemoteConnector for RedmineRemoteConnector {
         Ok(Some(task))
     }
 
-    fn create_remote_task(&self, domain: &String, _project: &String, task: &Task) -> Result<String, String> {
+    fn create_remote_task(&self, domain: &String, project: &String, task: &Task) -> Result<String, String> {
         let redmine = get_redmine_instance(domain)?;
 
         let mut builder = CreateIssue::builder();
         let project = match task.get_property("project_id") {
             Some(project_id) => project_id.to_string(),
-            _ => gittask::get_config_value("task.redmine.project.id")?
+            None if !project.is_empty() => project.clone(),
+            None => gittask::get_config_value("task.redmine.project.id")?
         };
         let project_id = resolve_project_id(&redmine, &project)?;
         builder.project_id(project_id);
@@ -524,14 +521,14 @@ fn get_status_id_by_name(redmine: &Redmine, name: &str) -> Result<Option<u64>, S
         .map(|s| s.id))
 }
 
+fn configured_url() -> Option<String> {
+    gittask::get_config_value("task.redmine.url").ok()
+        .or_else(|| std::env::var("REDMINE_URL").ok())
+        .filter(|url| !url.trim().is_empty())
+}
+
 fn get_base_url(domain: &String) -> Result<String, String> {
-    match gittask::get_config_value("task.redmine.url") {
-        Ok(url) => Ok(url),
-        _ => match std::env::var("REDMINE_URL") {
-            Ok(url) => Ok(url),
-            _ => Ok(format!("https://{}", domain)),
-        }
-    }
+    Ok(configured_url().unwrap_or_else(|| format!("https://{}", domain)))
 }
 
 fn get_api_key() -> Result<String, String> {
@@ -866,6 +863,77 @@ mod tests {
 
         let targets = crate::connectors::get_matching_remote_connectors(remotes, &Some("redmine".to_string()), &None, false);
         assert!(targets.is_empty(), "without a default project there is no default target");
+    }
+
+    #[test]
+    fn the_redmine_url_environment_variable_enables_remote_discovery() {
+        let _repo = gittask::testing::TestRepo::new();
+        gittask::set_config_value("task.redmine.project.id", "1").unwrap();
+        let remotes = vec!["https://example.invalid/git-task/ci.git".to_string()];
+
+        unsafe { std::env::set_var("REDMINE_URL", "http://127.0.0.1:1/"); }
+        let default_targets = crate::connectors::get_matching_remote_connectors(remotes.clone(), &Some("redmine".to_string()), &None, false);
+        let explicit_targets = crate::connectors::get_matching_remote_connectors(remotes, &Some("redmine".to_string()), &Some("2".to_string()), false);
+        unsafe { std::env::remove_var("REDMINE_URL"); }
+
+        let projects: Vec<&String> = default_targets.iter().map(|(_, _, project)| project).collect();
+        assert_eq!(projects, vec!["1"], "REDMINE_URL must count as a configured server");
+        let projects: Vec<&String> = explicit_targets.iter().map(|(_, _, project)| project).collect();
+        assert_eq!(projects, vec!["2"]);
+    }
+
+    fn redmine_creating_issues() -> impl Fn(&str, &str) -> (u16, String) + Send + 'static {
+        |method, path| {
+            if method == "GET" && path.starts_with("/projects/") && path.ends_with(".json") {
+                let identifier = &path["/projects/".len()..path.len() - ".json".len()];
+                (200, format!(r#"{{"project":{}}}"#, project_json(2, identifier, identifier)))
+            } else if method == "POST" && path == "/issues.json" {
+                (201, issue_in_project(2))
+            } else {
+                (404, r#"{"errors":["Not found"]}"#.to_string())
+            }
+        }
+    }
+
+    #[test]
+    fn create_remote_task_creates_the_issue_in_the_requested_project() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, requests) = stub_redmine(redmine_creating_issues());
+        configure_stub(&redmine);
+        gittask::set_config_value("task.redmine.project.id", "alpha").unwrap();
+        let task = gittask::Task::new("New".to_string(), "".to_string(), "New".to_string()).unwrap();
+
+        let result = RedmineRemoteConnector.create_remote_task(&String::new(), &"beta".to_string(), &task);
+
+        assert_eq!(result, Ok("7".to_string()));
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /projects/beta.json", "POST /issues.json"], "--project must win over the configured default");
+    }
+
+    #[test]
+    fn create_remote_task_needs_no_default_project_when_one_is_requested() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, requests) = stub_redmine(redmine_creating_issues());
+        configure_stub(&redmine);
+        let task = gittask::Task::new("New".to_string(), "".to_string(), "New".to_string()).unwrap();
+
+        let result = RedmineRemoteConnector.create_remote_task(&String::new(), &"beta".to_string(), &task);
+
+        assert_eq!(result, Ok("7".to_string()));
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /projects/beta.json", "POST /issues.json"]);
+    }
+
+    #[test]
+    fn create_remote_task_prefers_the_project_of_the_task() {
+        let _repo = gittask::testing::TestRepo::new();
+        let (redmine, requests) = stub_redmine(redmine_creating_issues());
+        configure_stub(&redmine);
+        let mut task = gittask::Task::new("New".to_string(), "".to_string(), "New".to_string()).unwrap();
+        task.set_property("project_id", "gamma");
+
+        let result = RedmineRemoteConnector.create_remote_task(&String::new(), &"beta".to_string(), &task);
+
+        assert_eq!(result, Ok("7".to_string()));
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /projects/gamma.json", "POST /issues.json"], "a project set on the task is an explicit choice too");
     }
 
     fn issue_with_journals(journals: &str) -> Issue {
