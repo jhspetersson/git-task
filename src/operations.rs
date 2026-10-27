@@ -2465,10 +2465,12 @@ mod tests {
         let local = gittask::create_task(local).unwrap();
         let mut remote = remote_task(&local.get_id().unwrap());
         remote.set_property("name", "Parent");
-        remote.add_subtask(Some("5".to_string()), "Child renamed".to_string(), "CLOSED".to_string(), HashMap::from([
-            ("created".to_string(), "123".to_string()),
-        ])).unwrap();
-        remote.add_subtask(Some("7".to_string()), "New child".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        remote.set_subtasks(vec![
+            gittask::Subtask::new(Some("5".to_string()), "Child renamed".to_string(), "CLOSED".to_string(), HashMap::from([
+                ("created".to_string(), "123".to_string()),
+            ])),
+            gittask::Subtask::new(Some("7".to_string()), "New child".to_string(), "OPEN".to_string(), HashMap::new()),
+        ]);
 
         let merged = import_remote_task(remote, true, true, false).unwrap().expect("the task has changed");
 
@@ -2491,7 +2493,7 @@ mod tests {
         let local = gittask::create_task(local).unwrap();
         let mut remote = remote_task(&local.get_id().unwrap());
         remote.set_property("name", "Parent");
-        remote.add_subtask(Some("5".to_string()), "Child".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        remote.set_subtasks(vec![gittask::Subtask::new(Some("5".to_string()), "Child".to_string(), "OPEN".to_string(), HashMap::new())]);
 
         assert!(import_remote_task(remote, true, true, false).unwrap().is_none(), "local-only properties must not look like a remote change");
     }
