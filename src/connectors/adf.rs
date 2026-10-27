@@ -292,8 +292,12 @@ fn render_runs(runs: &[(String, Marks)]) -> String {
     }
     runs.iter().map(|(text, marks)| {
         if marks.code {
-            let fence = if text.contains('`') { "``" } else { "`" };
-            format!("{fence}{text}{fence}")
+            let runs: Vec<usize> = text.split(|c| c != '`').map(str::len).filter(|n| *n > 0).collect();
+            let fence = "`".repeat((1..).find(|n| !runs.contains(n)).unwrap());
+            let all_spaces = text.chars().all(|c| c == ' ');
+            let pad = !all_spaces && (text.starts_with('`') || text.ends_with('`') || (text.starts_with(' ') && text.ends_with(' ')));
+            let pad = if pad { " " } else { "" };
+            format!("{fence}{pad}{text}{pad}{fence}")
         } else {
             escape_text(text)
         }
@@ -658,14 +662,17 @@ fn parse_inline_into(chars: &[char], marks: &Marks, nodes: &mut Vec<Value>) {
             }
             '`' => {
                 let fence = chars[i..].iter().take_while(|c| **c == '`').count();
-                if let Some(end) = find_seq(chars, i + fence, &vec!['`'; fence]) {
+                if let Some(end) = find_backtick_run(chars, i + fence, fence) {
                     flush(&mut buf, nodes);
-                    let code: String = chars[i + fence..end].iter().collect();
+                    let mut code: String = chars[i + fence..end].iter().collect();
+                    if code.len() >= 2 && code.starts_with(' ') && code.ends_with(' ') && !code.chars().all(|c| c == ' ') {
+                        code = code[1..code.len() - 1].to_string();
+                    }
                     push_text(nodes, code, &Marks { code: true, ..marks.clone() });
                     i = end + fence;
                 } else {
-                    buf.push(c);
-                    i += 1;
+                    buf.extend(std::iter::repeat('`').take(fence));
+                    i += fence;
                 }
             }
             '[' => {
@@ -723,6 +730,22 @@ fn parse_inline_into(chars: &[char], marks: &Marks, nodes: &mut Vec<Value>) {
         }
     }
     flush(&mut buf, nodes);
+}
+
+fn find_backtick_run(chars: &[char], from: usize, length: usize) -> Option<usize> {
+    let mut j = from;
+    while j < chars.len() {
+        if chars[j] == '`' {
+            let run = chars[j..].iter().take_while(|c| **c == '`').count();
+            if run == length {
+                return Some(j);
+            }
+            j += run;
+        } else {
+            j += 1;
+        }
+    }
+    None
 }
 
 fn find_seq(chars: &[char], from: usize, seq: &[char]) -> Option<usize> {
@@ -1033,5 +1056,25 @@ mod tests {
             let adf = doc(vec![para(vec![text("see "), link, text(" now")])]);
             assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), adf, "{href:?} must survive the round trip");
         }
+    }
+
+    #[test]
+    fn test_remote_inline_code_with_backticks_survives_the_round_trip() {
+        for code in ["a``b", "a`b", "```", "`start", "end`", "`", " padded ", "a `` b ``` c"] {
+            let span = json!({"type": "text", "text": code, "marks": [{"type": "code"}]});
+            let adf = doc(vec![para(vec![text("use "), span, text(" here")])]);
+            let md = adf_to_markdown(&adf);
+            assert_eq!(markdown_to_adf(&md), adf, "{code:?} must survive the round trip\nmarkdown: {md}");
+        }
+    }
+
+    #[test]
+    fn test_code_span_closes_only_on_a_run_of_the_same_length() {
+        let adf = markdown_to_adf("`a``b` and `` `x` `` done");
+        let content = adf["content"][0]["content"].as_array().unwrap();
+        assert_eq!(content[0], json!({"type": "text", "text": "a``b", "marks": [{"type": "code"}]}));
+        assert_eq!(content[1], text(" and "));
+        assert_eq!(content[2], json!({"type": "text", "text": "`x`", "marks": [{"type": "code"}]}));
+        assert_eq!(content[3], text(" done"));
     }
 }
