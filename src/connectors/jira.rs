@@ -12,7 +12,6 @@ use gittask::{Task, Comment, Label, Subtask};
 
 use crate::connectors::adf;
 use crate::connectors::{status_names_match, RemoteConnector, RemoteTaskState};
-use crate::util::error_message;
 
 pub struct JiraRemoteConnector;
 
@@ -672,70 +671,7 @@ impl RemoteConnector for JiraRemoteConnector {
         let subtask_id = subtask.get_id().ok_or_else(|| "Subtask has no ID".to_string())?;
         let subtask_key = task_id_to_issue_key(project, &subtask_id);
 
-        RUNTIME.block_on(async {
-            let fields = HashMap::from([
-                ("summary".to_string(), serde_json::json!(subtask.get_name())),
-            ]);
-
-            let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
-                fields: Some(fields),
-                ..Default::default()
-            };
-
-            let result = match issues_api::edit_issue(
-                &config,
-                subtask_key.as_str(),
-                issue_details,
-                None,
-                None,
-                None,
-                None,
-                None,
-            ).await {
-                Ok(_) => Ok(()),
-                Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => Ok(()),
-                Err(e) => Err(format!("Failed to update subtask: {}", e))
-            };
-
-            if result.is_ok() && !subtask.get_status().is_empty() {
-                if let Ok(transitions) = issues_api::get_transitions(
-                    &config,
-                    subtask_key.as_str(),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ).await {
-                    for transition in transitions.transitions.unwrap_or_default() {
-                        if let Some(target_status) = transition.to
-                            && target_status.name.as_deref().is_some_and(|name| status_names_match(name, subtask.get_status())) {
-                                let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
-                                    transition: Some(IssueTransition {
-                                        id: transition.id.clone(),
-                                        ..Default::default()
-                                    }),
-                                    ..Default::default()
-                                };
-
-                                if let Err(e) = issues_api::do_transition(
-                                    &config,
-                                    subtask_key.as_str(),
-                                    issue_details,
-                                ).await {
-                                    eprintln!("ERROR: failed to transition subtask status: {e}");
-                                }
-
-                                break;
-                        }
-                    }
-                } else {
-                    error_message("Failed to get transitions for subtask.".to_string());
-                }
-            }
-
-            result
-        })
+        RUNTIME.block_on(update_subtask(&config, &subtask_key, subtask))
     }
 
     fn delete_remote_subtask(&self, domain: &String, project: &String, _task_id: &String, subtask_id: &String) -> Result<(), String> {
@@ -878,6 +814,40 @@ struct CurrentFields {
     summary: Option<String>,
     description: String,
     labels: Vec<String>,
+}
+
+async fn update_subtask(config: &Configuration, subtask_key: &str, subtask: &Subtask) -> Result<(), String> {
+    let current_status = fetch_current_status(config, subtask_key).await?;
+
+    let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
+        fields: Some(HashMap::from([
+            ("summary".to_string(), serde_json::json!(subtask.get_name())),
+        ])),
+        ..Default::default()
+    };
+    match issues_api::edit_issue(config, subtask_key, issue_details, None, None, None, None, None).await {
+        Ok(_) => {},
+        Err(e) if e.to_string().starts_with("error in serde: EOF while parsing a value at line 1 column 0") => {},
+        Err(e) => return Err(format!("Failed to update subtask: {}", e)),
+    }
+
+    let wanted_status = subtask.get_status();
+    let already_there = current_status.as_deref().is_some_and(|current| status_names_match(current, wanted_status));
+    if wanted_status.is_empty() || already_there {
+        return Ok(());
+    }
+    transition_issue(config, subtask_key, wanted_status, "").await
+}
+
+async fn fetch_current_status(config: &Configuration, issue_key: &str) -> Result<Option<String>, String> {
+    match issues_api::get_issue(config, issue_key, Some(vec!["status".to_string()]), None, None, None, None, None).await {
+        Ok(issue) => Ok(issue.fields.unwrap_or_default()
+            .get("status")
+            .and_then(|status| status.get("name"))
+            .and_then(|name| name.as_str())
+            .map(str::to_string)),
+        Err(e) => Err(format!("Could not fetch issue {issue_key} before updating it: {e}")),
+    }
 }
 
 async fn fetch_current_fields(config: &Configuration, issue_key: &str) -> Result<CurrentFields, String> {
@@ -1025,6 +995,99 @@ mod tests {
 
     fn jira_statuses() -> Vec<String> {
         vec!["To Do".to_string(), "In Progress".to_string(), "Done".to_string()]
+    }
+
+    fn stub_jira(handler: impl Fn(&str, &str) -> (u16, String) + Send + 'static) -> (Configuration, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind stub server");
+        let addr = listener.local_addr().unwrap();
+        let requests = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = requests.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let mut stream = match stream { Ok(s) => s, Err(_) => continue };
+                let mut data = Vec::new();
+                let mut buf = [0u8; 4096];
+                let header_end = [13u8, 10, 13, 10];
+                loop {
+                    if let Some(pos) = data.windows(4).position(|w| w == header_end) {
+                        let head = String::from_utf8_lossy(&data[..pos]).to_string();
+                        let content_length = head.lines().find_map(|line| {
+                            let (key, value) = line.split_once(':')?;
+                            if key.eq_ignore_ascii_case("content-length") { value.trim().parse::<usize>().ok() } else { None }
+                        }).unwrap_or(0);
+                        if data.len() >= pos + 4 + content_length {
+                            break;
+                        }
+                    }
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => data.extend_from_slice(&buf[..n]),
+                    }
+                }
+                let head = String::from_utf8_lossy(&data).to_string();
+                let mut parts = head.lines().next().unwrap_or_default().split_whitespace();
+                let method = parts.next().unwrap_or_default().to_string();
+                let path = parts.next().unwrap_or_default().split('?').next().unwrap_or_default().to_string();
+                log.lock().unwrap().push(format!("{method} {path}"));
+                let (status, body) = handler(&method, &path);
+                let crlf = [13u8, 10];
+                let status_line = format!("HTTP/1.1 {status} {}", if status < 300 { "OK" } else { "Error" });
+                let length = format!("Content-Length: {}", body.len());
+                let response = [status_line.as_bytes(), &crlf, b"Content-Type: application/json", &crlf, length.as_bytes(), &crlf, b"Connection: close", &crlf, &crlf, body.as_bytes()].concat();
+                let _ = stream.write_all(&response);
+            }
+        });
+        let mut config = Configuration::new();
+        config.base_path = format!("http://{addr}");
+        (config, requests)
+    }
+
+    fn subtask_with_status(status: &str) -> Subtask {
+        Subtask::new(Some("ABC-2".to_string()), "Child".to_string(), status.to_string(), HashMap::new())
+    }
+
+    fn jira_subtask_flow(current_status: &'static str, transition_status: u16) -> impl Fn(&str, &str) -> (u16, String) + Send + 'static {
+        move |method, path| match (method, path) {
+            ("GET", "/rest/api/3/issue/ABC-2") => (200, format!(r#"{{"fields":{{"status":{{"name":"{current_status}"}}}}}}"#)),
+            ("PUT", "/rest/api/3/issue/ABC-2") => (204, String::new()),
+            ("GET", "/rest/api/3/issue/ABC-2/transitions") => (200, r#"{"transitions":[{"id":"31","to":{"name":"Done"}}]}"#.to_string()),
+            ("POST", "/rest/api/3/issue/ABC-2/transitions") => (transition_status, if transition_status < 300 { String::new() } else { r#"{"errorMessages":["Forbidden"]}"#.to_string() }),
+            _ => (404, String::new()),
+        }
+    }
+
+    #[test]
+    fn test_update_subtask_fails_when_the_transition_is_rejected() {
+        let (config, requests) = stub_jira(jira_subtask_flow("To Do", 403));
+
+        let result = RUNTIME.block_on(update_subtask(&config, "ABC-2", &subtask_with_status("DONE")));
+
+        assert!(result.is_err(), "a rejected transition must fail the subtask update");
+        assert!(result.as_ref().unwrap_err().contains("Failed to transition ABC-2"), "unexpected error: {result:?}");
+        assert!(requests.lock().unwrap().contains(&"POST /rest/api/3/issue/ABC-2/transitions".to_string()), "the transition must have been attempted");
+    }
+
+    #[test]
+    fn test_update_subtask_transitions_when_the_status_differs() {
+        let (config, requests) = stub_jira(jira_subtask_flow("To Do", 204));
+
+        let result = RUNTIME.block_on(update_subtask(&config, "ABC-2", &subtask_with_status("DONE")));
+
+        assert_eq!(result, Ok(()));
+        assert!(requests.lock().unwrap().contains(&"POST /rest/api/3/issue/ABC-2/transitions".to_string()));
+    }
+
+    #[test]
+    fn test_update_subtask_skips_the_transition_when_the_status_already_matches() {
+        let (config, requests) = stub_jira(jira_subtask_flow("Done", 403));
+
+        let result = RUNTIME.block_on(update_subtask(&config, "ABC-2", &subtask_with_status("DONE")));
+
+        assert_eq!(result, Ok(()));
+        let requests = requests.lock().unwrap();
+        assert!(requests.contains(&"PUT /rest/api/3/issue/ABC-2".to_string()), "the summary must still be updated");
+        assert!(!requests.iter().any(|r| r.ends_with("/transitions")), "no transition request must be made, got {requests:?}");
     }
 
     #[test]
