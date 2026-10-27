@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use chrono::DateTime;
 use jira_v3_openapi::{apis::configuration::Configuration, apis::issues_api};
-use jira_v3_openapi::apis::{issue_comments_api, issue_search_api};
+use jira_v3_openapi::apis::{issue_comments_api, issue_fields_api, issue_search_api};
 use jira_v3_openapi::models::IssueTransition;
 use regex::Regex;
 use tokio::runtime::Runtime;
@@ -11,7 +11,7 @@ use tokio::runtime::Runtime;
 use gittask::{Task, Comment, Label, Subtask};
 
 use crate::connectors::adf;
-use crate::connectors::{status_names_match, RemoteConnector, RemoteTaskState};
+use crate::connectors::{status_names_match, RemoteConnector, RemoteField, RemoteTaskState};
 
 pub struct JiraRemoteConnector;
 
@@ -30,6 +30,7 @@ impl RemoteConnector for JiraRemoteConnector {
             "task.jira.user".to_string(),
             "task.jira.project".to_string(),
             "task.jira.projects".to_string(),
+            "task.jira.fields".to_string(),
         ])
     }
 
@@ -54,6 +55,42 @@ impl RemoteConnector for JiraRemoteConnector {
         true
     }
 
+    fn fields_config_option(&self) -> Option<String> {
+        Some("task.jira.fields".to_string())
+    }
+
+    fn discover_remote_fields(&self, domain: &String, project: &String) -> Result<Vec<RemoteField>, String> {
+        let config = get_configuration(domain)?;
+        RUNTIME.block_on(async {
+            let jql = build_jql(project, &RemoteTaskState::All, &[]);
+            let response = issue_search_api::search_and_reconsile_issues_using_jql(
+                &config,
+                Some(&jql),
+                None,
+                Some(100),
+                Some(vec!["*navigable".to_string()]),
+                None,
+                None,
+                None,
+                None,
+                None,
+            ).await.map_err(|e| e.to_string())?;
+            let issues = response.issues.unwrap_or_default();
+            let samples: Vec<&HashMap<String, serde_json::Value>> = issues.iter().filter_map(|issue| issue.fields.as_ref()).collect();
+            let catalog = fetch_field_catalog(&config).await?;
+            let mappings = build_field_mappings(&catalog, Some(&used_custom_fields(&samples)));
+            Ok(mappings.into_iter().map(|mapping| RemoteField {
+                name: catalog.iter()
+                    .find(|field| field.id.as_deref() == Some(mapping.field.as_str()))
+                    .and_then(|field| field.name.clone())
+                    .unwrap_or_default(),
+                kind: mapping.kind.map(FieldKind::config_name).unwrap_or("string").to_string(),
+                property: mapping.property,
+                id: mapping.field,
+            }).collect())
+        })
+    }
+
     fn list_remote_tasks(
         &self,
         domain: &String,
@@ -66,6 +103,9 @@ impl RemoteConnector for JiraRemoteConnector {
     ) -> Result<Vec<Task>, String> {
         let config = get_configuration(domain)?;
         let prefixed = multi_project_mode();
+        let configured = get_field_mappings()?;
+        let discover = configured.is_none();
+        let mut mappings = configured.unwrap_or_default();
 
         let jql = RUNTIME.block_on(async {
             let jira_statuses = jira_status_names(&config, &state).await?;
@@ -79,13 +119,18 @@ impl RemoteConnector for JiraRemoteConnector {
         if with_labels {
             field_list.push("labels".to_string());
         }
+        field_list.extend(mappings.iter().map(|m| m.field.clone()));
+        if discover {
+            // Every navigable field, so the custom fields in use can be found.
+            field_list.push("*navigable".to_string());
+        }
 
         RUNTIME.block_on(async {
-            let mut tasks: Vec<Task> = vec![];
+            let mut issues = vec![];
             let mut next_page_token: Option<String> = None;
             loop {
                 let max_results = match limit {
-                    Some(limit) => std::cmp::min(limit.saturating_sub(tasks.len()), 100) as i32,
+                    Some(limit) => std::cmp::min(limit.saturating_sub(issues.len()), 100) as i32,
                     None => 100,
                 };
                 let response = issue_search_api::search_and_reconsile_issues_using_jql(
@@ -101,76 +146,85 @@ impl RemoteConnector for JiraRemoteConnector {
                     None,
                 ).await.map_err(|e| e.to_string())?;
 
-                let issues = response.issues.unwrap_or_default();
-                let batch_len = issues.len();
-                for issue in issues {
-                    let key = match issue.key {
-                        Some(key) => key,
-                        None => {
-                            eprintln!("WARNING: skipping Jira issue without a key");
-                            continue;
-                        }
-                    };
-                    let fields = match issue.fields {
-                        Some(fields) => fields,
-                        None => continue,
-                    };
-                    let summary = match fields.get("summary").and_then(|v| v.as_str()) {
-                        Some(summary) => summary,
-                        None => {
-                            eprintln!("WARNING: skipping Jira issue {key} without a summary");
-                            continue;
-                        }
-                    };
+                let batch = response.issues.unwrap_or_default();
+                let batch_len = batch.len();
+                issues.extend(batch);
 
-                    let mut props = HashMap::new();
-                    props.insert("name".to_string(), summary.to_string());
-                    props.insert("description".to_string(), fields.get("description").map(parse_adf).unwrap_or_default());
-                    props.insert("status".to_string(), fields.get("status").map(parse_status).unwrap_or_default());
-                    if let Some(created) = fields.get("created").and_then(|v| v.as_str()).and_then(|s| parse_to_unix_timestamp(s).ok()) {
-                        props.insert("created".to_string(), created);
-                    }
-                    if let Some(creator) = fields.get("creator") {
-                        props.insert("author".to_string(), parse_creator(creator));
-                    }
-
-                    let mut task = match Task::from_properties(issue_key_to_task_id(&key, prefixed), props) {
-                        Ok(task) => task,
-                        Err(e) => {
-                            eprintln!("WARNING: skipping Jira issue {key}: {e}");
-                            continue;
-                        }
-                    };
-
-                    if with_comments {
-                        if let Some(comments) = fields.get("comment") {
-                            let mut task_comments = parse_comments(comments);
-                            if comments_are_truncated(comments) {
-                                match fetch_all_comments(&config, &key).await {
-                                    Ok(all_comments) => task_comments = all_comments,
-                                    Err(e) => return Err(format!("Could not fetch all comments for {key}: {e}")),
-                                }
-                            }
-                            task.set_comments(task_comments);
-                        }
-                    }
-
-                    if with_labels {
-                        if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
-                            let task_labels = labels.iter().filter_map(|v| {
-                                v.as_str().map(|name| Label::new(name.to_string(), None, None))
-                            }).collect();
-                            task.set_labels(task_labels);
-                        }
-                    }
-
-                    tasks.push(task);
-                }
-
-                next_page_token = match next_search_page(response.is_last, response.next_page_token, batch_len, tasks.len(), limit) {
+                next_page_token = match next_search_page(response.is_last, response.next_page_token, batch_len, issues.len(), limit) {
                     Some(token) => Some(token),
                     None => break,
                 };
+            }
+
+            if discover {
+                let samples: Vec<&HashMap<String, serde_json::Value>> = issues.iter().filter_map(|issue| issue.fields.as_ref()).collect();
+                mappings = discover_field_mappings(&config, &samples).await?;
+            }
+
+            let mut tasks: Vec<Task> = vec![];
+            for issue in issues {
+                let key = match issue.key {
+                    Some(key) => key,
+                    None => {
+                        eprintln!("WARNING: skipping Jira issue without a key");
+                        continue;
+                    }
+                };
+                let fields = match issue.fields {
+                    Some(fields) => fields,
+                    None => continue,
+                };
+                let summary = match fields.get("summary").and_then(|v| v.as_str()) {
+                    Some(summary) => summary,
+                    None => {
+                        eprintln!("WARNING: skipping Jira issue {key} without a summary");
+                        continue;
+                    }
+                };
+
+                let mut props = HashMap::new();
+                props.insert("name".to_string(), summary.to_string());
+                props.insert("description".to_string(), fields.get("description").map(parse_adf).unwrap_or_default());
+                props.insert("status".to_string(), fields.get("status").map(parse_status).unwrap_or_default());
+                if let Some(created) = fields.get("created").and_then(|v| v.as_str()).and_then(|s| parse_to_unix_timestamp(s).ok()) {
+                    props.insert("created".to_string(), created);
+                }
+                if let Some(creator) = fields.get("creator") {
+                    props.insert("author".to_string(), parse_creator(creator));
+                }
+                insert_custom_properties(&mut props, &fields, &mappings);
+
+                let mut task = match Task::from_properties(issue_key_to_task_id(&key, prefixed), props) {
+                    Ok(task) => task,
+                    Err(e) => {
+                        eprintln!("WARNING: skipping Jira issue {key}: {e}");
+                        continue;
+                    }
+                };
+
+                if with_comments {
+                    if let Some(comments) = fields.get("comment") {
+                        let mut task_comments = parse_comments(comments);
+                        if comments_are_truncated(comments) {
+                            match fetch_all_comments(&config, &key).await {
+                                Ok(all_comments) => task_comments = all_comments,
+                                Err(e) => return Err(format!("Could not fetch all comments for {key}: {e}")),
+                            }
+                        }
+                        task.set_comments(task_comments);
+                    }
+                }
+
+                if with_labels {
+                    if let Some(serde_json::Value::Array(labels)) = fields.get("labels") {
+                        let task_labels = labels.iter().filter_map(|v| {
+                            v.as_str().map(|name| Label::new(name.to_string(), None, None))
+                        }).collect();
+                        task.set_labels(task_labels);
+                    }
+                }
+
+                tasks.push(task);
             }
 
             Ok(tasks)
@@ -188,6 +242,9 @@ impl RemoteConnector for JiraRemoteConnector {
     ) -> Result<Option<Task>, String> {
         let config = get_configuration(domain)?;
         let prefixed = multi_project_mode();
+        let configured = get_field_mappings()?;
+        let discover = configured.is_none();
+        let mut mappings = configured.unwrap_or_default();
 
         let mut field_list = vec!["summary".to_string(), "description".to_string(), "status".to_string(), "created".to_string(), "creator".to_string()];
         if with_comments {
@@ -195,6 +252,10 @@ impl RemoteConnector for JiraRemoteConnector {
         }
         if with_labels {
             field_list.push("labels".to_string());
+        }
+        field_list.extend(mappings.iter().map(|m| m.field.clone()));
+        if discover {
+            field_list.push("*navigable".to_string());
         }
 
         RUNTIME.block_on(async {
@@ -212,6 +273,9 @@ impl RemoteConnector for JiraRemoteConnector {
                     let mut props = HashMap::new();
                     if let Some(fields) = issue.fields {
                         let issue_key = issue.key.unwrap_or_else(|| task_id_to_issue_key(project, task_id));
+                        if discover {
+                            mappings = discover_field_mappings(&config, &[&fields]).await?;
+                        }
                         let summary = fields.get("summary").and_then(|v| v.as_str())
                             .ok_or_else(|| format!("Issue {issue_key} has no summary"))?;
                         props.insert("name".to_string(), summary.to_string());
@@ -223,6 +287,7 @@ impl RemoteConnector for JiraRemoteConnector {
                         if let Some(creator) = fields.get("creator") {
                             props.insert("author".to_string(), parse_creator(creator));
                         }
+                        insert_custom_properties(&mut props, &fields, &mappings);
 
                         let mut task = Task::from_properties(issue_key_to_task_id(&issue_key, prefixed), props)?;
 
@@ -267,10 +332,15 @@ impl RemoteConnector for JiraRemoteConnector {
     ) -> Result<String, String> {
         let config = get_configuration(domain)?;
         let prefixed = multi_project_mode();
+        let configured = get_field_mappings()?;
         let name = task.get_property("name").ok_or_else(|| "Task has no name".to_string())?;
         let description = task.get_property("description").map(String::as_str).unwrap_or("");
 
         RUNTIME.block_on(async {
+            let mappings = match configured {
+                Some(mappings) => mappings,
+                None => mappings_for_task(&config, task).await?,
+            };
             let mut issue_details = jira_v3_openapi::models::IssueUpdateDetails {
                 fields: Some(std::collections::HashMap::from([
                     ("project".to_string(), serde_json::json!({
@@ -289,6 +359,9 @@ impl RemoteConnector for JiraRemoteConnector {
                 issue_details.fields.as_mut().unwrap().insert("labels".to_string(), serde_json::json!(
                     labels.iter().map(|l| l.get_name()).collect::<Vec<String>>()
                 ));
+            }
+            for (field, value) in custom_fields_for_create(task.get_all_properties(), &mappings)? {
+                issue_details.fields.as_mut().unwrap().insert(field, value);
             }
 
             match issues_api::create_issue(&config, issue_details, None).await {
@@ -417,10 +490,15 @@ impl RemoteConnector for JiraRemoteConnector {
         let name = task.get_property("name").ok_or_else(|| "Task has no name".to_string())?;
         let description = task.get_property("description").map(String::as_str).unwrap_or("");
         let issue_key = task_id_to_issue_key(project, &task.get_id().unwrap());
+        let configured = get_field_mappings()?;
 
         RUNTIME.block_on(async {
-            let current = fetch_current_fields(&config, &issue_key).await?;
-            let fields = changed_fields(&current, name, description, labels);
+            let mappings = match configured {
+                Some(mappings) => mappings,
+                None => mappings_for_task(&config, task).await?,
+            };
+            let current = fetch_current_fields(&config, &issue_key, &mappings).await?;
+            let fields = changed_fields(&current, name, description, labels, task.get_all_properties(), &mappings)?;
 
             let mut result = if fields.is_empty() {
                 Ok(())
@@ -795,6 +873,8 @@ struct CurrentFields {
     summary: Option<String>,
     description: String,
     labels: Vec<String>,
+    /// Raw values of the mapped custom fields, by Jira field id.
+    custom: HashMap<String, serde_json::Value>,
 }
 
 async fn update_subtask(config: &Configuration, subtask_key: &str, subtask: &Subtask) -> Result<(), String> {
@@ -850,11 +930,13 @@ async fn fetch_current_status(config: &Configuration, issue_key: &str) -> Result
     }
 }
 
-async fn fetch_current_fields(config: &Configuration, issue_key: &str) -> Result<CurrentFields, String> {
+async fn fetch_current_fields(config: &Configuration, issue_key: &str, mappings: &[FieldMapping]) -> Result<CurrentFields, String> {
+    let mut field_list = vec!["summary".to_string(), "description".to_string(), "labels".to_string()];
+    field_list.extend(mappings.iter().map(|m| m.field.clone()));
     match issues_api::get_issue(
         config,
         issue_key,
-        Some(vec!["summary".to_string(), "description".to_string(), "labels".to_string()]),
+        Some(field_list),
         None,
         None,
         None,
@@ -869,6 +951,9 @@ async fn fetch_current_fields(config: &Configuration, issue_key: &str) -> Result
                 labels: fields.get("labels").and_then(|v| v.as_array())
                     .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
                     .unwrap_or_default(),
+                custom: mappings.iter()
+                    .filter_map(|m| fields.get(&m.field).map(|v| (m.field.clone(), v.clone())))
+                    .collect(),
             })
         }
         Err(e) => Err(format!("Could not fetch issue {issue_key} before updating it: {e}")),
@@ -880,7 +965,14 @@ async fn fetch_current_fields(config: &Configuration, issue_key: &str) -> Result
 /// The description is the important one: the local text is a markdown
 /// approximation of the Jira document, so writing it back when it has not
 /// changed would strip whatever formatting the conversion could not keep.
-fn changed_fields(current: &CurrentFields, name: &str, description: &str, labels: Option<&Vec<Label>>) -> HashMap<String, serde_json::Value> {
+fn changed_fields(
+    current: &CurrentFields,
+    name: &str,
+    description: &str,
+    labels: Option<&Vec<Label>>,
+    properties: &HashMap<String, String>,
+    mappings: &[FieldMapping],
+) -> Result<HashMap<String, serde_json::Value>, String> {
     let mut fields = HashMap::new();
     if current.summary.as_deref() != Some(name) {
         fields.insert("summary".to_string(), serde_json::json!(name));
@@ -897,7 +989,308 @@ fn changed_fields(current: &CurrentFields, name: &str, description: &str, labels
             fields.insert("labels".to_string(), serde_json::json!(wanted));
         }
     }
-    fields
+    for mapping in mappings {
+        // A property the task does not have leaves the Jira field alone.
+        let Some(local) = properties.get(&mapping.property) else { continue };
+        let remote = current.custom.get(&mapping.field);
+        let remote_text = remote.and_then(custom_field_to_string).unwrap_or_default();
+        if remote_text != *local {
+            fields.insert(mapping.field.clone(), custom_field_payload(mapping, remote, local)?);
+        }
+    }
+    Ok(fields)
+}
+
+/// How a local property is written to a Jira custom field.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FieldKind {
+    /// A plain string.
+    Text,
+    /// A rich text (paragraph) field, sent as an ADF document.
+    Doc,
+    Number,
+    Bool,
+    /// A select list: `{"value": "..."}`.
+    Option,
+    /// An object chosen by name: `{"name": "..."}` (priorities, versions, components).
+    Named,
+}
+
+/// One `property=field[:type]` entry of `task.jira.fields`.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct FieldMapping {
+    property: String,
+    field: String,
+    kind: Option<FieldKind>,
+}
+
+const BUILT_IN_PROPERTIES: [&str; 6] = ["id", "name", "description", "status", "created", "author"];
+
+/// Parses `task.jira.fields`: comma separated `property=field[:type]` entries, for example
+/// `points=customfield_10016:number,team=customfield_10001:option`.
+pub(crate) fn parse_field_mappings(spec: &str) -> Result<Vec<FieldMapping>, String> {
+    let mut mappings: Vec<FieldMapping> = vec![];
+    for entry in spec.split(',').map(str::trim).filter(|e| !e.is_empty()) {
+        let invalid = || format!("Invalid Jira field mapping '{entry}': expected property=field[:type]");
+        let (property, target) = entry.split_once('=').ok_or_else(invalid)?;
+        let (field, kind) = match target.split_once(':') {
+            Some((field, kind)) => (field.trim(), Some(parse_field_kind(kind.trim(), entry)?)),
+            None => (target.trim(), None),
+        };
+        let property = property.trim();
+        if property.is_empty() || field.is_empty() {
+            return Err(invalid());
+        }
+        if BUILT_IN_PROPERTIES.contains(&property) {
+            return Err(format!("Invalid Jira field mapping '{entry}': '{property}' is a built-in property"));
+        }
+        if mappings.iter().any(|m| m.property == property) {
+            return Err(format!("Invalid Jira field mapping '{entry}': property '{property}' is mapped twice"));
+        }
+        if mappings.iter().any(|m| m.field == field) {
+            return Err(format!("Invalid Jira field mapping '{entry}': field '{field}' is mapped twice"));
+        }
+        mappings.push(FieldMapping { property: property.to_string(), field: field.to_string(), kind });
+    }
+    Ok(mappings)
+}
+
+fn parse_field_kind(kind: &str, entry: &str) -> Result<FieldKind, String> {
+    match kind.to_ascii_lowercase().as_str() {
+        "string" | "text" => Ok(FieldKind::Text),
+        "doc" | "paragraph" => Ok(FieldKind::Doc),
+        "number" => Ok(FieldKind::Number),
+        "bool" | "boolean" => Ok(FieldKind::Bool),
+        "option" | "select" => Ok(FieldKind::Option),
+        "name" | "named" => Ok(FieldKind::Named),
+        _ => Err(format!("Invalid Jira field mapping '{entry}': unknown type '{kind}' (expected string, doc, number, bool, option or name)")),
+    }
+}
+
+/// The custom field mappings configured in `task.jira.fields`, or `None` when the option
+/// is not set and the mapping is discovered from Jira instead.
+fn get_field_mappings() -> Result<Option<Vec<FieldMapping>>, String> {
+    match gittask::get_config_value("task.jira.fields") {
+        Ok(spec) => parse_field_mappings(&spec).map(Some),
+        Err(_) => Ok(None),
+    }
+}
+
+/// Serializes mappings in the `task.jira.fields` syntax.
+#[cfg(test)]
+fn format_field_mappings(mappings: &[FieldMapping]) -> String {
+    mappings.iter().map(|m| match m.kind {
+        Some(kind) => format!("{}={}:{}", m.property, m.field, kind.config_name()),
+        None => format!("{}={}", m.property, m.field),
+    }).collect::<Vec<_>>().join(",")
+}
+
+impl FieldKind {
+    fn config_name(self) -> &'static str {
+        match self {
+            FieldKind::Text => "string",
+            FieldKind::Doc => "doc",
+            FieldKind::Number => "number",
+            FieldKind::Bool => "bool",
+            FieldKind::Option => "option",
+            FieldKind::Named => "name",
+        }
+    }
+}
+
+async fn fetch_field_catalog(config: &Configuration) -> Result<Vec<jira_v3_openapi::models::FieldDetails>, String> {
+    issue_fields_api::get_fields(config).await.map_err(|e| format!("Could not list Jira fields: {e}"))
+}
+
+/// Discovers a mapping for the custom fields that carry a value on the given issues:
+/// each property is named after the Jira field, typed from the field schema.
+async fn discover_field_mappings(config: &Configuration, issues: &[&HashMap<String, serde_json::Value>]) -> Result<Vec<FieldMapping>, String> {
+    let catalog = fetch_field_catalog(config).await?;
+    Ok(build_field_mappings(&catalog, Some(&used_custom_fields(issues))))
+}
+
+/// Discovers the mapping for the properties of a task about to be pushed: every custom
+/// field of the instance whose derived property name the task has.
+async fn mappings_for_task(config: &Configuration, task: &Task) -> Result<Vec<FieldMapping>, String> {
+    let catalog = fetch_field_catalog(config).await?;
+    let mut mappings = build_field_mappings(&catalog, None);
+    mappings.retain(|mapping| task.has_property(&mapping.property));
+    Ok(mappings)
+}
+
+/// The custom fields holding a value on at least one of the issues.
+fn used_custom_fields(issues: &[&HashMap<String, serde_json::Value>]) -> Vec<String> {
+    let mut used: Vec<String> = issues.iter()
+        .flat_map(|fields| fields.iter())
+        .filter(|(id, value)| id.starts_with("customfield_") && !value.is_null())
+        .map(|(id, _)| id.clone())
+        .collect();
+    used.sort();
+    used.dedup();
+    used
+}
+
+/// Maps the custom fields of the catalog that can be synchronized, or only those in
+/// `used_fields`. Property names are derived over the whole catalog, in field id order,
+/// so a name does not depend on which fields happen to hold a value.
+fn build_field_mappings(catalog: &[jira_v3_openapi::models::FieldDetails], used_fields: Option<&[String]>) -> Vec<FieldMapping> {
+    let mut custom_fields: Vec<&jira_v3_openapi::models::FieldDetails> = catalog.iter()
+        .filter(|field| field.id.as_deref().is_some_and(|id| id.starts_with("customfield_")))
+        .collect();
+    custom_fields.sort_by_key(|field| custom_field_number(field));
+
+    let mut mappings: Vec<FieldMapping> = vec![];
+    for field in custom_fields {
+        let id = field.id.as_deref().unwrap_or_default();
+        let Some(kind) = field.schema.as_deref().and_then(field_kind_from_schema) else { continue };
+        let mut property = property_name(field.name.as_deref().unwrap_or(id));
+        if BUILT_IN_PROPERTIES.contains(&property.as_str()) || mappings.iter().any(|m| m.property == property) {
+            property = format!("{property}_{}", id.trim_start_matches("customfield_"));
+        }
+        mappings.push(FieldMapping { property, field: id.to_string(), kind: Some(kind) });
+    }
+    if let Some(used) = used_fields {
+        mappings.retain(|mapping| used.contains(&mapping.field));
+    }
+    mappings.sort_by(|a, b| a.property.cmp(&b.property));
+    mappings
+}
+
+fn custom_field_number(field: &jira_v3_openapi::models::FieldDetails) -> i64 {
+    field.schema.as_deref().and_then(|schema| schema.custom_id)
+        .or_else(|| field.id.as_deref().and_then(|id| id.trim_start_matches("customfield_").parse().ok()))
+        .unwrap_or(i64::MAX)
+}
+
+/// The writable shape of a field, from its schema. Fields that cannot be written back by
+/// value (users, cascading selects, sprints, ranks, development info) are not mapped.
+fn field_kind_from_schema(schema: &jira_v3_openapi::models::JsonTypeBean) -> Option<FieldKind> {
+    let custom_type = schema.custom.as_deref().and_then(|c| c.rsplit(':').next()).unwrap_or("");
+    match (schema.r#type.as_str(), schema.items.as_deref()) {
+        (_, _) if custom_type == "gh-lexo-rank" => None,
+        ("string", _) if custom_type == "textarea" => Some(FieldKind::Doc),
+        ("string", _) | ("date", _) | ("datetime", _) => Some(FieldKind::Text),
+        ("number", _) => Some(FieldKind::Number),
+        ("option", _) | ("array", Some("option")) => Some(FieldKind::Option),
+        ("array", Some("string")) => Some(FieldKind::Text),
+        ("version", _) | ("component", _) | ("array", Some("version")) | ("array", Some("component")) => Some(FieldKind::Named),
+        _ => None,
+    }
+}
+
+/// `Story point estimate` becomes `story_point_estimate`.
+fn property_name(field_name: &str) -> String {
+    let mut name = String::new();
+    for c in field_name.chars() {
+        if c.is_alphanumeric() {
+            name.extend(c.to_lowercase());
+        } else if !name.is_empty() && !name.ends_with('_') {
+            name.push('_');
+        }
+    }
+    let name = name.trim_end_matches('_');
+    if name.is_empty() { "field".to_string() } else { name.to_string() }
+}
+
+/// Copies the mapped Jira fields of an issue into task properties.
+fn insert_custom_properties(props: &mut HashMap<String, String>, fields: &HashMap<String, serde_json::Value>, mappings: &[FieldMapping]) {
+    for mapping in mappings {
+        if let Some(value) = fields.get(&mapping.field).and_then(custom_field_to_string) {
+            props.insert(mapping.property.clone(), value);
+        }
+    }
+}
+
+fn is_adf_document(value: &serde_json::Value) -> bool {
+    value.get("type").and_then(|t| t.as_str()) == Some("doc") && value.get("content").is_some()
+}
+
+/// Renders a Jira field value as a task property. `None` for an empty (null) field,
+/// so that the local property, if any, is left alone.
+fn custom_field_to_string(value: &serde_json::Value) -> Option<String> {
+    use serde_json::Value;
+    match value {
+        Value::Null => None,
+        Value::String(s) => Some(s.clone()),
+        Value::Bool(b) => Some(b.to_string()),
+        Value::Number(n) => Some(match (n.as_i64(), n.as_f64()) {
+            (Some(i), _) => i.to_string(),
+            (None, Some(f)) if f.fract() == 0.0 && f.abs() < 9e15 => format!("{}", f as i64),
+            _ => n.to_string(),
+        }),
+        Value::Array(items) => Some(items.iter().filter_map(custom_field_to_string).collect::<Vec<_>>().join(", ")),
+        Value::Object(_) if is_adf_document(value) => Some(parse_adf(value)),
+        Value::Object(obj) => ["value", "name", "displayName", "key", "id"].iter()
+            .find_map(|k| obj.get(*k))
+            .and_then(custom_field_to_string),
+    }
+}
+
+/// Guesses how to write a field from the value Jira currently holds in it.
+fn infer_field_kind(value: &serde_json::Value) -> Option<FieldKind> {
+    use serde_json::Value;
+    match value {
+        Value::Null => None,
+        Value::String(_) => Some(FieldKind::Text),
+        Value::Number(_) => Some(FieldKind::Number),
+        Value::Bool(_) => Some(FieldKind::Bool),
+        Value::Array(items) => items.first().and_then(infer_field_kind),
+        Value::Object(_) if is_adf_document(value) => Some(FieldKind::Doc),
+        Value::Object(obj) if obj.contains_key("value") => Some(FieldKind::Option),
+        Value::Object(obj) if obj.contains_key("name") => Some(FieldKind::Named),
+        Value::Object(_) => Some(FieldKind::Text),
+    }
+}
+
+/// The value written to a Jira field for a local property. The shape follows the type
+/// given in the mapping, else the field's current value, else plain text. An empty
+/// property clears the field; a multi-value field takes a comma separated list.
+fn custom_field_payload(mapping: &FieldMapping, current: Option<&serde_json::Value>, local: &str) -> Result<serde_json::Value, String> {
+    use serde_json::Value;
+    if local.trim().is_empty() {
+        return Ok(Value::Null);
+    }
+    let kind = mapping.kind.or_else(|| current.and_then(infer_field_kind)).unwrap_or(FieldKind::Text);
+    if let Some(Value::Array(_)) = current {
+        return local.split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(|part| scalar_payload(mapping, kind, part))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array);
+    }
+    scalar_payload(mapping, kind, local)
+}
+
+fn scalar_payload(mapping: &FieldMapping, kind: FieldKind, local: &str) -> Result<serde_json::Value, String> {
+    let bad = |expected: &str| format!("Property '{}' must be {expected} to be pushed to Jira field {}, got '{local}'", mapping.property, mapping.field);
+    Ok(match kind {
+        FieldKind::Text => serde_json::json!(local),
+        FieldKind::Doc => format_adf(local),
+        FieldKind::Number => match local.parse::<i64>() {
+            Ok(i) => serde_json::json!(i),
+            Err(_) => serde_json::json!(local.parse::<f64>().map_err(|_| bad("a number"))?),
+        },
+        FieldKind::Bool => match local.to_ascii_lowercase().as_str() {
+            "true" | "yes" | "1" => serde_json::json!(true),
+            "false" | "no" | "0" => serde_json::json!(false),
+            _ => return Err(bad("true or false")),
+        },
+        FieldKind::Option => serde_json::json!({"value": local}),
+        FieldKind::Named => serde_json::json!({"name": local}),
+    })
+}
+
+/// The mapped custom fields to send when creating an issue. Without a current value to
+/// learn the shape from, a mapping needs an explicit type for anything but text.
+fn custom_fields_for_create(properties: &HashMap<String, String>, mappings: &[FieldMapping]) -> Result<Vec<(String, serde_json::Value)>, String> {
+    let mut fields = vec![];
+    for mapping in mappings {
+        if let Some(value) = properties.get(&mapping.property).filter(|v| !v.trim().is_empty()) {
+            fields.push((mapping.field.clone(), custom_field_payload(mapping, None, value)?));
+        }
+    }
+    Ok(fields)
 }
 
 fn parse_creator(creator: &serde_json::Value) -> String {
@@ -1168,14 +1561,24 @@ mod tests {
             summary: Some(summary.to_string()),
             description: description.to_string(),
             labels: labels.iter().map(|l| l.to_string()).collect(),
+            custom: HashMap::new(),
         }
+    }
+
+    fn no_custom_fields() -> (HashMap<String, String>, Vec<FieldMapping>) {
+        (HashMap::new(), vec![])
+    }
+
+    fn props(entries: &[(&str, &str)]) -> HashMap<String, String> {
+        entries.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }
 
     #[test]
     fn test_update_sends_nothing_when_only_the_status_changed() {
         let remote = current("Title", "# Heading\n\n- a list", &["bug"]);
         let labels = vec![Label::new("bug".to_string(), None, None)];
-        let fields = changed_fields(&remote, "Title", "# Heading\n\n- a list", Some(&labels));
+        let (properties, mappings) = no_custom_fields();
+        let fields = changed_fields(&remote, "Title", "# Heading\n\n- a list", Some(&labels), &properties, &mappings).unwrap();
         assert!(fields.is_empty(), "an unchanged description must never be written back: {fields:?}");
     }
 
@@ -1184,13 +1587,14 @@ mod tests {
         let remote = current("Title", "body", &["bug"]);
         let labels = vec![Label::new("bug".to_string(), None, None), Label::new("ui".to_string(), None, None)];
 
-        let fields = changed_fields(&remote, "New title", "body", Some(&labels));
+        let (properties, mappings) = no_custom_fields();
+        let fields = changed_fields(&remote, "New title", "body", Some(&labels), &properties, &mappings).unwrap();
         assert_eq!(fields.len(), 2);
         assert_eq!(fields["summary"], serde_json::json!("New title"));
         assert_eq!(fields["labels"], serde_json::json!(["bug", "ui"]));
         assert!(!fields.contains_key("description"));
 
-        let fields = changed_fields(&remote, "Title", "edited body", None);
+        let fields = changed_fields(&remote, "Title", "edited body", None, &properties, &mappings).unwrap();
         assert_eq!(fields.len(), 1);
         assert_eq!(fields["description"], format_adf("edited body"));
     }
@@ -1199,7 +1603,217 @@ mod tests {
     fn test_update_ignores_label_order() {
         let remote = current("Title", "body", &["ui", "bug"]);
         let labels = vec![Label::new("bug".to_string(), None, None), Label::new("ui".to_string(), None, None)];
-        assert!(changed_fields(&remote, "Title", "body", Some(&labels)).is_empty());
+        let (properties, mappings) = no_custom_fields();
+        assert!(changed_fields(&remote, "Title", "body", Some(&labels), &properties, &mappings).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_parse_field_mappings() {
+        let mappings = parse_field_mappings(" points = customfield_10016:number, team=customfield_10001 ,, due=duedate:text").unwrap();
+        assert_eq!(mappings, vec![
+            FieldMapping { property: "points".to_string(), field: "customfield_10016".to_string(), kind: Some(FieldKind::Number) },
+            FieldMapping { property: "team".to_string(), field: "customfield_10001".to_string(), kind: None },
+            FieldMapping { property: "due".to_string(), field: "duedate".to_string(), kind: Some(FieldKind::Text) },
+        ]);
+        assert_eq!(parse_field_mappings("").unwrap(), vec![]);
+    }
+
+    #[test]
+    fn test_parse_field_mappings_rejects_bad_entries() {
+        for spec in ["points", "=customfield_1", "points=", "points=customfield_1:money", "name=customfield_1", "a=customfield_1,a=customfield_2", "a=customfield_1,b=customfield_1"] {
+            let error = parse_field_mappings(spec).unwrap_err();
+            assert!(error.starts_with("Invalid Jira field mapping"), "{spec}: {error}");
+        }
+    }
+
+    #[test]
+    fn test_custom_field_values_become_text() {
+        assert_eq!(custom_field_to_string(&serde_json::json!(null)), None);
+        assert_eq!(custom_field_to_string(&serde_json::json!("plain")), Some("plain".to_string()));
+        assert_eq!(custom_field_to_string(&serde_json::json!(5.0)), Some("5".to_string()));
+        assert_eq!(custom_field_to_string(&serde_json::json!(2.5)), Some("2.5".to_string()));
+        assert_eq!(custom_field_to_string(&serde_json::json!(true)), Some("true".to_string()));
+        assert_eq!(custom_field_to_string(&serde_json::json!({"self": "...", "value": "Backend", "id": "10100"})), Some("Backend".to_string()));
+        assert_eq!(custom_field_to_string(&serde_json::json!({"accountId": "x", "displayName": "Alice"})), Some("Alice".to_string()));
+        assert_eq!(custom_field_to_string(&serde_json::json!([{"value": "a"}, {"value": "b"}])), Some("a, b".to_string()));
+        assert_eq!(custom_field_to_string(&serde_json::json!([])), Some(String::new()));
+        let doc = format_adf("**bold** text");
+        assert_eq!(custom_field_to_string(&doc), Some("**bold** text".to_string()), "paragraph fields are converted like descriptions");
+    }
+
+    #[test]
+    fn test_pulled_issue_fields_fill_the_mapped_properties() {
+        let mappings = parse_field_mappings("points=customfield_10016,team=customfield_10001,empty=customfield_10002").unwrap();
+        let fields: HashMap<String, serde_json::Value> = serde_json::from_value(serde_json::json!({
+            "summary": "Title",
+            "customfield_10016": 3,
+            "customfield_10001": {"value": "Core"},
+            "customfield_10002": null,
+        })).unwrap();
+        let mut collected = HashMap::new();
+        insert_custom_properties(&mut collected, &fields, &mappings);
+        assert_eq!(collected, props(&[("points", "3"), ("team", "Core")]));
+    }
+
+    #[test]
+    fn test_update_sends_only_the_changed_custom_fields() {
+        let mut remote = current("Title", "body", &[]);
+        remote.custom = HashMap::from([
+            ("customfield_10016".to_string(), serde_json::json!(3.0)),
+            ("customfield_10001".to_string(), serde_json::json!({"value": "Core", "id": "1"})),
+            ("customfield_10002".to_string(), serde_json::json!(null)),
+            ("customfield_10003".to_string(), serde_json::json!([{"value": "a"}, {"value": "b"}])),
+        ]);
+        let mappings = parse_field_mappings("points=customfield_10016,team=customfield_10001,note=customfield_10002,tags=customfield_10003,untouched=customfield_10004").unwrap();
+
+        let unchanged = props(&[("points", "3"), ("team", "Core"), ("tags", "a, b")]);
+        assert!(changed_fields(&remote, "Title", "body", None, &unchanged, &mappings).unwrap().is_empty(), "equal values must not be written back");
+
+        let edited = props(&[("points", "5"), ("team", "Platform"), ("note", "hello"), ("tags", "b, c")]);
+        let fields = changed_fields(&remote, "Title", "body", None, &edited, &mappings).unwrap();
+        assert_eq!(fields.len(), 4, "{fields:?}");
+        assert_eq!(fields["customfield_10016"], serde_json::json!(5), "the number shape is learnt from the current value");
+        assert_eq!(fields["customfield_10001"], serde_json::json!({"value": "Platform"}), "options are set by value");
+        assert_eq!(fields["customfield_10002"], serde_json::json!("hello"), "an empty field with no type is written as text");
+        assert_eq!(fields["customfield_10003"], serde_json::json!([{"value": "b"}, {"value": "c"}]), "multi-select lists are split on commas");
+
+        let cleared = props(&[("team", "")]);
+        let fields = changed_fields(&remote, "Title", "body", None, &cleared, &mappings).unwrap();
+        assert_eq!(fields["customfield_10001"], serde_json::json!(null), "an empty property clears the field");
+    }
+
+    #[test]
+    fn test_explicit_field_types_win_and_are_validated() {
+        let mappings = parse_field_mappings("points=customfield_1:number,flag=customfield_2:bool,team=customfield_3:option,prio=customfield_4:name,notes=customfield_5:doc").unwrap();
+        let remote = current("Title", "body", &[]);
+
+        let fields = changed_fields(&remote, "Title", "body", None, &props(&[("points", "2.5"), ("flag", "yes"), ("team", "Core"), ("prio", "High"), ("notes", "# Head")]), &mappings).unwrap();
+        assert_eq!(fields["customfield_1"], serde_json::json!(2.5));
+        assert_eq!(fields["customfield_2"], serde_json::json!(true));
+        assert_eq!(fields["customfield_3"], serde_json::json!({"value": "Core"}));
+        assert_eq!(fields["customfield_4"], serde_json::json!({"name": "High"}));
+        assert_eq!(fields["customfield_5"], format_adf("# Head"));
+
+        let error = changed_fields(&remote, "Title", "body", None, &props(&[("points", "many")]), &mappings).unwrap_err();
+        assert!(error.contains("points") && error.contains("customfield_1") && error.contains("many"), "{error}");
+        assert!(changed_fields(&remote, "Title", "body", None, &props(&[("flag", "maybe")]), &mappings).is_err());
+    }
+
+    #[test]
+    fn test_create_sends_the_mapped_properties_that_are_set() {
+        let mappings = parse_field_mappings("points=customfield_1:number,team=customfield_2,blank=customfield_3").unwrap();
+        let fields = custom_fields_for_create(&props(&[("points", "8"), ("team", "Core"), ("blank", ""), ("other", "x")]), &mappings).unwrap();
+        let fields: HashMap<String, serde_json::Value> = fields.into_iter().collect();
+        assert_eq!(fields, HashMap::from([
+            ("customfield_1".to_string(), serde_json::json!(8)),
+            ("customfield_2".to_string(), serde_json::json!("Core")),
+        ]));
+    }
+
+    fn catalog_field(id: &str, name: &str, kind: &str, items: Option<&str>, custom_type: Option<&str>) -> jira_v3_openapi::models::FieldDetails {
+        jira_v3_openapi::models::FieldDetails {
+            id: Some(id.to_string()),
+            name: Some(name.to_string()),
+            custom: Some(id.starts_with("customfield_")),
+            schema: Some(Box::new(jira_v3_openapi::models::JsonTypeBean {
+                r#type: kind.to_string(),
+                items: items.map(str::to_string),
+                custom: custom_type.map(|t| format!("com.atlassian.jira.plugin.system.customfieldtypes:{t}")),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }
+    }
+
+    fn sample_catalog() -> Vec<jira_v3_openapi::models::FieldDetails> {
+        vec![
+            catalog_field("summary", "Summary", "string", None, None),
+            catalog_field("customfield_10016", "Story point estimate", "number", None, Some("float")),
+            catalog_field("customfield_10001", "Team", "option", None, Some("select")),
+            catalog_field("customfield_10002", "Flagged", "array", Some("option"), Some("multicheckboxes")),
+            catalog_field("customfield_10003", "Acceptance Criteria", "string", None, Some("textarea")),
+            catalog_field("customfield_10004", "Reviewer", "user", None, Some("userpicker")),
+            catalog_field("customfield_10005", "Rank", "string", None, Some("gh-lexo-rank")),
+            catalog_field("customfield_10006", "Status", "string", None, Some("textfield")),
+            catalog_field("customfield_10007", "Team", "string", None, Some("textfield")),
+            catalog_field("customfield_10008", "Fix Versions (custom)", "array", Some("version"), Some("multiversion")),
+            catalog_field("customfield_10009", "Unused", "number", None, Some("float")),
+        ]
+    }
+
+    #[test]
+    fn test_build_field_mappings_names_and_types_the_used_custom_fields() {
+        let used: Vec<String> = (1..=8).map(|n| format!("customfield_1000{n}")).chain(["customfield_10016".to_string()]).collect();
+
+        let mappings = build_field_mappings(&sample_catalog(), Some(&used));
+
+        assert_eq!(format_field_mappings(&mappings), "acceptance_criteria=customfield_10003:doc,fix_versions_custom=customfield_10008:name,flagged=customfield_10002:option,status_10006=customfield_10006:string,story_point_estimate=customfield_10016:number,team=customfield_10001:option,team_10007=customfield_10007:string");
+        assert!(mappings.iter().all(|m| m.field != "customfield_10004"), "user fields cannot be written by value and are skipped");
+        assert!(mappings.iter().all(|m| m.field != "customfield_10005"), "the rank is noise");
+        assert!(mappings.iter().all(|m| m.field != "customfield_10009"), "fields without a value on any issue are skipped");
+    }
+
+    #[test]
+    fn test_property_names_do_not_depend_on_the_fields_in_use() {
+        let only_second_team = build_field_mappings(&sample_catalog(), Some(&["customfield_10007".to_string()]));
+        assert_eq!(format_field_mappings(&only_second_team), "team_10007=customfield_10007:string", "the name is the same as when both Team fields are in use");
+
+        let everything = build_field_mappings(&sample_catalog(), None);
+        assert_eq!(everything.len(), 8, "every writable custom field of the catalog: {everything:?}");
+        assert!(everything.iter().any(|m| m.field == "customfield_10009"), "unused fields are included when no usage is given");
+    }
+
+    #[test]
+    fn test_formatted_mappings_parse_back() {
+        let mappings = build_field_mappings(&sample_catalog(), Some(&["customfield_10016".to_string(), "customfield_10001".to_string()]));
+        assert_eq!(parse_field_mappings(&format_field_mappings(&mappings)).unwrap(), mappings);
+        let untyped = vec![FieldMapping { property: "a".to_string(), field: "customfield_1".to_string(), kind: None }];
+        assert_eq!(format_field_mappings(&untyped), "a=customfield_1");
+    }
+
+    #[test]
+    fn test_property_names_come_from_field_names() {
+        assert_eq!(property_name("Story point estimate"), "story_point_estimate");
+        assert_eq!(property_name("  Épic -- Link!"), "épic_link");
+        assert_eq!(property_name("???"), "field");
+    }
+
+    #[test]
+    fn test_discover_field_mappings_uses_the_fields_with_values_on_the_issues() {
+        let (config, requests) = stub_jira(|method, path| match (method, path) {
+            ("GET", "/rest/api/3/field") => (200, r#"[
+                {"id":"customfield_10016","name":"Story point estimate","custom":true,"schema":{"type":"number","custom":"com.atlassian.jira.plugin.system.customfieldtypes:float","customId":10016}},
+                {"id":"customfield_10001","name":"Team","custom":true,"schema":{"type":"option","custom":"com.atlassian.jira.plugin.system.customfieldtypes:select","customId":10001}},
+                {"id":"customfield_10009","name":"Unused","custom":true,"schema":{"type":"number","custom":"com.atlassian.jira.plugin.system.customfieldtypes:float","customId":10009}},
+                {"id":"summary","name":"Summary","custom":false,"schema":{"type":"string","system":"summary"}}
+            ]"#.to_string()),
+            _ => (404, String::new()),
+        });
+        let first: HashMap<String, serde_json::Value> = serde_json::from_value(serde_json::json!({"summary": "A", "customfield_10016": 3, "customfield_10001": null, "customfield_10009": null})).unwrap();
+        let second: HashMap<String, serde_json::Value> = serde_json::from_value(serde_json::json!({"summary": "B", "customfield_10016": null, "customfield_10001": {"value": "Core"}})).unwrap();
+
+        let mappings = RUNTIME.block_on(discover_field_mappings(&config, &[&first, &second])).unwrap();
+
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /rest/api/3/field"]);
+        assert_eq!(format_field_mappings(&mappings), "story_point_estimate=customfield_10016:number,team=customfield_10001:option");
+    }
+
+    #[test]
+    fn test_fetch_current_fields_requests_and_keeps_the_mapped_fields() {
+        let (config, requests) = stub_jira(|method, path| match (method, path) {
+            ("GET", "/rest/api/3/issue/ABC-1") => (200, r#"{"fields":{"summary":"Title","labels":["bug"],"customfield_10016":5,"customfield_10001":{"value":"Core"}}}"#.to_string()),
+            _ => (404, String::new()),
+        });
+        let mappings = parse_field_mappings("points=customfield_10016,team=customfield_10001,missing=customfield_10099").unwrap();
+
+        let current = RUNTIME.block_on(fetch_current_fields(&config, "ABC-1", &mappings)).unwrap();
+
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /rest/api/3/issue/ABC-1"]);
+        assert_eq!(current.summary.as_deref(), Some("Title"));
+        assert_eq!(current.custom, HashMap::from([
+            ("customfield_10016".to_string(), serde_json::json!(5)),
+            ("customfield_10001".to_string(), serde_json::json!({"value": "Core"})),
+        ]), "fields Jira did not return are simply absent");
     }
 
     #[test]

@@ -614,6 +614,39 @@ enum ConfigCommand {
         #[command(subcommand)]
         subcommand: ConnectorsCommand,
     },
+    /// Custom fields of the remote project (e.g. Jira) synchronized as task properties
+    Fields {
+        #[command(subcommand)]
+        subcommand: FieldsCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum FieldsCommand {
+    /// Show the custom fields in use on the remote project and their task properties
+    List {
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira, redmine)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
+        /// Use this project if the connector manages several (e.g. Jira)
+        #[arg(long)]
+        project: Option<String>,
+    },
+    /// Save the discovered mapping to the connector's config option (e.g. task.jira.fields)
+    Save {
+        /// Use this remote if there are several of them
+        #[arg(short, long)]
+        remote: Option<String>,
+        /// Use this remote connector (github, gitlab, jira, redmine)
+        #[arg(long = "connector", aliases = ["conn"])]
+        connector_type: Option<String>,
+        /// Use this project if the connector manages several (e.g. Jira)
+        #[arg(long)]
+        project: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -897,6 +930,14 @@ fn task_config(subcommand: ConfigCommand) -> bool {
         ConfigCommand::Status { subcommand } => task_config_status(subcommand),
         ConfigCommand::Properties { subcommand } => task_config_properties(subcommand),
         ConfigCommand::Connectors { subcommand } => task_config_connectors(subcommand),
+        ConfigCommand::Fields { subcommand } => task_config_fields(subcommand),
+    }
+}
+
+fn task_config_fields(subcommand: FieldsCommand) -> bool {
+    match subcommand {
+        FieldsCommand::List { remote, connector_type, project } => task_config_fields_list(&remote, &connector_type, &project),
+        FieldsCommand::Save { remote, connector_type, project } => task_config_fields_save(&remote, &connector_type, &project),
     }
 }
 

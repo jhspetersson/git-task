@@ -492,6 +492,23 @@ We also recommend setting up statuses as they are organized in Jira.
 
 Subtasks are synchronized as Jira sub-tasks: a local subtask is created as an issue with `issuetype = "Sub-task"` and a `parent` pointing to the task's issue key.
 
+### Custom fields
+
+Jira custom fields are synchronized as task properties. By default, the mapping is discovered from Jira on every pull and push: each custom field becomes a property named after the field (`Story point estimate` becomes `story_point_estimate`), typed from the field schema. Pulling fills the properties from the fields that hold a value; pushing writes a property back when it differs from Jira, and an empty property clears the field. A property missing locally leaves the field alone, and a field that is empty in Jira leaves the local property alone.
+
+See which custom fields are in use in the project, and pin the mapping so that it no longer depends on the Jira field catalog:
+
+    git task config fields list
+    git task config fields save
+
+`save` writes the discovered mapping to `task.jira.fields`, where it can be trimmed or edited by hand (`--project` selects the project when several are configured). Once this option is set, only the listed fields are synchronized. The format is a comma separated list of `property=field[:type]`:
+
+    git task config set task.jira.fields "points=customfield_10016:number,team=customfield_10001:option,notes=customfield_10200:doc"
+
+The type says how a value is written when Jira holds no value to learn the shape from (a new issue, or a field that is empty). Supported types: `string` (default), `number`, `bool`, `option` (single or multi select, by option value), `name` (priorities, versions, components, by name) and `doc` (paragraph fields, converted from markdown like the description). Values of select lists and other objects are read as their displayed value; multi-value fields become a comma separated list.
+
+Fields that cannot be written back by value (users, cascading selects, sprints, the rank) are not discovered. Mapping one by hand as `string` still reads it, but a changed value will be rejected by Jira on push.
+
 ### Several Jira projects in one repository
 
 List every project you want to manage:

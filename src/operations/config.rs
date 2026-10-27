@@ -55,6 +55,15 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool, forc
                 Err(e) => error_message(format!("ERROR: {e}"))
             }
         },
+        "task.jira.fields" => {
+            if let Err(e) = crate::connectors::jira::parse_field_mappings(&value) {
+                return error_message(format!("ERROR: {e}"));
+            }
+            match gittask::set_config_value(&param, &value) {
+                Ok(_) => success_message(format!("{param} has been updated")),
+                Err(e) => error_message(format!("ERROR: {e}"))
+            }
+        },
         "task.list.columns" => {
             match gittask::set_config_value(&param, &value) {
                 Ok(_) => success_message(format!("{param} has been updated")),
@@ -232,6 +241,46 @@ mod tests {
 pub(crate) fn task_config_list() -> bool {
     let from_connectors = get_config_options_from_connectors().join("\n");
     success_message("task.list.columns\ntask.list.show.headers\ntask.list.sort\ntask.status.open\ntask.status.in_progress\ntask.status.closed\ntask.default.connector\ntask.ref\n".to_string() + &from_connectors)
+}
+
+/// Shows the custom fields in use on the remote project and how they map to task properties.
+pub(crate) fn task_config_fields_list(remote: &Option<String>, connector_type: &Option<String>, project: &Option<String>) -> bool {
+    let (connector, user, repo) = match crate::operations::get_user_repo(remote, connector_type, project) {
+        Ok(target) => target,
+        Err(e) => return error_message(format!("ERROR: {e}")),
+    };
+    match connector.discover_remote_fields(&user, &repo) {
+        Ok(fields) if fields.is_empty() => success_message(format!("No custom fields with values found in {repo}")),
+        Ok(fields) => {
+            let width = fields.iter().map(|f| f.property.len()).max().unwrap_or(0);
+            let lines: Vec<String> = fields.iter().map(|f| format!("{:<width$}  {}:{}  ({})", f.property, f.id, f.kind, f.name)).collect();
+            success_message(lines.join("\n"))
+        },
+        Err(e) => error_message(format!("ERROR: {e}")),
+    }
+}
+
+/// Saves the discovered custom field mapping to the connector's config option, so that
+/// it no longer depends on the remote field catalog and can be edited by hand.
+pub(crate) fn task_config_fields_save(remote: &Option<String>, connector_type: &Option<String>, project: &Option<String>) -> bool {
+    let (connector, user, repo) = match crate::operations::get_user_repo(remote, connector_type, project) {
+        Ok(target) => target,
+        Err(e) => return error_message(format!("ERROR: {e}")),
+    };
+    let Some(option) = connector.fields_config_option() else {
+        return error_message(format!("ERROR: Custom fields are not supported for {}", connector.type_name()));
+    };
+    match connector.discover_remote_fields(&user, &repo) {
+        Ok(fields) if fields.is_empty() => error_message(format!("No custom fields with values found in {repo}, nothing to save")),
+        Ok(fields) => {
+            let value = fields.iter().map(|f| format!("{}={}:{}", f.property, f.id, f.kind)).collect::<Vec<_>>().join(",");
+            match gittask::set_config_value(&option, &value) {
+                Ok(_) => success_message(format!("{option} has been set to:\n{value}")),
+                Err(e) => error_message(format!("ERROR: {e}")),
+            }
+        },
+        Err(e) => error_message(format!("ERROR: {e}")),
+    }
 }
 
 pub(crate) fn task_config_connectors_list(name: Option<String>) -> bool {

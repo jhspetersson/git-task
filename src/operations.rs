@@ -695,6 +695,11 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool,
                 Some(remote_project) => local_task.get_property("project_id") == Some(remote_project),
                 None => true,
             };
+            // Any other property the connector reports (e.g. mapped Jira custom fields) is taken from the remote.
+            let extra_properties: Vec<(&String, &String)> = remote_task.get_all_properties().iter()
+                .filter(|(key, _)| !CONNECTOR_MANAGED_PROPERTIES.contains(&key.as_str()))
+                .collect();
+            let extra_equal = extra_properties.iter().all(|(key, value)| local_task.get_property(key) == Some(value));
 
             if local_task.get_property("name") == remote_task.get_property("name")
                 && local_task.get_property("description") == remote_task.get_property("description")
@@ -702,7 +707,8 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool,
                 && (no_comments || comments_are_equal(local_task.get_comments(), remote_task.get_comments()))
                 && subtasks_equal
                 && labels_equal
-                && project_equal {
+                && project_equal
+                && extra_equal {
                 Ok(None)
             } else {
                 local_task.set_property("name", remote_task.get_property("name").map(String::as_str).unwrap_or(""));
@@ -710,6 +716,9 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool,
                 local_task.set_property("status", remote_task.get_property("status").map(String::as_str).unwrap_or(""));
                 if let Some(remote_project) = remote_task.get_property("project_id") {
                     local_task.set_property("project_id", remote_project);
+                }
+                for (key, value) in extra_properties {
+                    local_task.set_property(key, value);
                 }
                 if !no_comments {
                     if let Some(comments) = remote_task.get_comments() {
@@ -730,6 +739,10 @@ fn import_remote_task(remote_task: Task, no_comments: bool, with_subtasks: bool,
         Err(e) => Err(e)
     }
 }
+
+/// Properties `import_remote_task` handles explicitly, or deliberately keeps local
+/// (`created` and `author` describe the local task, not the remote issue).
+const CONNECTOR_MANAGED_PROPERTIES: [&str; 6] = ["name", "description", "status", "project_id", "created", "author"];
 
 fn label_names(labels: &Option<Vec<Label>>) -> Vec<String> {
     let mut names = labels.as_ref().map(|labels| labels.iter().map(|l| l.get_name()).collect::<Vec<_>>()).unwrap_or_default();
@@ -2483,6 +2496,41 @@ mod tests {
         assert_eq!(subtasks[0].get_property("estimate").map(String::as_str), Some("3d"), "a property the connector does not manage must survive the pull");
         assert_eq!(subtasks[0].get_property("owner").map(String::as_str), Some("alice"));
         assert_eq!(subtasks[0].get_property("created").map(String::as_str), Some("123"), "properties the remote provides are taken from it");
+    }
+
+    #[test]
+    fn test_import_remote_task_takes_extra_remote_properties_and_keeps_local_ones() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap();
+        local.set_property("points", "3");
+        local.set_property("owner", "alice");
+        local.set_property("created", "100");
+        let id = gittask::create_task(local).unwrap().get_id().unwrap();
+        let mut remote = gittask::find_task(&id).unwrap().unwrap();
+        remote.set_property("points", "5");
+        remote.set_property("team", "Core");
+        remote.set_property("created", "999");
+        remote.delete_property("owner");
+
+        let merged = import_remote_task(remote, true, false, false).unwrap().expect("a changed custom field is a remote change");
+
+        assert_eq!(merged.get_property("points").map(String::as_str), Some("5"), "a property the connector reports is taken from the remote");
+        assert_eq!(merged.get_property("team").map(String::as_str), Some("Core"), "a new remote property is added");
+        assert_eq!(merged.get_property("owner").map(String::as_str), Some("alice"), "a property the remote does not know survives");
+        assert_eq!(merged.get_property("created").map(String::as_str), Some("100"), "the local creation time is kept");
+    }
+
+    #[test]
+    fn test_import_remote_task_reports_nothing_to_do_when_extra_remote_properties_match() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap();
+        local.set_property("points", "3");
+        local.set_property("owner", "alice");
+        let id = gittask::create_task(local).unwrap().get_id().unwrap();
+        let mut remote = gittask::find_task(&id).unwrap().unwrap();
+        remote.delete_property("owner");
+
+        assert!(import_remote_task(remote, true, false, false).unwrap().is_none());
     }
 
     #[test]

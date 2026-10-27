@@ -17,6 +17,15 @@ pub enum RemoteTaskState {
     Closed(String, String),
 }
 
+/// A custom field of a remote project, as it is mapped to a task property.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoteField {
+    pub property: String,
+    pub id: String,
+    pub kind: String,
+    pub name: String,
+}
+
 pub trait RemoteConnector {
     fn type_name(&self) -> &str;
     fn get_config_options(&self) -> Option<Vec<String>> {
@@ -53,6 +62,17 @@ pub trait RemoteConnector {
 
     fn supports_labels(&self) -> bool {
         true
+    }
+
+    /// The config option holding the custom field mapping (`property=field:type,...`).
+    fn fields_config_option(&self) -> Option<String> {
+        None
+    }
+
+    /// The custom fields in use on the remote project that can be synchronized as task properties.
+    #[allow(unused)]
+    fn discover_remote_fields(&self, user: &String, repo: &String) -> Result<Vec<RemoteField>, String> {
+        Err(format!("Custom fields are not supported for {}", self.type_name()))
     }
 
     #[allow(unused)]
