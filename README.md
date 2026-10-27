@@ -509,7 +509,7 @@ In this mode local task IDs are full Jira issue keys (`GTPM-42`), so tasks from 
 
 Without `--project`, new tasks go to the default project: `task.jira.project`, then the project from `task.jira.url`, then the first entry of `task.jira.projects`.
 
-Tasks pulled before enabling this mode have numeric IDs that belong to the default project. Rename them in one go when switching:
+Tasks pulled before enabling this mode have numeric IDs that belong to the default project. Rename them, together with their numeric subtask IDs, in one go when switching:
 
     git task config set task.jira.projects GTPM,OPS,DOCS --rename-tasks
 

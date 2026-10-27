@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use crate::connectors::{get_config_options_from_connectors, get_matching_remote_connectors};
 use crate::operations::DEFAULT_LIST_COLUMNS;
 use crate::status::StatusManager;
@@ -46,7 +48,7 @@ pub(crate) fn task_config_set(param: String, value: String, move_ref: bool, forc
                     if rename_tasks {
                         rename_numeric_tasks_with_jira_project()
                     } else {
-                        println!("NOTE: Jira tasks are now identified by their full issue key (e.g. ABC-42). Run with --rename-tasks to prefix existing numeric task IDs with the default project.");
+                        println!("NOTE: Jira tasks are now identified by their full issue key (e.g. ABC-42). Run with --rename-tasks to prefix existing numeric task and subtask IDs with the default project.");
                         true
                     }
                 },
@@ -120,31 +122,110 @@ fn rename_numeric_tasks_with_jira_project() -> bool {
         None => return error_message("No default Jira project found: set task.jira.project, a project URL in task.jira.url or task.jira.projects".to_string()),
     };
 
-    match gittask::list_tasks() {
-        Ok(tasks) => {
-            let mut renamed = 0;
-            let mut success = true;
-            for task in tasks {
-                let id = match task.get_id() {
-                    Some(id) if !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()) => id,
-                    _ => continue,
-                };
-                let new_id = format!("{project}-{id}");
-                match gittask::update_task_id(&id, &new_id, false) {
-                    Ok(_) => {
-                        println!("Task ID {id} -> {new_id} updated");
-                        renamed += 1;
-                    },
-                    Err(e) => {
-                        eprintln!("ERROR: {e}");
-                        success = false;
-                    }
-                }
+    let tasks = match gittask::list_tasks() {
+        Ok(tasks) => tasks,
+        Err(e) => return error_message(format!("ERROR: {e}")),
+    };
+
+    let existing: HashSet<String> = tasks.iter().filter_map(|task| task.get_id()).collect();
+    let mut to_write = vec![];
+    let mut old_ids = vec![];
+    let mut renamed_subtasks = 0;
+    for mut task in tasks {
+        let id = task.get_id().unwrap_or_default();
+        let mut changed = false;
+        if let Some(new_id) = prefixed_jira_id(&project, &id) {
+            if existing.contains(&new_id) {
+                return error_message(format!("ERROR: Task ID {new_id} already exists, task ID {id} can't be renamed"));
             }
-            println!("{renamed} task(s) renamed");
-            success
-        },
-        Err(e) => error_message(format!("ERROR: {e}")),
+            println!("Task ID {id} -> {new_id} updated");
+            old_ids.push(id.clone());
+            task.set_id(new_id);
+            changed = true;
+        }
+        if let Some(subtasks) = task.get_subtasks().clone() {
+            let renamed = subtasks.into_iter().map(|mut subtask| {
+                if let Some(new_id) = subtask.get_id().and_then(|subtask_id| prefixed_jira_id(&project, &subtask_id)) {
+                    subtask.set_id(new_id);
+                    renamed_subtasks += 1;
+                    changed = true;
+                }
+                subtask
+            }).collect::<Vec<_>>();
+            let mut seen = HashSet::new();
+            if let Some(duplicate) = renamed.iter().filter_map(|subtask| subtask.get_id()).find(|subtask_id| !seen.insert(subtask_id.clone())) {
+                return error_message(format!("ERROR: Subtask ID {duplicate} already exists in task ID {id}, its subtasks can't be renamed"));
+            }
+            task.set_subtasks(renamed);
+        }
+        if changed {
+            to_write.push(task);
+        }
+    }
+
+    let renamed = old_ids.len();
+    if let Err(e) = gittask::update_tasks(to_write) {
+        return error_message(format!("ERROR: {e}"));
+    }
+    if !old_ids.is_empty() {
+        if let Err(e) = gittask::delete_tasks(&old_ids.iter().map(String::as_str).collect::<Vec<_>>()) {
+            return error_message(format!("ERROR: {e}"));
+        }
+    }
+    println!("{renamed} task(s) and {renamed_subtasks} subtask(s) renamed");
+    true
+}
+
+fn prefixed_jira_id(project: &str, id: &str) -> Option<String> {
+    (!id.is_empty() && id.chars().all(|c| c.is_ascii_digit())).then(|| format!("{project}-{id}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    fn subtask_ids(task: &gittask::Task) -> Vec<String> {
+        task.get_subtasks().as_ref().unwrap().iter().filter_map(|s| s.get_id()).collect()
+    }
+
+    #[test]
+    fn test_rename_tasks_prefixes_subtask_ids_along_with_parent_ids() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut parent = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        parent.add_subtask(Some("2".to_string()), "Child".to_string(), "OPEN".to_string(), HashMap::from([("priority".to_string(), "high".to_string())])).unwrap();
+        parent.add_subtask(Some("OTHER-9".to_string()), "Foreign child".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        let parent_id = gittask::create_task(parent).unwrap().get_id().unwrap();
+        let mut prefixed = gittask::Task::new("Already prefixed".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        prefixed.set_id("TEST-50".to_string());
+        prefixed.add_subtask(Some("3".to_string()), "Child".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        gittask::create_task(prefixed).unwrap();
+
+        assert!(task_config_set("task.jira.projects".to_string(), "TEST,OTHER".to_string(), false, false, true));
+
+        assert!(gittask::find_task(&parent_id).unwrap().is_none(), "the numeric task must be gone");
+        let parent = gittask::find_task(&format!("TEST-{parent_id}")).unwrap().unwrap();
+        assert_eq!(subtask_ids(&parent), vec!["TEST-2".to_string(), "OTHER-9".to_string()], "numeric subtask IDs get the prefix, issue keys are kept");
+        assert_eq!(parent.get_subtasks().as_ref().unwrap()[0].get_property("priority"), Some(&"high".to_string()), "subtask properties must survive");
+
+        let prefixed = gittask::find_task(&"TEST-50".to_string()).unwrap().unwrap();
+        assert_eq!(subtask_ids(&prefixed), vec!["TEST-3".to_string()], "subtasks of an already prefixed task are migrated too");
+    }
+
+    #[test]
+    fn test_rename_tasks_is_a_single_batch_that_refuses_collisions() {
+        let _repo = gittask::testing::TestRepo::new();
+        let numeric = gittask::Task::new("Numeric".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        let numeric_id = gittask::create_task(numeric).unwrap().get_id().unwrap();
+        let mut colliding = gittask::Task::new("Colliding".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        colliding.set_id(format!("TEST-{numeric_id}"));
+        gittask::create_task(colliding).unwrap();
+
+        assert!(!task_config_set("task.jira.projects".to_string(), "TEST".to_string(), false, false, true));
+
+        assert_eq!(gittask::find_task(&numeric_id).unwrap().unwrap().get_property("name").unwrap(), "Numeric", "nothing is renamed when any ID collides");
+        assert_eq!(gittask::find_task(&format!("TEST-{numeric_id}")).unwrap().unwrap().get_property("name").unwrap(), "Colliding");
     }
 }
 
