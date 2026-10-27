@@ -310,7 +310,7 @@ fn wrap_mark(kind: MarkKind, text: &str, href: Option<&str>) -> String {
     let lead = &text[..text.len() - text.trim_start().len()];
     let trail = &text[text.trim_end().len()..];
     let body = match kind {
-        MarkKind::Link => format!("[{trimmed}]({})", href.unwrap_or("")),
+        MarkKind::Link => format!("[{trimmed}]({})", escape_href(href.unwrap_or(""))),
         MarkKind::Strong => format!("**{trimmed}**"),
         MarkKind::Em => format!("*{trimmed}*"),
         MarkKind::Strike => format!("~~{trimmed}~~"),
@@ -671,7 +671,7 @@ fn parse_inline_into(chars: &[char], marks: &Marks, nodes: &mut Vec<Value>) {
             '[' => {
                 if let Some((label_end, href_end)) = find_link(chars, i) {
                     flush(&mut buf, nodes);
-                    let href: String = chars[label_end + 2..href_end].iter().collect();
+                    let href = unescape_href(&chars[label_end + 2..href_end]);
                     let inner = Marks { link: Some(href), ..marks.clone() };
                     parse_inline_into(&chars[i + 1..label_end], &inner, nodes);
                     i = href_end + 1;
@@ -751,11 +751,53 @@ fn find_link(chars: &[char], start: usize) -> Option<(usize, usize)> {
     if j >= chars.len() || chars.get(j + 1) != Some(&'(') {
         return None;
     }
-    let close = (j + 2..chars.len()).find(|&k| chars[k] == ')' || chars[k] == '\n')?;
-    if chars[close] != ')' || chars[j + 2..close].iter().any(|c| c.is_whitespace()) {
-        return None;
+    let mut depth = 0;
+    let mut k = j + 2;
+    while k < chars.len() {
+        match chars[k] {
+            '\\' if k + 1 < chars.len() && chars[k + 1].is_ascii_punctuation() => k += 1,
+            '(' => depth += 1,
+            ')' if depth == 0 => return Some((j, k)),
+            ')' => depth -= 1,
+            c if c.is_whitespace() => return None,
+            _ => {}
+        }
+        k += 1;
     }
-    Some((j, close))
+    None
+}
+
+fn unescape_href(chars: &[char]) -> String {
+    let mut out = String::with_capacity(chars.len());
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '\\' && i + 1 < chars.len() && chars[i + 1].is_ascii_punctuation() {
+            i += 1;
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
+    out
+}
+
+fn escape_href(href: &str) -> String {
+    let mut depth: i64 = 0;
+    let balanced = href.chars().all(|c| {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            _ => {}
+        }
+        depth >= 0
+    }) && depth == 0;
+    let mut out = String::with_capacity(href.len());
+    for c in href.chars() {
+        if c == '\\' || (!balanced && matches!(c, '(' | ')')) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 fn push_text(nodes: &mut Vec<Value>, text: String, marks: &Marks) {
@@ -972,5 +1014,24 @@ mod tests {
         assert_eq!(blocks.len(), 2, "{adf}");
         assert_eq!(blocks[0]["content"][0], text("```\ncode\n```"));
         assert_eq!(blocks[1], para(vec![text("after")]));
+    }
+
+    #[test]
+    fn test_links_with_balanced_parentheses_in_the_href() {
+        let md = "See [Function](https://en.wikipedia.org/wiki/Function_(math)) (really).";
+        round_trip(md);
+        let adf = markdown_to_adf(md);
+        let content = adf["content"][0]["content"].as_array().unwrap();
+        assert_eq!(content[1], json!({"type": "text", "text": "Function", "marks": [{"type": "link", "attrs": {"href": "https://en.wikipedia.org/wiki/Function_(math)"}}]}));
+        assert_eq!(content[2], text(" (really)."));
+    }
+
+    #[test]
+    fn test_remote_links_with_unbalanced_parentheses_survive_the_round_trip() {
+        for href in ["https://example.com/a)b", "https://example.com/a(b", "https://example.com/x_(y))", "https://example.com/back\\slash"] {
+            let link = json!({"type": "text", "text": "link", "marks": [{"type": "link", "attrs": {"href": href}}]});
+            let adf = doc(vec![para(vec![text("see "), link, text(" now")])]);
+            assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), adf, "{href:?} must survive the round trip");
+        }
     }
 }
