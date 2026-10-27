@@ -643,27 +643,8 @@ impl RemoteConnector for JiraRemoteConnector {
         let config = get_configuration(domain)?;
         let prefixed = multi_project_mode();
 
-        RUNTIME.block_on(async {
-            let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
-                fields: Some(HashMap::from([
-                    ("project".to_string(), serde_json::json!({ "key": project })),
-                    ("parent".to_string(), serde_json::json!({ "key": task_id_to_issue_key(project, task_id) })),
-                    ("summary".to_string(), serde_json::json!(subtask.get_name())),
-                    ("issuetype".to_string(), serde_json::json!({ "name": "Sub-task" })),
-                ])),
-                ..Default::default()
-            };
-
-            match issues_api::create_issue(&config, issue_details, None).await {
-                Ok(response) => {
-                    match response.key {
-                        Some(key) => Ok(issue_key_to_task_id(&key, prefixed)),
-                        None => Err("Failed to create subtask: no key returned.".to_string())
-                    }
-                },
-                Err(e) => Err(format!("Failed to create subtask: {}", e))
-            }
-        })
+        let key = RUNTIME.block_on(create_subtask(&config, project, &task_id_to_issue_key(project, task_id), subtask))?;
+        Ok(issue_key_to_task_id(&key, prefixed))
     }
 
     fn update_remote_subtask(&self, domain: &String, project: &String, _task_id: &String, subtask: &Subtask, _is_done: bool) -> Result<(), String> {
@@ -831,12 +812,37 @@ async fn update_subtask(config: &Configuration, subtask_key: &str, subtask: &Sub
         Err(e) => return Err(format!("Failed to update subtask: {}", e)),
     }
 
-    let wanted_status = subtask.get_status();
-    let already_there = current_status.as_deref().is_some_and(|current| status_names_match(current, wanted_status));
+    ensure_status(config, subtask_key, current_status.as_deref(), subtask.get_status()).await
+}
+
+async fn create_subtask(config: &Configuration, project: &str, parent_key: &str, subtask: &Subtask) -> Result<String, String> {
+    let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
+        fields: Some(HashMap::from([
+            ("project".to_string(), serde_json::json!({ "key": project })),
+            ("parent".to_string(), serde_json::json!({ "key": parent_key })),
+            ("summary".to_string(), serde_json::json!(subtask.get_name())),
+            ("issuetype".to_string(), serde_json::json!({ "name": "Sub-task" })),
+        ])),
+        ..Default::default()
+    };
+    let key = match issues_api::create_issue(config, issue_details, None).await {
+        Ok(response) => response.key.ok_or_else(|| "Failed to create subtask: no key returned.".to_string())?,
+        Err(e) => return Err(format!("Failed to create subtask: {}", e)),
+    };
+
+    if !subtask.get_status().is_empty() {
+        let current_status = fetch_current_status(config, &key).await?;
+        ensure_status(config, &key, current_status.as_deref(), subtask.get_status()).await?;
+    }
+    Ok(key)
+}
+
+async fn ensure_status(config: &Configuration, issue_key: &str, current_status: Option<&str>, wanted_status: &str) -> Result<(), String> {
+    let already_there = current_status.is_some_and(|current| status_names_match(current, wanted_status));
     if wanted_status.is_empty() || already_there {
         return Ok(());
     }
-    transition_issue(config, subtask_key, wanted_status, "").await
+    transition_issue(config, issue_key, wanted_status, "").await
 }
 
 async fn fetch_current_status(config: &Configuration, issue_key: &str) -> Result<Option<String>, String> {
@@ -1049,6 +1055,7 @@ mod tests {
 
     fn jira_subtask_flow(current_status: &'static str, transition_status: u16) -> impl Fn(&str, &str) -> (u16, String) + Send + 'static {
         move |method, path| match (method, path) {
+            ("POST", "/rest/api/3/issue") => (201, r#"{"id":"10002","key":"ABC-2"}"#.to_string()),
             ("GET", "/rest/api/3/issue/ABC-2") => (200, format!(r#"{{"fields":{{"status":{{"name":"{current_status}"}}}}}}"#)),
             ("PUT", "/rest/api/3/issue/ABC-2") => (204, String::new()),
             ("GET", "/rest/api/3/issue/ABC-2/transitions") => (200, r#"{"transitions":[{"id":"31","to":{"name":"Done"}}]}"#.to_string()),
@@ -1088,6 +1095,37 @@ mod tests {
         let requests = requests.lock().unwrap();
         assert!(requests.contains(&"PUT /rest/api/3/issue/ABC-2".to_string()), "the summary must still be updated");
         assert!(!requests.iter().any(|r| r.ends_with("/transitions")), "no transition request must be made, got {requests:?}");
+    }
+
+    #[test]
+    fn test_create_subtask_applies_the_requested_status() {
+        let (config, requests) = stub_jira(jira_subtask_flow("To Do", 204));
+
+        let result = RUNTIME.block_on(create_subtask(&config, "ABC", "ABC-1", &subtask_with_status("DONE")));
+
+        assert_eq!(result, Ok("ABC-2".to_string()));
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.first().map(String::as_str), Some("POST /rest/api/3/issue"));
+        assert!(requests.contains(&"POST /rest/api/3/issue/ABC-2/transitions".to_string()), "the new subtask must be transitioned, got {requests:?}");
+    }
+
+    #[test]
+    fn test_create_subtask_fails_when_the_status_cannot_be_applied() {
+        let (config, _requests) = stub_jira(jira_subtask_flow("To Do", 403));
+
+        let result = RUNTIME.block_on(create_subtask(&config, "ABC", "ABC-1", &subtask_with_status("DONE")));
+
+        assert!(result.as_ref().is_err_and(|e| e.contains("Failed to transition ABC-2")), "unexpected result: {result:?}");
+    }
+
+    #[test]
+    fn test_create_subtask_skips_the_transition_when_jira_starts_in_the_wanted_status() {
+        let (config, requests) = stub_jira(jira_subtask_flow("To Do", 403));
+
+        let result = RUNTIME.block_on(create_subtask(&config, "ABC", "ABC-1", &subtask_with_status("to-do")));
+
+        assert_eq!(result, Ok("ABC-2".to_string()));
+        assert!(!requests.lock().unwrap().iter().any(|r| r.ends_with("/transitions")));
     }
 
     #[test]
