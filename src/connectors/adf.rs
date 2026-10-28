@@ -597,7 +597,29 @@ fn starts_block(line: &str) -> bool {
 // markdown -> ADF
 // ---------------------------------------------------------------------------
 
+/// How deep quotes, lists and table cells may nest before the rest is kept as
+/// plain text. Every level costs a recursive call, so hostile input such as
+/// thousands of `>` markers must not be followed all the way down.
+const MAX_BLOCK_DEPTH: usize = 64;
+
+/// How deep link labels may nest inside one another before `[` is literal.
+const MAX_INLINE_DEPTH: usize = 32;
+
 fn parse_blocks(lines: &[&str]) -> Vec<Value> {
+    parse_blocks_at(lines, 0)
+}
+
+/// Past the nesting limit the lines become one paragraph of inline text instead
+/// of being parsed into blocks, so the document stays complete and the stack bounded.
+fn literal_paragraph(lines: &[&str]) -> Vec<Value> {
+    let text = lines.iter().map(|l| l.trim_end()).collect::<Vec<_>>().join("\n");
+    vec![json!({"type": "paragraph", "content": parse_inline(&text)})]
+}
+
+fn parse_blocks_at(lines: &[&str], depth: usize) -> Vec<Value> {
+    if depth >= MAX_BLOCK_DEPTH && lines.iter().any(|l| !l.trim().is_empty()) {
+        return literal_paragraph(lines);
+    }
     let mut blocks = vec![];
     let mut i = 0;
     while i < lines.len() {
@@ -633,7 +655,7 @@ fn parse_blocks(lines: &[&str]) -> Vec<Value> {
                 inner.push(l);
                 i += 1;
             }
-            blocks.push(json!({"type": "blockquote", "content": quote_content(parse_blocks(&inner))}));
+            blocks.push(json!({"type": "blockquote", "content": quote_content(parse_blocks_at(&inner, depth + 1))}));
         } else if trimmed.starts_with('|') && i + 1 < lines.len() && is_table_separator(lines[i + 1]) {
             let mut rows = vec![];
             rows.push(table_cells(lines[i]));
@@ -642,9 +664,9 @@ fn parse_blocks(lines: &[&str]) -> Vec<Value> {
                 rows.push(table_cells(lines[i]));
                 i += 1;
             }
-            blocks.push(table_node(rows));
+            blocks.push(table_node(rows, depth + 1));
         } else if list_marker(line).is_some() {
-            let (node, consumed) = parse_list(&lines[i..]);
+            let (node, consumed) = parse_list(&lines[i..], depth + 1);
             blocks.push(node);
             i += consumed;
         } else {
@@ -710,11 +732,11 @@ fn is_table_separator(line: &str) -> bool {
     t.starts_with('|') && t.len() > 1 && t.chars().all(|c| matches!(c, '|' | '-' | ':' | ' ')) && t.contains('-')
 }
 
-fn cell_blocks(cell: &str) -> Vec<Value> {
+fn cell_blocks(cell: &str, depth: usize) -> Vec<Value> {
     let text = decode_cell(cell);
     let lines: Vec<&str> = text.split('\n').collect();
     let mut blocks = vec![];
-    for block in parse_blocks(&lines) {
+    for block in parse_blocks_at(&lines, depth) {
         if node_type(&block) == "table" {
             blocks.extend(table_as_paragraphs(&block));
         } else {
@@ -930,13 +952,13 @@ fn table_cells(line: &str) -> Vec<String> {
     cells
 }
 
-fn table_node(rows: Vec<Vec<String>>) -> Value {
+fn table_node(rows: Vec<Vec<String>>, depth: usize) -> Value {
     let row = |cells: &Vec<String>, kind: &str| json!({
         "type": "tableRow",
         "content": cells.iter().map(|c| json!({
             "type": kind,
             "attrs": {},
-            "content": cell_blocks(c)
+            "content": cell_blocks(c, depth)
         })).collect::<Vec<_>>()
     });
     let mut content = vec![row(&rows[0], "tableHeader")];
@@ -989,7 +1011,7 @@ fn list_marker(line: &str) -> Option<(usize, ListKind, usize, bool)> {
     Some((indent, kind, marker_len, false))
 }
 
-fn parse_list(lines: &[&str]) -> (Value, usize) {
+fn parse_list(lines: &[&str], depth: usize) -> (Value, usize) {
     let (base_indent, kind, _, _) = list_marker(lines[0]).unwrap();
     let mut items: Vec<(Vec<String>, bool)> = vec![];
     let mut i = 0;
@@ -1041,9 +1063,9 @@ fn parse_list(lines: &[&str]) -> (Value, usize) {
     let item_nodes: Vec<Value> = items.iter().flat_map(|(body, done)| {
         let body_refs: Vec<&str> = body.iter().map(String::as_str).collect();
         if kind == ListKind::Task {
-            task_item_nodes(parse_blocks(&body_refs), *done)
+            task_item_nodes(parse_blocks_at(&body_refs, depth), *done)
         } else {
-            vec![json!({"type": "listItem", "content": item_content(parse_blocks(&body_refs))})]
+            vec![json!({"type": "listItem", "content": item_content(parse_blocks_at(&body_refs, depth))})]
         }
     }).collect();
 
@@ -1237,7 +1259,7 @@ fn parse_inline(text: &str) -> Vec<Value> {
 
 fn parse_inline_into(chars: &[char], marks: &Marks, nodes: &mut Vec<Value>) {
     let mut buf: Option<(String, Marks)> = None;
-    for piece in resolve_inline(chars, marks) {
+    for piece in resolve_inline(chars, marks, 0) {
         let (text, marks) = match piece {
             Piece::Break => {
                 flush_run(&mut buf, nodes);
@@ -1274,13 +1296,13 @@ enum Piece {
     Break,
 }
 
-fn resolve_inline(chars: &[char], marks: &Marks) -> Vec<Piece> {
-    let mut pieces = tokenize(chars, marks);
+fn resolve_inline(chars: &[char], marks: &Marks, depth: usize) -> Vec<Piece> {
+    let mut pieces = tokenize(chars, marks, depth);
     process_emphasis(&mut pieces);
     pieces
 }
 
-fn tokenize(chars: &[char], marks: &Marks) -> Vec<Piece> {
+fn tokenize(chars: &[char], marks: &Marks, depth: usize) -> Vec<Piece> {
     let mut pieces = vec![];
     let mut buf = String::new();
     let flush = |buf: &mut String, pieces: &mut Vec<Piece>| {
@@ -1318,12 +1340,14 @@ fn tokenize(chars: &[char], marks: &Marks) -> Vec<Piece> {
                     i += fence;
                 }
             }
-            '[' => {
+            // Past the nesting limit a bracket is ordinary text, so link labels
+            // nested thousands deep cannot recurse the parser into the ground.
+            '[' if depth < MAX_INLINE_DEPTH => {
                 if let Some((label_end, href_end)) = find_link(chars, i) {
                     flush(&mut buf, &mut pieces);
                     let href = unescape_href(&chars[label_end + 2..href_end]);
                     let inner = Marks { link: Some(href), ..marks.clone() };
-                    pieces.extend(resolve_inline(&chars[i + 1..label_end], &inner).into_iter().map(|piece| match piece {
+                    pieces.extend(resolve_inline(&chars[i + 1..label_end], &inner, depth + 1).into_iter().map(|piece| match piece {
                         Piece::Delim { ch, count, marks, .. } => Piece::Run(ch.to_string().repeat(count), marks),
                         other => other,
                     }));
@@ -1768,6 +1792,39 @@ mod tests {
             assert!(!md.contains("** "), "{md}");
             assert!(!md.contains(" **"), "{md}");
         }
+    }
+
+    #[test]
+    fn test_deeply_nested_markdown_does_not_overflow_the_stack() {
+        // Thousands of quote markers: the parser stops nesting at the limit and
+        // keeps the rest as text, and the result survives a round trip.
+        let quotes = format!("{}text", "> ".repeat(8_192));
+        let adf = markdown_to_adf(&quotes);
+        assert_eq!(adf["type"], "doc");
+        let md = adf_to_markdown(&adf);
+        assert!(md.ends_with("text"), "the text at the bottom must be kept: {}", &md[md.len().saturating_sub(40)..]);
+        assert!(markdown_to_adf(&md) == adf, "the bounded quote document must be stable");
+
+        // Link labels nested inside each other thousands of times.
+        let links = format!("{}x{}", "[".repeat(8_192), "](u)".repeat(8_192));
+        let adf = markdown_to_adf(&links);
+        let md = adf_to_markdown(&adf);
+        assert!(md.contains('x'));
+        assert!(markdown_to_adf(&md) == adf, "the bounded link document must be stable");
+
+        // Lists nested by indentation far past the limit.
+        let list = (0..1_000).map(|k| format!("{}- item {k}", "  ".repeat(k))).collect::<Vec<_>>().join("\n");
+        let adf = markdown_to_adf(&list);
+        let md = adf_to_markdown(&adf);
+        assert!(md.contains("item 999"), "the deepest item must be kept");
+        assert!(markdown_to_adf(&md) == adf, "the bounded list document must be stable");
+
+        // Quotes inside table cells inside quotes, which go through the cell parser.
+        let cell = format!("| {}cell |\n| --- |", "> ".repeat(2_000));
+        let nested_cells = format!("{}{}", "> ".repeat(50), cell.replace('\n', "\n> "));
+        let adf = markdown_to_adf(&nested_cells);
+        assert_eq!(adf["type"], "doc");
+        assert!(adf_to_markdown(&adf).contains("cell"));
     }
 
     #[test]
