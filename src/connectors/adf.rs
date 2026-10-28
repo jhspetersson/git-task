@@ -1183,11 +1183,44 @@ fn task_list_as_bullets(list: &Value) -> Value {
                     None => items.push(json!({"type": "listItem", "content": [{"type": "paragraph", "content": []}, nested]})),
                 }
             }
-            "blockTaskItem" => items.push(json!({"type": "listItem", "content": item_content(children(child).to_vec())})),
-            _ => items.push(json!({"type": "listItem", "content": [{"type": "paragraph", "content": child["content"].clone()}]})),
+            "blockTaskItem" => {
+                let mut blocks = item_content(children(child).to_vec());
+                match blocks.first_mut() {
+                    Some(first) if node_type(first) == "paragraph" => {
+                        let content = first["content"].as_array().cloned().unwrap_or_default();
+                        first["content"] = json!(with_task_marker(child, content));
+                    }
+                    _ => blocks.insert(0, json!({"type": "paragraph", "content": with_task_marker(child, vec![])})),
+                }
+                items.push(json!({"type": "listItem", "content": blocks}));
+            }
+            _ => {
+                let content = child["content"].as_array().cloned().unwrap_or_default();
+                items.push(json!({"type": "listItem", "content": [{"type": "paragraph", "content": with_task_marker(child, content)}]}));
+            }
         }
     }
     json!({"type": "bulletList", "content": items})
+}
+
+/// Puts a visible `[x]` or `[ ]` in front of a task's inline content so the
+/// completion state survives being flattened into a plain bullet. The marker
+/// merges into a leading plain text node, matching what the parser produces
+/// for the same Markdown, so the result round-trips unchanged.
+fn with_task_marker(item: &Value, mut content: Vec<Value>) -> Vec<Value> {
+    let marker = if attr_str(item, "state") == Some("DONE") { "[x]" } else { "[ ]" };
+    let plain_text_first = content.first().is_some_and(|first| {
+        node_type(first) == "text" && first.get("marks").and_then(Value::as_array).is_none_or(|m| m.is_empty())
+    });
+    if plain_text_first {
+        let text = content[0]["text"].as_str().unwrap_or("").to_string();
+        content[0]["text"] = json!(format!("{marker} {text}"));
+    } else if content.is_empty() {
+        content.push(json!({"type": "text", "text": marker}));
+    } else {
+        content.insert(0, json!({"type": "text", "text": format!("{marker} ")}));
+    }
+    content
 }
 
 fn text_nodes(text: &str) -> Vec<Value> {
@@ -2361,8 +2394,56 @@ b")]}]});
         assert_eq!(children(quote).iter().map(node_type).collect::<Vec<_>>(), ["paragraph", "paragraph", "bulletList"]);
         assert_eq!(quote["content"][0], para(vec![text("Heading")]));
         assert_eq!(quote["content"][1], para(vec![text("nested")]));
-        assert_eq!(quote["content"][2]["content"][0]["content"][0], para(vec![text("task")]));
+        assert_eq!(quote["content"][2]["content"][0]["content"][0], para(vec![text("[ ] task")]));
         assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), adf);
+    }
+
+    #[test]
+    fn test_quoted_tasks_keep_their_state_as_visible_markers() {
+        let task = |state: &str, content: Vec<Value>| json!({"type": "taskItem", "attrs": {"localId": "i", "state": state}, "content": content});
+        let task_list = |items: Vec<Value>| json!({"type": "taskList", "attrs": {"localId": "l"}, "content": items});
+        let block_task = |state: &str, blocks: Vec<Value>| json!({"type": "blockTaskItem", "attrs": {"localId": "b", "state": state}, "content": blocks});
+        let panel = |blocks: Vec<Value>| json!({"type": "panel", "attrs": {"panelType": "info"}, "content": blocks});
+
+        // Pull renders panel tasks as quoted checkboxes; push flattens them into bullets
+        // that keep the checkbox text, and a second pull/push leaves them unchanged.
+        let adf = doc(vec![panel(vec![task_list(vec![
+            task("DONE", vec![text("Finished")]),
+            task("TODO", vec![text("Remaining")]),
+            task_list(vec![task("DONE", vec![text("Nested done")]), task("TODO", vec![marked("bold todo", &["strong"])])]),
+            block_task("DONE", vec![para(vec![text("First paragraph")]), para(vec![text("Second paragraph")])]),
+            task("TODO", vec![]),
+        ])])]);
+        let pulled = adf_to_markdown(&adf);
+        assert_eq!(pulled, "> - [x] Finished\n> - [ ] Remaining\n>   - [x] Nested done\n>   - [ ] **bold todo**\n> - [x] First paragraph\n>\n>   Second paragraph\n> - [ ]");
+        let pushed = markdown_to_adf(&pulled);
+        let quote = &pushed["content"][0];
+        assert_eq!(node_type(quote), "blockquote");
+        let bullets = &quote["content"][0];
+        assert_eq!(node_type(bullets), "bulletList");
+        let items = children(bullets);
+        assert_eq!(items[0]["content"], json!([para(vec![text("[x] Finished")])]));
+        assert_eq!(items[1]["content"][0], para(vec![text("[ ] Remaining")]));
+        let nested = children(&items[1]["content"][1]);
+        assert_eq!(nested[0]["content"], json!([para(vec![text("[x] Nested done")])]));
+        assert_eq!(nested[1]["content"], json!([para(vec![text("[ ] "), marked("bold todo", &["strong"])])]));
+        assert_eq!(items[2]["content"], json!([para(vec![text("[x] First paragraph")]), para(vec![text("Second paragraph")])]));
+        assert_eq!(items[3]["content"], json!([para(vec![text("[ ]")])]));
+        // The markers are escaped on the way back out so they read as text, not as a task list.
+        let repulled = adf_to_markdown(&pushed);
+        assert_eq!(repulled, "> - \\[x\\] Finished\n> - \\[ \\] Remaining\n>   - \\[x\\] Nested done\n>   - \\[ \\] **bold todo**\n> - \\[x\\] First paragraph\n>\n>   Second paragraph\n> - \\[ \\]");
+        assert_eq!(markdown_to_adf(&repulled), pushed);
+
+        // The same holds for a panel inside a table cell and inside an expand.
+        let cell_doc = doc(vec![json!({"type": "table", "content": [json!({"type": "tableRow", "content": [
+            json!({"type": "tableCell", "content": [panel(vec![task_list(vec![task("DONE", vec![text("In cell")])])])]}),
+        ]})]})]);
+        let cell_md = adf_to_markdown(&cell_doc);
+        let cell_pushed = markdown_to_adf(&cell_md);
+        assert!(adf_to_markdown(&cell_pushed).contains("\\[x\\] In cell"), "{cell_md}");
+        let expand_doc = doc(vec![json!({"type": "expand", "attrs": {"title": "More"}, "content": [panel(vec![task_list(vec![task("TODO", vec![text("In expand")])])])]})]);
+        let expand_pushed = markdown_to_adf(&adf_to_markdown(&expand_doc));
+        assert!(adf_to_markdown(&expand_pushed).contains("\\[ \\] In expand"));
     }
 
     #[test]
@@ -2465,10 +2546,10 @@ b")]}]});
         let list = &adf["content"][0]["content"][0];
         assert_eq!(list["type"], "bulletList");
         let items = children(list);
-        assert_eq!(items[0]["content"][0], para(vec![text("Parent")]));
+        assert_eq!(items[0]["content"][0], para(vec![text("[ ] Parent")]));
         assert_eq!(items[0]["content"][1]["type"], "bulletList");
-        assert_eq!(items[0]["content"][1]["content"][0]["content"][0], para(vec![text("Child")]));
-        assert_eq!(items[1]["content"], json!([para(vec![text("Two")]), para(vec![text("second")])]));
+        assert_eq!(items[0]["content"][1]["content"][0]["content"][0], para(vec![text("[x] Child")]));
+        assert_eq!(items[1]["content"], json!([para(vec![text("[ ] Two")]), para(vec![text("second")])]));
         fn inline_only(node: &Value) -> bool {
             match node_type(node) {
                 "paragraph" => children(node).iter().all(|c| matches!(node_type(c), "text" | "hardBreak")),
