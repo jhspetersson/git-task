@@ -633,7 +633,7 @@ fn encode_cell(text: &str) -> String {
         match fence {
             Some(len) => {
                 lines.push(escape_br(line));
-                if closes_fence(line, len) {
+                if fence_closing(line, len) {
                     fence = None;
                 }
             }
@@ -699,6 +699,14 @@ fn escape_br_outside_code(text: &str) -> String {
 }
 
 fn fence_opening(line: &str) -> Option<usize> {
+    opening_fence(strip_block_prefixes(line))
+}
+
+fn fence_closing(line: &str, fence: usize) -> bool {
+    closes_fence(strip_block_prefixes(line), fence)
+}
+
+fn strip_block_prefixes(line: &str) -> &str {
     let mut rest = line.trim_start();
     loop {
         if let Some((indent, _, offset, _)) = list_marker(rest) {
@@ -709,7 +717,7 @@ fn fence_opening(line: &str) -> Option<usize> {
             break;
         }
     }
-    opening_fence(rest)
+    rest
 }
 
 fn unescape_br(text: &str) -> String {
@@ -744,7 +752,7 @@ fn decode_cell(text: &str) -> String {
             line_start = false;
             let line_end = (i..chars.len()).find(|&j| chars[j..].starts_with(&br)).unwrap_or(chars.len());
             let line: String = chars[i..line_end].iter().collect();
-            let closing = matches!(fence, Some(len) if closes_fence(&line, len));
+            let closing = matches!(fence, Some(len) if fence_closing(&line, len));
             if fence.is_none() {
                 fence = fence_opening(&line);
             }
@@ -793,7 +801,8 @@ fn decode_cell(text: &str) -> String {
 fn table_cells(line: &str) -> Vec<String> {
     let t = line.trim();
     let t = t.strip_prefix('|').unwrap_or(t);
-    let t = t.strip_suffix('|').unwrap_or(t);
+    let escaped_end = t.ends_with('|') && t[..t.len() - 1].chars().rev().take_while(|c| *c == '\\').count() % 2 == 1;
+    let t = if escaped_end { t } else { t.strip_suffix('|').unwrap_or(t) };
     let mut cells = vec![];
     let mut cur = String::new();
     let mut chars = t.chars().peekable();
@@ -1955,5 +1964,37 @@ mod tests {
             let md = adf_to_markdown(&adf);
             assert_eq!(markdown_to_adf(&md), adf, "{md}");
         }
+    }
+
+    #[test]
+    fn test_quoted_code_block_in_a_cell_does_not_swallow_what_follows() {
+        let table = |rows: Vec<Value>| json!({"type": "table", "attrs": {"isNumberColumnEnabled": false, "layout": "default"}, "content": rows});
+        let row = |cells: Vec<Value>| json!({"type": "tableRow", "content": cells});
+        let header = |t: &str| json!({"type": "tableHeader", "attrs": {}, "content": [para(vec![text(t)])]});
+        let cell = |content: Vec<Value>| json!({"type": "tableCell", "attrs": {}, "content": content});
+        let quoted = json!({"type": "blockquote", "content": [{"type": "codeBlock", "content": [text("a
+b")]}]});
+        let adf = doc(vec![table(vec![row(vec![header("H")]), row(vec![cell(vec![quoted, para(vec![marked("x<br>y", &["code"]), text(" z")])])])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(markdown_to_adf(&md), adf, "{md}");
+
+        let typed = markdown_to_adf("| H |
+| --- |
+| > ```<br>> a<br>> ```<br><br>`k<br>v` and `c<br/>d` |");
+        let blocks = &typed["content"][0]["content"][1]["content"][0]["content"];
+        assert_eq!(blocks[0]["type"], "blockquote");
+        assert_eq!(blocks[0]["content"][0]["content"][0]["text"], "a");
+        assert_eq!(blocks[1]["content"][0], marked("k<br>v", &["code"]));
+        assert_eq!(blocks[1]["content"][2], marked("c<br/>d", &["code"]));
+    }
+
+    #[test]
+    fn test_escaped_final_pipe_in_a_table_row() {
+        let adf = markdown_to_adf("| H |\n| --- |\n| a\\| |\n| b\\|\n| c\\\\|");
+        let cell_text = |r: usize| adf["content"][0]["content"][r]["content"][0]["content"][0]["content"][0]["text"].clone();
+        assert_eq!(cell_text(1), "a|");
+        assert_eq!(cell_text(2), "b|", "an escaped pipe at the end of the row is content, not the closing separator");
+        assert_eq!(cell_text(3), "c\\", "an escaped backslash before the final pipe leaves the pipe as separator");
+        round_trip("| H |\n| --- |\n| a\\| |");
     }
 }
