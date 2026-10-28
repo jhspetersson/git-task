@@ -66,7 +66,11 @@ fn render_block(node: &Value) -> String {
         "taskList" => children(node).iter().map(|item| {
             let done = attr_str(item, "state") == Some("DONE");
             let marker = if done { "- [x] " } else { "- [ ] " };
-            indent_continuation(&render_inline(children(item)), marker)
+            match node_type(item) {
+                "taskList" => indent_continuation(&render_block(item), "  "),
+                "blockTaskItem" => indent_by(&render_item_blocks(children(item)), marker, 2),
+                _ => indent_by(&render_inline(children(item)), marker, 2),
+            }
         }).collect::<Vec<_>>().join("\n"),
         "codeBlock" => {
             let language = attr_str(node, "language").unwrap_or("");
@@ -105,10 +109,15 @@ fn is_inline(node: &Value) -> bool {
     matches!(node_type(node), "text" | "hardBreak" | "mention" | "emoji" | "inlineCard" | "date" | "status" | "placeholder")
 }
 
+const MAX_LIST_NUMBER: u64 = 999_999_999;
+
 fn render_list(items: &[Value], ordered_from: Option<u64>) -> String {
+    let ordered_from = ordered_from.map(|start| {
+        if start.saturating_add(items.len().saturating_sub(1) as u64) > MAX_LIST_NUMBER { 1 } else { start }
+    });
     items.iter().enumerate().map(|(i, item)| {
         let marker = match ordered_from {
-            Some(start) => format!("{}. ", start + i as u64),
+            Some(start) => format!("{}. ", start.saturating_add(i as u64)),
             None => "- ".to_string(),
         };
         indent_continuation(&render_item_blocks(children(item)), &marker)
@@ -138,7 +147,11 @@ fn render_item_blocks(blocks: &[Value]) -> String {
 
 /// Puts `marker` before the first line and indents the following lines by its width.
 fn indent_continuation(body: &str, marker: &str) -> String {
-    let pad = " ".repeat(marker.chars().count());
+    indent_by(body, marker, marker.chars().count())
+}
+
+fn indent_by(body: &str, marker: &str, width: usize) -> String {
+    let pad = " ".repeat(width);
     let mut out = String::new();
     for (i, line) in body.lines().enumerate() {
         if i == 0 {
@@ -157,12 +170,32 @@ fn indent_continuation(body: &str, marker: &str) -> String {
     out
 }
 
+const MAX_TABLE_COLUMNS: usize = 256;
+
 fn render_table(rows: &[Value]) -> String {
-    let rendered: Vec<Vec<String>> = rows.iter().map(|row| {
-        children(row).iter().map(|cell| {
-            encode_cell(&render_blocks(children(cell))).replace('|', "\\|")
-        }).collect()
-    }).collect();
+    let mut rendered: Vec<Vec<String>> = vec![vec![]; rows.len()];
+    let mut occupied: Vec<Vec<bool>> = vec![vec![]; rows.len()];
+    for (r, row) in rows.iter().enumerate() {
+        let mut col = 0;
+        for cell in children(row) {
+            while occupied[r].get(col) == Some(&true) {
+                col += 1;
+            }
+            let colspan = attr_u64(cell, "colspan").unwrap_or(1).clamp(1, MAX_TABLE_COLUMNS as u64) as usize;
+            let rowspan = attr_u64(cell, "rowspan").unwrap_or(1).clamp(1, (rows.len() - r) as u64) as usize;
+            for rr in r..r + rowspan {
+                for c in col..col + colspan {
+                    if occupied[rr].len() <= c {
+                        occupied[rr].resize(c + 1, false);
+                        rendered[rr].resize(c + 1, String::new());
+                    }
+                    occupied[rr][c] = true;
+                }
+            }
+            rendered[r][col] = encode_cell(&render_blocks(children(cell))).replace('|', "\\|");
+            col += colspan;
+        }
+    }
     if rendered.is_empty() {
         return String::new();
     }
@@ -194,6 +227,13 @@ struct Marks {
     link: Option<String>,
 }
 
+fn append_run(runs: &mut Vec<(String, Marks)>, text: String, marks: Marks) {
+    match runs.last_mut() {
+        Some((last, last_marks)) if *last_marks == marks => last.push_str(&text),
+        _ => runs.push((text, marks)),
+    }
+}
+
 fn marks_of(node: &Value) -> Marks {
     let mut marks = Marks { code: false, strong: false, em: false, strike: false, link: None };
     if let Some(list) = node.get("marks").and_then(Value::as_array) {
@@ -217,12 +257,13 @@ fn render_inline(nodes: &[Value]) -> String {
     let mut runs: Vec<(String, Marks)> = vec![];
     let plain = Marks { code: false, strong: false, em: false, strike: false, link: None };
     let mut push = |text: String, marks: Marks| {
-        if text.is_empty() {
-            return;
-        }
-        match runs.last_mut() {
-            Some((last, last_marks)) if *last_marks == marks => last.push_str(&text),
-            _ => runs.push((text, marks)),
+        for (k, part) in text.split('\n').enumerate() {
+            if k > 0 {
+                append_run(&mut runs, "\n".to_string(), Marks { code: false, strong: false, em: false, strike: false, link: None });
+            }
+            if !part.is_empty() {
+                append_run(&mut runs, part.to_string(), marks.clone());
+            }
         }
     };
     for node in nodes {
@@ -231,7 +272,17 @@ fn render_inline(nodes: &[Value]) -> String {
             "hardBreak" => push("\n".to_string(), plain.clone()),
             "mention" | "status" | "placeholder" => push(attr_str(node, "text").unwrap_or("").to_string(), plain.clone()),
             "emoji" => push(attr_str(node, "shortName").or(attr_str(node, "text")).unwrap_or("").to_string(), plain.clone()),
-            "inlineCard" => push(attr_str(node, "url").unwrap_or("").to_string(), plain.clone()),
+            "inlineCard" => {
+                let data = node.get("attrs").and_then(|a| a.get("data"));
+                let url = attr_str(node, "url").or_else(|| data.and_then(|d| d.get("url")).and_then(Value::as_str));
+                let name = data.and_then(|d| d.get("name")).and_then(Value::as_str).filter(|n| !n.trim().is_empty());
+                match (url, name) {
+                    (Some(url), Some(name)) => push(name.to_string(), Marks { link: Some(url.to_string()), ..plain.clone() }),
+                    (Some(url), None) => push(url.to_string(), plain.clone()),
+                    (None, Some(name)) => push(name.to_string(), plain.clone()),
+                    (None, None) => {}
+                }
+            }
             "date" => push(attr_str(node, "timestamp").unwrap_or("").to_string(), plain.clone()),
             _ => push(plain_text(children(node)), plain.clone()),
         }
@@ -252,13 +303,26 @@ fn render_inline(nodes: &[Value]) -> String {
     for candidate in candidates {
         let md = escape_line_starts(&candidate);
         if inline_round_trips(&md, &runs) {
-            return md;
+            return keep_hard_breaks(&md);
         }
     }
     let unmarked: Vec<(String, Marks)> = runs.iter()
         .map(|(text, marks)| (text.clone(), Marks { strong: false, em: false, strike: false, ..marks.clone() }))
         .collect();
-    escape_line_starts(&render_runs(&unmarked, None, false, None, None))
+    keep_hard_breaks(&escape_line_starts(&render_runs(&unmarked, None, false, None, None)))
+}
+
+fn keep_hard_breaks(md: &str) -> String {
+    let lines: Vec<&str> = md.split('\n').collect();
+    let mut out = String::with_capacity(md.len());
+    for (i, line) in lines.iter().enumerate() {
+        if i > 0 {
+            let blank = lines[i - 1].trim().is_empty() || line.trim().is_empty();
+            out.push_str(if blank { "<br>" } else { "\n" });
+        }
+        out.push_str(line);
+    }
+    out
 }
 
 const MARK_ORDERS: [[MarkKind; 4]; 6] = [
@@ -539,7 +603,7 @@ fn parse_blocks(lines: &[&str]) -> Vec<Value> {
                 inner.push(l);
                 i += 1;
             }
-            blocks.push(json!({"type": "blockquote", "content": parse_blocks(&inner)}));
+            blocks.push(json!({"type": "blockquote", "content": quote_content(parse_blocks(&inner))}));
         } else if trimmed.starts_with('|') && i + 1 < lines.len() && is_table_separator(lines[i + 1]) {
             let mut rows = vec![];
             rows.push(table_cells(lines[i]));
@@ -619,27 +683,41 @@ fn is_table_separator(line: &str) -> bool {
 fn cell_blocks(cell: &str) -> Vec<Value> {
     let text = decode_cell(cell);
     let lines: Vec<&str> = text.split('\n').collect();
-    let mut blocks = parse_blocks(&lines);
+    let mut blocks = vec![];
+    for block in parse_blocks(&lines) {
+        if node_type(&block) == "table" {
+            blocks.extend(table_as_paragraphs(&block));
+        } else {
+            blocks.push(block);
+        }
+    }
     if blocks.is_empty() {
         blocks.push(json!({"type": "paragraph", "content": []}));
     }
     blocks
 }
 
+fn table_as_paragraphs(table: &Value) -> Vec<Value> {
+    children(table).iter().map(|row| {
+        let cells: Vec<String> = children(row).iter().map(|cell| plain_text(children(cell)).replace('\n', " ")).collect();
+        json!({"type": "paragraph", "content": text_nodes(&cells.join(" | "))})
+    }).collect()
+}
+
 fn encode_cell(text: &str) -> String {
     let mut lines = vec![];
-    let mut fence: Option<usize> = None;
+    let mut fence: Option<(usize, usize)> = None;
     for line in text.split('\n') {
         match fence {
-            Some(len) => {
+            Some((len, quotes)) => {
                 lines.push(escape_br(line));
-                if fence_closing(line, len) {
+                if fence_closing(line, len, quotes) {
                     fence = None;
                 }
             }
             None => match fence_opening(line) {
-                Some(len) => {
-                    fence = Some(len);
+                Some(opened) => {
+                    fence = Some(opened);
                     lines.push(escape_br(line));
                 }
                 None => lines.push(escape_br_outside_code(line)),
@@ -698,26 +776,31 @@ fn escape_br_outside_code(text: &str) -> String {
     out
 }
 
-fn fence_opening(line: &str) -> Option<usize> {
-    opening_fence(strip_block_prefixes(line))
-}
-
-fn fence_closing(line: &str, fence: usize) -> bool {
-    closes_fence(strip_block_prefixes(line), fence)
-}
-
-fn strip_block_prefixes(line: &str) -> &str {
+fn fence_opening(line: &str) -> Option<(usize, usize)> {
     let mut rest = line.trim_start();
+    let mut quotes = 0;
     loop {
         if let Some((indent, _, offset, _)) = list_marker(rest) {
             rest = rest[indent + offset..].trim_start();
         } else if let Some(quoted) = rest.strip_prefix('>') {
             rest = quoted.trim_start();
+            quotes += 1;
         } else {
             break;
         }
     }
-    rest
+    opening_fence(rest).map(|len| (len, quotes))
+}
+
+fn fence_closing(line: &str, fence: usize, quotes: usize) -> bool {
+    let mut rest = line.trim_start();
+    for _ in 0..quotes {
+        match rest.strip_prefix('>') {
+            Some(quoted) => rest = quoted.trim_start(),
+            None => return false,
+        }
+    }
+    closes_fence(rest, fence)
 }
 
 fn unescape_br(text: &str) -> String {
@@ -744,7 +827,7 @@ fn decode_cell(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let br = ['<', 'b', 'r', '>'];
     let mut out = String::with_capacity(text.len());
-    let mut fence: Option<usize> = None;
+    let mut fence: Option<(usize, usize)> = None;
     let mut line_start = true;
     let mut i = 0;
     while i < chars.len() {
@@ -752,7 +835,7 @@ fn decode_cell(text: &str) -> String {
             line_start = false;
             let line_end = (i..chars.len()).find(|&j| chars[j..].starts_with(&br)).unwrap_or(chars.len());
             let line: String = chars[i..line_end].iter().collect();
-            let closing = matches!(fence, Some(len) if fence_closing(&line, len));
+            let closing = matches!(fence, Some((len, quotes)) if fence_closing(&line, len, quotes));
             if fence.is_none() {
                 fence = fence_opening(&line);
             }
@@ -888,6 +971,7 @@ fn parse_list(lines: &[&str]) -> (Value, usize) {
                     break;
                 }
                 items.push((vec![line[indent + offset..].to_string()], done));
+                let content_indent = if kind == ListKind::Task { indent + 2 } else { indent + offset };
                 i += 1;
                 // Continuation lines: anything indented past the marker, or blank lines followed by such.
                 while i < lines.len() {
@@ -903,7 +987,7 @@ fn parse_list(lines: &[&str]) -> (Value, usize) {
                         let continues = lines.get(after).is_some_and(|n| n.len() - n.trim_start().len() > base_indent);
                         if continues {
                             for blank in &lines[i..after] {
-                                let strip = indent_boundary(blank, indent + offset);
+                                let strip = indent_boundary(blank, content_indent);
                                 items.last_mut().unwrap().0.push(blank[strip..].to_string());
                             }
                             i = after;
@@ -912,7 +996,7 @@ fn parse_list(lines: &[&str]) -> (Value, usize) {
                         break;
                     }
                     if l_indent > base_indent {
-                        let strip = indent_boundary(l, indent + offset);
+                        let strip = indent_boundary(l, content_indent);
                         items.last_mut().unwrap().0.push(l[strip..].to_string());
                         i += 1;
                     } else {
@@ -924,20 +1008,12 @@ fn parse_list(lines: &[&str]) -> (Value, usize) {
         }
     }
 
-    let item_nodes: Vec<Value> = items.iter().map(|(body, done)| {
+    let item_nodes: Vec<Value> = items.iter().flat_map(|(body, done)| {
         let body_refs: Vec<&str> = body.iter().map(String::as_str).collect();
         if kind == ListKind::Task {
-            json!({
-                "type": "taskItem",
-                "attrs": {"localId": next_local_id(), "state": if *done { "DONE" } else { "TODO" }},
-                "content": parse_inline(body_refs.join("\n").trim())
-            })
+            task_item_nodes(parse_blocks(&body_refs), *done)
         } else {
-            let mut content = parse_blocks(&body_refs);
-            if content.is_empty() {
-                content.push(json!({"type": "paragraph", "content": []}));
-            }
-            json!({"type": "listItem", "content": content})
+            vec![json!({"type": "listItem", "content": item_content(parse_blocks(&body_refs))})]
         }
     }).collect();
 
@@ -969,6 +1045,60 @@ fn indent_boundary(line: &str, max_bytes: usize) -> usize {
     end
 }
 
+fn task_item_nodes(blocks: Vec<Value>, done: bool) -> Vec<Value> {
+    let (nested, blocks): (Vec<Value>, Vec<Value>) = blocks.into_iter().partition(|block| node_type(block) == "taskList");
+    let paragraphs = task_paragraphs(blocks);
+    let attrs = json!({"localId": next_local_id(), "state": if done { "DONE" } else { "TODO" }});
+    let item = match paragraphs.as_slice() {
+        [] => json!({"type": "taskItem", "attrs": attrs, "content": []}),
+        [paragraph] => json!({"type": "taskItem", "attrs": attrs, "content": paragraph["content"].clone()}),
+        _ => json!({"type": "blockTaskItem", "attrs": attrs, "content": paragraphs}),
+    };
+    std::iter::once(item).chain(nested).collect()
+}
+
+fn task_paragraphs(blocks: Vec<Value>) -> Vec<Value> {
+    let mut out = vec![];
+    for block in blocks {
+        match node_type(&block) {
+            "paragraph" => out.push(block),
+            "heading" => out.push(json!({"type": "paragraph", "content": block["content"].clone()})),
+            "codeBlock" => out.push(json!({"type": "paragraph", "content": code_inline(&plain_text(children(&block)))})),
+            "bulletList" | "orderedList" | "blockquote" => {
+                for child in children(&block) {
+                    match node_type(child) {
+                        "listItem" => out.extend(task_paragraphs(children(child).to_vec())),
+                        _ => out.extend(task_paragraphs(vec![child.clone()])),
+                    }
+                }
+            }
+            "taskList" => {
+                for child in children(&block) {
+                    match node_type(child) {
+                        "taskItem" => out.push(json!({"type": "paragraph", "content": child["content"].clone()})),
+                        _ => out.extend(task_paragraphs(children(child).to_vec())),
+                    }
+                }
+            }
+            _ => out.push(json!({"type": "paragraph", "content": text_nodes(&plain_text(children(&block)))})),
+        }
+    }
+    out
+}
+
+fn code_inline(code: &str) -> Vec<Value> {
+    let mut nodes = vec![];
+    for (k, line) in code.split('\n').enumerate() {
+        if k > 0 {
+            nodes.push(json!({"type": "hardBreak"}));
+        }
+        if !line.is_empty() {
+            nodes.push(json!({"type": "text", "text": line, "marks": [{"type": "code"}]}));
+        }
+    }
+    nodes
+}
+
 fn same_kind(a: ListKind, b: ListKind) -> bool {
     matches!((a, b), (ListKind::Bullet, ListKind::Bullet) | (ListKind::Ordered(_), ListKind::Ordered(_)) | (ListKind::Task, ListKind::Task))
 }
@@ -977,6 +1107,57 @@ fn next_local_id() -> String {
     use std::sync::atomic::{AtomicU64, Ordering};
     static COUNTER: AtomicU64 = AtomicU64::new(1);
     format!("git-task-{}", COUNTER.fetch_add(1, Ordering::SeqCst))
+}
+
+fn quote_content(blocks: Vec<Value>) -> Vec<Value> {
+    let mut out = vec![];
+    for block in blocks {
+        match node_type(&block) {
+            "paragraph" | "bulletList" | "orderedList" | "codeBlock" => out.push(block),
+            "heading" => out.push(json!({"type": "paragraph", "content": block["content"].clone()})),
+            "blockquote" => out.extend(children(&block).to_vec()),
+            "taskList" => out.push(task_list_as_bullets(&block)),
+            _ => out.push(json!({"type": "paragraph", "content": text_nodes(&plain_text(children(&block)))})),
+        }
+    }
+    if out.is_empty() {
+        out.push(json!({"type": "paragraph", "content": []}));
+    }
+    out
+}
+
+fn item_content(blocks: Vec<Value>) -> Vec<Value> {
+    let mut out = vec![];
+    for block in blocks {
+        match node_type(&block) {
+            "paragraph" | "bulletList" | "orderedList" | "codeBlock" | "taskList" => out.push(block),
+            "heading" => out.push(json!({"type": "paragraph", "content": block["content"].clone()})),
+            "blockquote" => out.extend(item_content(children(&block).to_vec())),
+            _ => out.push(json!({"type": "paragraph", "content": text_nodes(&plain_text(children(&block)))})),
+        }
+    }
+    if out.first().is_none_or(|first| matches!(node_type(first), "bulletList" | "orderedList" | "taskList")) {
+        out.insert(0, json!({"type": "paragraph", "content": []}));
+    }
+    out
+}
+
+fn task_list_as_bullets(list: &Value) -> Value {
+    let mut items: Vec<Value> = vec![];
+    for child in children(list) {
+        match node_type(child) {
+            "taskList" => {
+                let nested = task_list_as_bullets(child);
+                match items.last_mut().and_then(|item| item["content"].as_array_mut()) {
+                    Some(content) => content.push(nested),
+                    None => items.push(json!({"type": "listItem", "content": [{"type": "paragraph", "content": []}, nested]})),
+                }
+            }
+            "blockTaskItem" => items.push(json!({"type": "listItem", "content": item_content(children(child).to_vec())})),
+            _ => items.push(json!({"type": "listItem", "content": [{"type": "paragraph", "content": child["content"].clone()}]})),
+        }
+    }
+    json!({"type": "bulletList", "content": items})
 }
 
 fn text_nodes(text: &str) -> Vec<Value> {
@@ -1160,7 +1341,7 @@ fn process_emphasis(pieces: &mut [Piece]) {
         let used = if ch == '~' || (opener_count >= 2 && closer_count >= 2) { 2 } else { 1 };
         for piece in &mut pieces[opener + 1..closer] {
             match piece {
-                Piece::Run(_, m) => apply_emphasis(m, ch, used),
+                Piece::Run(_, m) => if !m.code { apply_emphasis(m, ch, used) },
                 Piece::Delim { marks, can_open, can_close, .. } => {
                     apply_emphasis(marks, ch, used);
                     *can_open = false;
@@ -1704,8 +1885,9 @@ mod tests {
             let link_href = content[1]["marks"].as_array().unwrap().iter().find_map(|m| m["attrs"]["href"].as_str());
             assert_eq!(link_href, Some(href), "{md}");
         }
-        assert_eq!(spans("*a `*` b*"), vec![span("a ", &["em"]), span("*", &["code", "em"]), span(" b", &["em"])]);
-        round_trip("*a `*` b*");
+        assert_eq!(spans("*a `*` b*"), vec![span("a ", &["em"]), span("*", &["code"]), span(" b", &["em"])]);
+        let normalized = markdown_to_adf("*a `*` b*");
+        assert_eq!(spans(&adf_to_markdown(&normalized)), vec![span("a", &["em"]), span(" ", &[]), span("*", &["code"]), span(" ", &[]), span("b", &["em"])]);
     }
 
     #[test]
@@ -1996,5 +2178,287 @@ b")]}]});
         assert_eq!(cell_text(2), "b|", "an escaped pipe at the end of the row is content, not the closing separator");
         assert_eq!(cell_text(3), "c\\", "an escaped backslash before the final pipe leaves the pipe as separator");
         round_trip("| H |\n| --- |\n| a\\| |");
+    }
+
+    #[test]
+    fn test_fence_like_lines_inside_cell_code_do_not_close_the_block() {
+        let table = |rows: Vec<Value>| json!({"type": "table", "attrs": {"isNumberColumnEnabled": false, "layout": "default"}, "content": rows});
+        let row = |cells: Vec<Value>| json!({"type": "tableRow", "content": cells});
+        let header = |t: &str| json!({"type": "tableHeader", "attrs": {}, "content": [para(vec![text(t)])]});
+        let cell = |content: Vec<Value>| json!({"type": "tableCell", "attrs": {}, "content": content});
+        let code = |t: &str| json!({"type": "codeBlock", "content": [text(t)]});
+        let quoted = |content: Vec<Value>| json!({"type": "blockquote", "content": content});
+        let cases = [
+            cell(vec![code("> ```\n`a\nb`\n- ```"), para(vec![marked("x<br>y", &["code"])])]),
+            cell(vec![quoted(vec![code("```\n> ```\nz")]), para(vec![marked("k<br>v", &["code"])])]),
+        ];
+        for content in cases {
+            let adf = doc(vec![table(vec![row(vec![header("H")]), row(vec![content])])]);
+            let md = adf_to_markdown(&adf);
+            assert_eq!(markdown_to_adf(&md), adf, "{md}");
+        }
+    }
+
+    #[test]
+    fn test_consecutive_hard_breaks_stay_inside_the_paragraph() {
+        let br = || json!({"type": "hardBreak"});
+        let adf = doc(vec![para(vec![text("first"), br(), br(), br(), text("second")])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "first<br><br><br>second");
+        assert_eq!(markdown_to_adf(&md), adf);
+        for content in [
+            vec![br(), text("x"), br()],
+            vec![text("a"), br(), text(" "), br(), text("b")],
+            vec![marked("bold", &["strong"]), br(), br(), marked("more", &["em"])],
+        ] {
+            let adf = doc(vec![para(content)]);
+            let md = adf_to_markdown(&adf);
+            assert_eq!(markdown_to_adf(&md), adf, "{md}");
+        }
+        let item = json!({"type": "bulletList", "content": [{"type": "listItem", "content": [para(vec![text("a"), br(), br(), text("b")])]}]});
+        let adf = doc(vec![item]);
+        assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), adf);
+        round_trip("line one\nline two");
+    }
+
+    #[test]
+    fn test_emphasis_does_not_apply_to_inline_code() {
+        assert_eq!(spans("**`value`**"), vec![span("value", &["code"])]);
+        assert_eq!(spans("*`value`*"), vec![span("value", &["code"])]);
+        assert_eq!(spans("~~`value`~~"), vec![span("value", &["code"])]);
+        assert_eq!(spans("**a `b` c**"), vec![span("a ", &["strong"]), span("b", &["code"]), span(" c", &["strong"])]);
+        assert_eq!(spans("*[`x`](https://x.test) y*"), vec![span("x", &["code", "link"]), span(" y", &["em"])]);
+    }
+
+    #[test]
+    fn test_newlines_inside_inline_code_become_hard_breaks() {
+        let adf = doc(vec![para(vec![marked("first\n\nsecond", &["code"])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "`first`<br><br>`second`");
+        let expected = doc(vec![para(vec![marked("first", &["code"]), json!({"type": "hardBreak"}), json!({"type": "hardBreak"}), marked("second", &["code"])])]);
+        assert_eq!(markdown_to_adf(&md), expected);
+        round_trip(&md);
+        let adf = doc(vec![para(vec![text("see "), marked("a\nb", &["code"]), text(" end")])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "see `a`\n`b` end");
+        assert_eq!(markdown_to_adf(&md), doc(vec![para(vec![text("see "), marked("a", &["code"]), json!({"type": "hardBreak"}), marked("b", &["code"]), text(" end")])]));
+    }
+
+    #[test]
+    fn test_quotes_only_hold_allowed_blocks() {
+        assert_eq!(markdown_to_adf(">")["content"][0], json!({"type": "blockquote", "content": [{"type": "paragraph", "content": []}]}));
+        let adf = markdown_to_adf("> # Heading\n> > nested\n> - [ ] task");
+        let quote = &adf["content"][0];
+        assert_eq!(children(quote).iter().map(node_type).collect::<Vec<_>>(), ["paragraph", "paragraph", "bulletList"]);
+        assert_eq!(quote["content"][0], para(vec![text("Heading")]));
+        assert_eq!(quote["content"][1], para(vec![text("nested")]));
+        assert_eq!(quote["content"][2]["content"][0]["content"][0], para(vec![text("task")]));
+        assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), adf);
+    }
+
+    #[test]
+    fn test_list_items_only_hold_allowed_blocks() {
+        let adf = markdown_to_adf("- # Heading\n- > quote\n- - nested\n\n1. # Numbered");
+        let items = children(&adf["content"][0]);
+        assert_eq!(items[0]["content"], json!([para(vec![text("Heading")])]));
+        assert_eq!(items[1]["content"], json!([para(vec![text("quote")])]));
+        assert_eq!(items[2]["content"][0], para(vec![]), "a nested list cannot be the first child of an item");
+        assert_eq!(items[2]["content"][1]["type"], "bulletList");
+        assert_eq!(adf["content"][1]["content"][0]["content"], json!([para(vec![text("Numbered")])]));
+        assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), adf);
+    }
+
+    fn strip_ids(value: &Value) -> Value {
+        match value {
+            Value::Object(map) => Value::Object(map.iter().filter(|(k, _)| *k != "localId").map(|(k, v)| (k.clone(), strip_ids(v))).collect()),
+            Value::Array(items) => Value::Array(items.iter().map(strip_ids).collect()),
+            other => other.clone(),
+        }
+    }
+
+    #[test]
+    fn test_nested_task_lists_and_block_task_items_survive_the_round_trip() {
+        let task = |state: &str, content: Vec<Value>| json!({"type": "taskItem", "attrs": {"localId": "i", "state": state}, "content": content});
+        let block_task = |state: &str, content: Vec<Value>| json!({"type": "blockTaskItem", "attrs": {"localId": "b", "state": state}, "content": content});
+        let list = |content: Vec<Value>| json!({"type": "taskList", "attrs": {"localId": "l"}, "content": content});
+
+        let adf = doc(vec![list(vec![task("TODO", vec![text("Parent")]), list(vec![task("DONE", vec![text("Finished")]), task("TODO", vec![text("Remaining")])]), task("DONE", vec![text("Last")])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "- [ ] Parent\n  - [x] Finished\n  - [ ] Remaining\n- [x] Last");
+        assert_eq!(strip_ids(&markdown_to_adf(&md)), strip_ids(&adf));
+
+        let adf = doc(vec![list(vec![block_task("DONE", vec![para(vec![marked("First", &["strong"])]), para(vec![marked("Second", &["em"])])]), task("TODO", vec![text("Plain")])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "- [x] **First**\n\n  *Second*\n- [ ] Plain");
+        assert_eq!(strip_ids(&markdown_to_adf(&md)), strip_ids(&adf));
+    }
+
+    #[test]
+    fn test_marked_text_with_newlines_becomes_hard_breaks() {
+        let linked = |t: &str| json!({"type": "text", "text": t, "marks": [{"type": "link", "attrs": {"href": "https://x.test/"}}]});
+        let br = || json!({"type": "hardBreak"});
+        let adf = doc(vec![para(vec![linked("first\nsecond")])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "[first](https://x.test/)\n[second](https://x.test/)");
+        assert_eq!(markdown_to_adf(&md), doc(vec![para(vec![linked("first"), br(), linked("second")])]));
+
+        let adf = doc(vec![para(vec![marked("a\nb", &["strong"])])]);
+        assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), doc(vec![para(vec![marked("a", &["strong"]), br(), marked("b", &["strong"])])]));
+
+        let table = |rows: Vec<Value>| json!({"type": "table", "attrs": {"isNumberColumnEnabled": false, "layout": "default"}, "content": rows});
+        let row = |cells: Vec<Value>| json!({"type": "tableRow", "content": cells});
+        let header = |t: &str| json!({"type": "tableHeader", "attrs": {}, "content": [para(vec![text(t)])]});
+        let cell = |content: Vec<Value>| json!({"type": "tableCell", "attrs": {}, "content": content});
+        let adf = doc(vec![table(vec![row(vec![header("H")]), row(vec![cell(vec![para(vec![linked("first\nsecond")])])])])]);
+        let expected = doc(vec![table(vec![row(vec![header("H")]), row(vec![cell(vec![para(vec![linked("first"), br(), linked("second")])])])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(markdown_to_adf(&md), expected, "{md}");
+    }
+
+    #[test]
+    fn test_three_task_levels_with_siblings_survive_the_round_trip() {
+        let md = "- [ ] Parent\n  - [ ] Child\n    - [x] Grandchild\n    - [ ] Grandchild two\n  - [ ] Child two\n- [x] Parent two";
+        let adf = markdown_to_adf(md);
+        let top = children(&adf["content"][0]);
+        assert_eq!(top.iter().map(node_type).collect::<Vec<_>>(), ["taskItem", "taskList", "taskItem"]);
+        let level_two = children(&top[1]);
+        assert_eq!(level_two.iter().map(node_type).collect::<Vec<_>>(), ["taskItem", "taskList", "taskItem"]);
+        assert_eq!(children(&level_two[1]).len(), 2);
+        assert_eq!(level_two[1]["content"][0]["attrs"]["state"], "DONE");
+        assert_eq!(level_two[1]["content"][0]["content"][0], text("Grandchild"));
+        round_trip(md);
+
+        let nested = format!("- item\n  {}", md.replace('\n', "\n  "));
+        let adf = markdown_to_adf(&nested);
+        assert_eq!(strip_ids(&markdown_to_adf(&adf_to_markdown(&adf))), strip_ids(&adf));
+        let cell = format!("| H |\n| --- |\n| {} |", md.replace('\n', "<br>"));
+        let adf = markdown_to_adf(&cell);
+        assert_eq!(strip_ids(&markdown_to_adf(&adf_to_markdown(&adf))), strip_ids(&adf));
+    }
+
+    #[test]
+    fn test_block_task_items_hold_only_paragraphs() {
+        let md = "- [ ] task\n  - bullet\n  1. numbered\n\n  ```\n  code\n  ```\n\n  > quoted";
+        let adf = markdown_to_adf(md);
+        let item = &adf["content"][0]["content"][0];
+        assert_eq!(item["type"], "blockTaskItem");
+        let kinds: Vec<&str> = children(item).iter().map(node_type).collect();
+        assert!(kinds.iter().all(|k| *k == "paragraph"), "{kinds:?}");
+        assert_eq!(children(item).len(), 5);
+        assert_eq!(item["content"][3]["content"][0], marked("code", &["code"]));
+        assert_eq!(strip_ids(&markdown_to_adf(&adf_to_markdown(&adf))), strip_ids(&adf));
+    }
+
+    #[test]
+    fn test_quoted_task_lists_keep_their_structure() {
+        let md = "> - [ ] Parent\n>   - [x] Child\n> - [ ] Two\n>\n>   second";
+        let adf = markdown_to_adf(md);
+        let list = &adf["content"][0]["content"][0];
+        assert_eq!(list["type"], "bulletList");
+        let items = children(list);
+        assert_eq!(items[0]["content"][0], para(vec![text("Parent")]));
+        assert_eq!(items[0]["content"][1]["type"], "bulletList");
+        assert_eq!(items[0]["content"][1]["content"][0]["content"][0], para(vec![text("Child")]));
+        assert_eq!(items[1]["content"], json!([para(vec![text("Two")]), para(vec![text("second")])]));
+        fn inline_only(node: &Value) -> bool {
+            match node_type(node) {
+                "paragraph" => children(node).iter().all(|c| matches!(node_type(c), "text" | "hardBreak")),
+                _ => children(node).iter().all(inline_only),
+            }
+        }
+        assert!(inline_only(&adf), "{adf}");
+        assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), adf);
+    }
+
+    #[test]
+    fn test_merged_cells_keep_their_columns() {
+        let table = |rows: Vec<Value>| json!({"type": "table", "attrs": {"isNumberColumnEnabled": false, "layout": "default"}, "content": rows});
+        let row = |cells: Vec<Value>| json!({"type": "tableRow", "content": cells});
+        let header = |t: &str| json!({"type": "tableHeader", "attrs": {}, "content": [para(vec![text(t)])]});
+        let cell = |t: &str| json!({"type": "tableCell", "attrs": {}, "content": [para(vec![text(t)])]});
+        let spanning = |t: &str, colspan: u64, rowspan: u64| json!({"type": "tableCell", "attrs": {"colspan": colspan, "rowspan": rowspan}, "content": [para(vec![text(t)])]});
+
+        let adf = doc(vec![table(vec![row(vec![header("A"), header("B"), header("C")]), row(vec![spanning("ab", 2, 1), cell("c")])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "| A | B | C |\n| --- | --- | --- |\n| ab |  | c |");
+        let back = markdown_to_adf(&md);
+        assert_eq!(back["content"][0]["content"][1]["content"][2]["content"][0], para(vec![text("c")]), "c stays under C");
+
+        let adf = doc(vec![table(vec![row(vec![header("Owner"), header("Status")]), row(vec![spanning("alice", 1, 2), cell("open")]), row(vec![cell("closed")])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "| Owner | Status |\n| --- | --- |\n| alice | open |\n|  | closed |");
+        let back = markdown_to_adf(&md);
+        assert_eq!(back["content"][0]["content"][2]["content"][1]["content"][0], para(vec![text("closed")]), "closed stays under Status");
+        assert_eq!(back["content"][0]["content"][2]["content"][0]["content"][0], para(vec![]));
+    }
+
+    #[test]
+    fn test_nested_tables_in_cells_become_paragraphs() {
+        let md = "| H |\n| --- |\n| \\| a \\| b \\|<br>\\| --- \\| --- \\|<br>\\| 1 \\| 2 \\| |";
+        let adf = markdown_to_adf(md);
+        let cell = &adf["content"][0]["content"][1]["content"][0];
+        let kinds: Vec<&str> = children(cell).iter().map(node_type).collect();
+        assert!(!kinds.contains(&"table"), "{kinds:?}");
+        assert_eq!(cell["content"][0], para(vec![text("a | b")]));
+        assert_eq!(cell["content"][1], para(vec![text("1 | 2")]));
+        assert_eq!(markdown_to_adf(&adf_to_markdown(&adf)), adf);
+    }
+
+    #[test]
+    fn test_extreme_cell_spans_do_not_panic() {
+        let table = |rows: Vec<Value>| json!({"type": "table", "attrs": {"isNumberColumnEnabled": false, "layout": "default"}, "content": rows});
+        let row = |cells: Vec<Value>| json!({"type": "tableRow", "content": cells});
+        let header = |t: &str| json!({"type": "tableHeader", "attrs": {}, "content": [para(vec![text(t)])]});
+        let cell = |t: &str| json!({"type": "tableCell", "attrs": {}, "content": [para(vec![text(t)])]});
+        let huge = json!({"type": "tableCell", "attrs": {"colspan": u64::MAX, "rowspan": u64::MAX}, "content": [para(vec![text("big")])]});
+        let adf = doc(vec![table(vec![row(vec![header("A"), header("B")]), row(vec![huge, cell("b")]), row(vec![cell("c")])])]);
+        let md = adf_to_markdown(&adf);
+        let back = markdown_to_adf(&md);
+        assert_eq!(back["content"][0]["content"][1]["content"][0]["content"][0], para(vec![text("big")]), "{md}");
+        assert_eq!(back["content"][0]["content"][2]["content"][0]["content"][0], para(vec![]), "{md}");
+        let zero = json!({"type": "tableCell", "attrs": {"colspan": 0, "rowspan": 0}, "content": [para(vec![text("z")])]});
+        let adf = doc(vec![table(vec![row(vec![header("A")]), row(vec![zero])])]);
+        assert_eq!(markdown_to_adf(&adf_to_markdown(&adf))["content"][0]["content"][1]["content"][0]["content"][0], para(vec![text("z")]));
+    }
+
+    #[test]
+    fn test_inline_cards_use_the_data_attribute() {
+        let card = |attrs: Value| json!({"type": "inlineCard", "attrs": attrs});
+        let adf = doc(vec![para(vec![text("Before "), card(json!({"data": {"@type": "Document", "name": "Design document", "url": "https://x.test/doc"}})), text(" after")])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "Before [Design document](https://x.test/doc) after");
+        assert_eq!(adf_to_markdown(&doc(vec![para(vec![card(json!({"data": {"url": "https://x.test/doc"}}))])])), "https://x.test/doc");
+        assert_eq!(adf_to_markdown(&doc(vec![para(vec![card(json!({"data": {"name": "Only a name"}}))])])), "Only a name");
+        assert_eq!(adf_to_markdown(&doc(vec![para(vec![card(json!({"url": "https://x.test/plain"}))])])), "https://x.test/plain");
+    }
+
+    #[test]
+    fn test_ordered_list_numbers_that_markdown_cannot_hold_fall_back_to_one() {
+        let item = |t: &str| json!({"type": "listItem", "content": [para(vec![text(t)])]});
+        let list = |order: u64| json!({"type": "orderedList", "attrs": {"order": order}, "content": [item("a"), item("b")]});
+        let md = adf_to_markdown(&doc(vec![list(u64::MAX)]));
+        assert_eq!(md, "1. a\n2. b");
+        assert_eq!(markdown_to_adf(&md)["content"][0]["content"].as_array().unwrap().len(), 2);
+        assert_eq!(adf_to_markdown(&doc(vec![list(999_999_999)])), "1. a\n2. b");
+        round_trip("999999998. a\n999999999. b");
+        round_trip("999999999. only");
+        let md = adf_to_markdown(&doc(vec![list(999_999_997)]));
+        assert_eq!(md, "999999997. a\n999999998. b");
+        round_trip(&md);
+    }
+
+    #[test]
+    fn test_smart_card_titles_with_newlines_keep_their_link() {
+        let card = json!({"type": "inlineCard", "attrs": {"data": {"name": "Design\nDocument", "url": "https://x.test/doc"}}});
+        let linked = |t: &str| json!({"type": "text", "text": t, "marks": [{"type": "link", "attrs": {"href": "https://x.test/doc"}}]});
+        let md = adf_to_markdown(&doc(vec![para(vec![text("see "), card.clone()])]));
+        assert_eq!(md, "see [Design](https://x.test/doc)\n[Document](https://x.test/doc)");
+        assert_eq!(markdown_to_adf(&md), doc(vec![para(vec![text("see "), linked("Design"), json!({"type": "hardBreak"}), linked("Document")])]));
+        let table = json!({"type": "table", "attrs": {"isNumberColumnEnabled": false, "layout": "default"}, "content": [
+            {"type": "tableRow", "content": [{"type": "tableHeader", "attrs": {}, "content": [para(vec![text("H")])]}]},
+            {"type": "tableRow", "content": [{"type": "tableCell", "attrs": {}, "content": [para(vec![card])]}]}]});
+        let md = adf_to_markdown(&doc(vec![table]));
+        let cell = &markdown_to_adf(&md)["content"][0]["content"][1]["content"][0]["content"][0];
+        assert_eq!(cell, &para(vec![linked("Design"), json!({"type": "hardBreak"}), linked("Document")]), "{md}");
     }
 }
