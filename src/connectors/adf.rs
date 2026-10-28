@@ -287,7 +287,29 @@ fn inline_round_trips(md: &str, runs: &[(String, Marks)]) -> bool {
         "hardBreak" => ("\n".to_string(), plain.clone()),
         _ => (node.get("text").and_then(Value::as_str).unwrap_or("").to_string(), marks_of(node)),
     }).collect();
-    merge_runs(&parsed) == merge_runs(runs)
+    comparable_runs(&parsed) == comparable_runs(runs)
+}
+
+fn comparable_runs(runs: &[(String, Marks)]) -> Vec<(String, Marks)> {
+    let plain = Marks { code: false, strong: false, em: false, strike: false, link: None };
+    let mut split: Vec<(String, Marks)> = vec![];
+    for (text, marks) in runs {
+        if marks.code {
+            split.push((text.clone(), marks.clone()));
+            continue;
+        }
+        let core = text.trim();
+        if core.is_empty() {
+            split.push((text.clone(), plain.clone()));
+            continue;
+        }
+        let lead = &text[..text.len() - text.trim_start().len()];
+        let trail = &text[text.trim_end().len()..];
+        split.push((lead.to_string(), plain.clone()));
+        split.push((core.to_string(), marks.clone()));
+        split.push((trail.to_string(), plain.clone()));
+    }
+    merge_runs(&split)
 }
 
 fn merge_runs(runs: &[(String, Marks)]) -> Vec<(String, Marks)> {
@@ -605,6 +627,29 @@ fn cell_blocks(cell: &str) -> Vec<Value> {
 }
 
 fn encode_cell(text: &str) -> String {
+    let mut lines = vec![];
+    let mut fence: Option<usize> = None;
+    for line in text.split('\n') {
+        match fence {
+            Some(len) => {
+                lines.push(escape_br(line));
+                if closes_fence(line, len) {
+                    fence = None;
+                }
+            }
+            None => match opening_fence(line.trim_start()) {
+                Some(len) => {
+                    fence = Some(len);
+                    lines.push(escape_br(line));
+                }
+                None => lines.push(escape_br_outside_code(line)),
+            },
+        }
+    }
+    lines.join("<br>")
+}
+
+fn escape_br(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(pos) = rest.find("<br") {
@@ -619,30 +664,100 @@ fn encode_cell(text: &str) -> String {
         }
     }
     out.push_str(rest);
-    out.replace('\n', "<br>")
+    out
 }
 
-fn decode_cell(text: &str) -> String {
+fn escape_br_outside_code(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = String::with_capacity(text.len());
+    let mut segment = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '`' {
+            let run = chars[i..].iter().take_while(|c| **c == '`').count();
+            if let Some(end) = find_backtick_run(&chars, i + run, run) {
+                out.push_str(&escape_br(&segment));
+                segment.clear();
+                out.extend(&chars[i..end + run]);
+                i = end + run;
+                continue;
+            }
+        }
+        segment.push(chars[i]);
+        i += 1;
+    }
+    out.push_str(&escape_br(&segment));
+    out
+}
+
+fn unescape_br(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
     while let Some(pos) = rest.find("<br") {
         out.push_str(&rest[..pos]);
         rest = &rest[pos + 3..];
         let slashes = rest.chars().take_while(|c| *c == '/').count();
-        if rest[slashes..].starts_with('>') {
-            if slashes == 0 {
-                out.push('\n');
-            } else {
-                out.push_str("<br");
-                out.push_str(&"/".repeat(slashes - 1));
-                out.push('>');
-            }
+        if slashes > 0 && rest[slashes..].starts_with('>') {
+            out.push_str("<br");
+            out.push_str(&"/".repeat(slashes - 1));
+            out.push('>');
             rest = &rest[slashes + 1..];
         } else {
             out.push_str("<br");
         }
     }
     out.push_str(rest);
+    out
+}
+
+fn decode_cell(text: &str) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let br = ['<', 'b', 'r', '>'];
+    let mut out = String::with_capacity(text.len());
+    let mut fence: Option<usize> = None;
+    let mut line_start = true;
+    let mut i = 0;
+    while i < chars.len() {
+        if line_start {
+            line_start = false;
+            let line_end = (i..chars.len()).find(|&j| chars[j..].starts_with(&br)).unwrap_or(chars.len());
+            let line: String = chars[i..line_end].iter().collect();
+            match fence {
+                Some(len) if closes_fence(&line, len) => fence = None,
+                None => fence = opening_fence(line.trim_start()),
+                _ => {}
+            }
+            if fence.is_some() {
+                out.push_str(&unescape_br(&line));
+                i = line_end;
+                continue;
+            }
+        }
+        if chars[i] == '`' {
+            let run = chars[i..].iter().take_while(|c| **c == '`').count();
+            let end = find_backtick_run(&chars, i + run, run).map(|end| end + run).unwrap_or(i + run);
+            out.extend(&chars[i..end]);
+            i = end;
+            continue;
+        }
+        if chars[i..].starts_with(&['<', 'b', 'r']) {
+            let slashes = chars[i + 3..].iter().take_while(|c| **c == '/').count();
+            if chars.get(i + 3 + slashes) == Some(&'>') {
+                if slashes == 0 {
+                    out.push('\n');
+                    line_start = true;
+                } else {
+                    out.push_str("<br");
+                    out.push_str(&"/".repeat(slashes - 1));
+                    out.push('>');
+                }
+                i += 4 + slashes;
+                continue;
+            }
+        }
+        out.push(chars[i]);
+        i += 1;
+    }
     out
 }
 
@@ -1735,5 +1850,55 @@ mod tests {
         assert_eq!(md, r"# title \<br> literal");
         assert_eq!(markdown_to_adf(&md), literal);
         round_trip("# plain heading");
+    }
+
+    fn trimmed_spans(nodes: &[Value]) -> Vec<(String, Vec<String>)> {
+        merged_spans(nodes).into_iter()
+            .filter(|(t, _)| !t.trim().is_empty())
+            .map(|(t, m)| (t.trim().to_string(), m))
+            .collect()
+    }
+
+    #[test]
+    fn test_marked_whitespace_keeps_the_formatting_of_the_paragraph() {
+        let adf = doc(vec![para(vec![marked("one ", &["strong"]), marked("two", &["em"]), text(" "), marked("three", &["strike"])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(md, "**one** *two* ~~three~~");
+        assert_eq!(spans(&md), vec![span("one", &["strong"]), span(" ", &[]), span("two", &["em"]), span(" ", &[]), span("three", &["strike"])]);
+        assert_eq!(adf_to_markdown(&doc(vec![para(vec![marked("a", &["strong"]), marked(" b", &["strong", "em"])])])), "**a *b***");
+
+        let options: [&[&str]; 8] = [&[], &["strong"], &["em"], &["strike"], &["strong", "em"], &["strong", "strike"], &["em", "strike"], &["strong", "em", "strike"]];
+        for a in options {
+            for b in options {
+                for c in options {
+                    let nodes = vec![marked("one ", a), marked(" two ", b), marked("three", c)];
+                    let md = adf_to_markdown(&doc(vec![para(nodes.clone())]));
+                    let back = markdown_to_adf(&md);
+                    assert_eq!(trimmed_spans(back["content"][0]["content"].as_array().unwrap()), trimmed_spans(&nodes), "{a:?} {b:?} {c:?} => {md}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_br_typed_inside_cell_code_stays_verbatim() {
+        let md = "| H |\n| --- |\n| `a<br>b` and x<br>y and `c<br/>d` |";
+        let adf = markdown_to_adf(md);
+        let content = &adf["content"][0]["content"][1]["content"][0]["content"][0]["content"];
+        assert_eq!(content[0], marked("a<br>b", &["code"]));
+        assert_eq!(content[1], text(" and x"));
+        assert_eq!(content[2], json!({"type": "hardBreak"}));
+        assert_eq!(content[3], text("y and "));
+        assert_eq!(content[4], marked("c<br/>d", &["code"]));
+        round_trip(md);
+
+        let table = |rows: Vec<Value>| json!({"type": "table", "attrs": {"isNumberColumnEnabled": false, "layout": "default"}, "content": rows});
+        let row = |cells: Vec<Value>| json!({"type": "tableRow", "content": cells});
+        let header = |t: &str| json!({"type": "tableHeader", "attrs": {}, "content": [para(vec![text(t)])]});
+        let cell = |content: Vec<Value>| json!({"type": "tableCell", "attrs": {}, "content": content});
+        let code = json!({"type": "codeBlock", "content": [text("first<br>x\nsecond `<br>`\n```")]});
+        let adf = doc(vec![table(vec![row(vec![header("H")]), row(vec![cell(vec![para(vec![marked("k<br>v", &["code"])]), code])])])]);
+        let md = adf_to_markdown(&adf);
+        assert_eq!(markdown_to_adf(&md), adf, "{md}");
     }
 }
