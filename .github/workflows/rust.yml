@@ -99,3 +99,26 @@ jobs:
       run: git config --global user.name Tester && git config --global user.email tester@example.com
     - name: Run GitHub integration tests
       run: cargo test --verbose --test github_integration -- --test-threads 1
+
+  jira-integration:
+    # Runs against a real Jira Cloud site, so it needs the GIT_TASK_JIRA_* secrets,
+    # which pull requests from forks do not get.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The Jira project is shared between runs, so they must not overlap.
+    concurrency:
+      group: jira-integration
+      cancel-in-progress: false
+    env:
+      GIT_TASK_JIRA_URL: ${{ secrets.GIT_TASK_JIRA_URL }}
+      GIT_TASK_JIRA_USER: ${{ secrets.GIT_TASK_JIRA_USER }}
+      GIT_TASK_JIRA_TOKEN: ${{ secrets.GIT_TASK_JIRA_TOKEN }}
+      GIT_TASK_JIRA_PROJECT: ${{ secrets.GIT_TASK_JIRA_PROJECT }}
+      GIT_TASK_JIRA_SECOND_PROJECT: ${{ secrets.GIT_TASK_JIRA_SECOND_PROJECT }}
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up git
+      run: git config --global user.name Tester && git config --global user.email tester@example.com
+    - name: Run Jira integration tests
+      run: cargo test --verbose --test jira_integration -- --test-threads 1
