@@ -1083,3 +1083,235 @@ fn renaming_tasks_when_enabling_several_projects_prefixes_the_keys() {
     run(&jira, &repo, &["push", &key]);
     assert_eq!(plain_text(&jira.issue(&key)["description"]), "After the switch", "the renamed task must keep syncing the same issue");
 }
+
+impl Jira {
+    fn account_id(&self) -> String {
+        self.get("/rest/api/3/myself")["accountId"].as_str().expect("accountId").to_string()
+    }
+
+    fn description_adf(&self, key: &str) -> Value {
+        self.issue(key)["description"].clone()
+    }
+}
+
+/// Pushes `markdown` as the description of a new issue and returns its key.
+fn push_description(jira: &Jira, repo: &TestRepo, title: &str, markdown: &str) -> String {
+    run(jira, repo, &["create", title, markdown]);
+    let local_id = local_task_ids(repo).into_iter().max_by_key(|id| id.parse::<u64>().unwrap_or(0)).expect("the created task");
+    let placeholder = format!("99999{local_id}");
+    run(jira, repo, &["set", &local_id, "id", &placeholder]);
+    let out = run(jira, repo, &["push", &placeholder]);
+    assert!(out.contains("Created REMOTE task ID"), "the push must create the issue: {out}");
+    let number = local_task_ids(repo).into_iter().find(|id| id != &placeholder && local_task(repo, id)["props"]["name"] == title).expect("the adopted issue number");
+    format!("{}-{number}", jira.project)
+}
+
+#[test]
+fn every_markdown_construct_survives_a_push_and_a_pull() {
+    let jira = jira_or_skip!();
+    let mut cleanup = Cleanup::new(&jira);
+    let suffix = unique_suffix();
+    let title = format!("Every construct from CI {suffix}");
+    let markdown = "\
+# Title
+
+Intro with **bold**, *italic*, ~~struck~~, `code`, a [link](https://example.com/path?q=1) and **bold *and italic* inside**.
+Second line after a hard break.
+
+## Lists
+
+- bullet
+  - nested child
+- second parent
+
+  continuation paragraph
+
+3. third
+4. fourth
+
+- [x] done task
+- [ ] open task
+  - [ ] nested task
+
+> quoted
+> text
+>
+> - quoted bullet
+
+```rust
+fn main() {}
+```
+
+| Name | Code |
+| --- | --- |
+| a\\| b | `x` |
+| **bold** | plain |
+
+---
+
+The end.";
+    let repo = local_repo(&jira);
+    let key = push_description(&jira, &repo, &title, markdown);
+    cleanup.track(&key);
+
+    // Jira accepted the document and kept every node type.
+    let mut kinds = vec![];
+    node_types(&jira.description_adf(&key), &mut kinds);
+    for kind in ["heading", "paragraph", "hardBreak", "bulletList", "orderedList", "taskList", "taskItem", "blockquote", "codeBlock", "table", "tableHeader", "tableCell", "rule",
+                 "mark:strong", "mark:em", "mark:strike", "mark:code", "mark:link"] {
+        assert!(kinds.contains(&kind.to_string()), "Jira must hold a {kind} node, got {kinds:?}");
+    }
+
+    // A fresh clone pulls the same Markdown back, and a push from it has nothing to send.
+    let other = local_repo(&jira);
+    let id = number_of(&key);
+    run(&jira, &other, &["pull", &id]);
+    assert_eq!(local_task(&other, &id)["props"]["description"], markdown, "the description must survive Jira unchanged");
+    let out = run(&jira, &other, &["push", &id]);
+    assert!(out.contains("Nothing to sync"), "what Jira stored must compare equal to the Markdown: {out}");
+
+    // The original repository agrees with Jira too.
+    let out = run(&jira, &repo, &["push", &id]);
+    assert!(out.contains("Nothing to sync"), "the pushed Markdown must compare equal to what Jira stored: {out}");
+}
+
+#[test]
+fn jira_only_nodes_pull_as_readable_markdown_and_push_back_as_valid_adf() {
+    let jira = jira_or_skip!();
+    let mut cleanup = Cleanup::new(&jira);
+    let suffix = unique_suffix();
+    let title = format!("Jira nodes from CI {suffix}");
+    let account_id = jira.account_id();
+    let para = |nodes: Vec<Value>| json!({ "type": "paragraph", "content": nodes });
+    let text = |t: &str| json!({ "type": "text", "text": t });
+    let task = |state: &str, t: &str, local: &str| json!({ "type": "taskItem", "attrs": { "localId": local, "state": state }, "content": [text(t)] });
+    let cell = |kind: &str, attrs: Value, t: &str| json!({ "type": kind, "attrs": attrs, "content": [para(vec![text(t)])] });
+    let description = json!({ "type": "doc", "version": 1, "content": [
+        { "type": "panel", "attrs": { "panelType": "info" }, "content": [
+            para(vec![text("Checklist")]),
+            { "type": "taskList", "attrs": { "localId": "list-1" }, "content": [
+                task("DONE", "Finished", "item-1"),
+                task("TODO", "Remaining", "item-2"),
+                { "type": "taskList", "attrs": { "localId": "list-2" }, "content": [task("TODO", "Nested", "item-3")] },
+            ]},
+        ]},
+        { "type": "expand", "attrs": { "title": " Details " }, "content": [para(vec![text("hidden text")])] },
+        { "type": "table", "attrs": { "isNumberColumnEnabled": false, "layout": "default" }, "content": [
+            { "type": "tableRow", "content": [cell("tableHeader", json!({ "colspan": 2 }), "wide header")] },
+            { "type": "tableRow", "content": [cell("tableCell", json!({ "rowspan": 2 }), "tall"), cell("tableCell", json!({}), "r1")] },
+            { "type": "tableRow", "content": [cell("tableCell", json!({}), "r2")] },
+        ]},
+        para(vec![
+            text("Ask "),
+            json!({ "type": "mention", "attrs": { "id": account_id } }),
+            text(" by "),
+            json!({ "type": "date", "attrs": { "timestamp": "1700000000000" } }),
+            text(" "),
+            json!({ "type": "status", "attrs": { "text": "BLOCKED", "color": "red", "localId": "status-1" } }),
+            text(" "),
+            json!({ "type": "emoji", "attrs": { "shortName": ":tada:" } }),
+        ]),
+        { "type": "rule" },
+        { "type": "heading", "attrs": { "level": 2.0 }, "content": [text("Float level")] },
+        { "type": "orderedList", "attrs": { "order": 2.0 }, "content": [
+            { "type": "listItem", "content": [para(vec![text("second")])] },
+        ]},
+    ]});
+    let key = jira.create_issue_with_adf(&jira.project, &title, description);
+    cleanup.track(&key);
+    let repo = local_repo(&jira);
+    let id = number_of(&key);
+
+    run(&jira, &repo, &["pull", &id]);
+    let pulled = local_task(&repo, &id)["props"]["description"].as_str().unwrap_or("").to_string();
+    for fragment in ["> Checklist", "> - [x] Finished", "> - [ ] Remaining", ">   - [ ] Nested", "**Details**", "hidden text",
+                     "| wide header |", "| tall | r1 |", "| r2 |", "Ask @", "1700000000000", "BLOCKED", "---", "## Float level", "2. second"] {
+        assert!(pulled.contains(fragment), "pulled Markdown must contain {fragment:?}, got:\n{pulled}");
+    }
+    assert!(pulled.contains(":tada:") || pulled.contains('\u{1F389}'), "the emoji must be kept in some form: {pulled}");
+    assert!(!pulled.contains("** Details **"), "whitespace must stay outside the title delimiters: {pulled}");
+
+    // Pushing an unrelated edit sends the flattened document back; Jira must accept it
+    // and the next pull must agree with the local text.
+    let edited = format!("{pulled}\n\nAppended locally.");
+    run(&jira, &repo, &["set", &id, "description", &edited]);
+    run(&jira, &repo, &["push", &id]);
+    let mut kinds = vec![];
+    node_types(&jira.description_adf(&key), &mut kinds);
+    for kind in ["blockquote", "bulletList", "table", "mark:strong", "orderedList", "rule"] {
+        assert!(kinds.contains(&kind.to_string()), "the flattened document must keep a {kind}, got {kinds:?}");
+    }
+    assert!(!kinds.contains(&"panel".to_string()) && !kinds.contains(&"expand".to_string()), "Jira-only containers are flattened on push: {kinds:?}");
+
+    run(&jira, &repo, &["pull", &id]);
+    assert_eq!(local_task(&repo, &id)["props"]["description"], edited, "the flattened document must pull back as the same Markdown");
+    let out = run(&jira, &repo, &["push", &id]);
+    assert!(out.contains("Nothing to sync"), "the round-tripped description must compare equal: {out}");
+}
+
+#[test]
+fn deeply_nested_descriptions_stay_readable_through_jira() {
+    let jira = jira_or_skip!();
+    let mut cleanup = Cleanup::new(&jira);
+    let suffix = unique_suffix();
+    let cases = [
+        ("bullets", format!("{}x", "- ".repeat(200))),
+        ("quotes", format!("{}x", "> ".repeat(200))),
+        ("indented", (0..100).map(|k| format!("{}- item {k}", "  ".repeat(k))).collect::<Vec<_>>().join("\n")),
+        ("mixed", (0..60).map(|k| format!("{}- > **deep** [l](https://example.com)", "    ".repeat(k))).collect::<Vec<_>>().join("\n")),
+    ];
+    for (name, markdown) in &cases {
+        let title = format!("Nested {name} from CI {suffix}");
+        let repo = local_repo(&jira);
+        let key = push_description(&jira, &repo, &title, markdown);
+        cleanup.track(&key);
+        let id = number_of(&key);
+
+        // The pull reads the document inside Jira's response wrapper, which is where
+        // an over-deep document fails to deserialize.
+        let other = local_repo(&jira);
+        run(&jira, &other, &["pull", &id]);
+        let pulled = local_task(&other, &id)["props"]["description"].as_str().unwrap_or("").to_string();
+        let expected_tail = match *name { "indented" => "item 99", "mixed" => "deep", _ => "x" };
+        assert!(pulled.contains(expected_tail), "{name}: the deepest content must be kept: {pulled}");
+
+        let out = run(&jira, &other, &["push", &id]);
+        assert!(out.contains("Nothing to sync"), "{name}: what Jira stored must be stable: {out}");
+        run(&jira, &other, &["pull", &id]);
+        assert_eq!(local_task(&other, &id)["props"]["description"], pulled, "{name}: a second pull must not change the text");
+    }
+}
+
+#[test]
+fn rich_text_comments_round_trip_through_jira() {
+    let jira = jira_or_skip!();
+    let mut cleanup = Cleanup::new(&jira);
+    let suffix = unique_suffix();
+    let title = format!("Rich comments from CI {suffix}");
+    let key = jira.create_issue(&jira.project, &title, "");
+    cleanup.track(&key);
+    let repo = local_repo(&jira);
+    let id = number_of(&key);
+    let comment = "**Bold** start with `code` and a [link](https://example.com/):\n\n- one\n- two\n\n```sh\necho hi\n```\n\n> quoted";
+
+    run(&jira, &repo, &["pull", &id]);
+    run(&jira, &repo, &["comment", "add", &id, comment, "--push"]);
+
+    let remote = jira.get(&format!("/rest/api/3/issue/{key}/comment"))["comments"].clone();
+    assert_eq!(remote.as_array().map(Vec::len), Some(1));
+    let mut kinds = vec![];
+    node_types(&remote[0]["body"], &mut kinds);
+    for kind in ["bulletList", "codeBlock", "blockquote", "mark:strong", "mark:code", "mark:link"] {
+        assert!(kinds.contains(&kind.to_string()), "the comment must reach Jira as rich text with a {kind}, got {kinds:?}");
+    }
+    let comment_id = remote[0]["id"].as_str().expect("comment id").to_string();
+
+    let other = local_repo(&jira);
+    run(&jira, &other, &["pull", &id]);
+    assert_eq!(local_comments(&other, &id), vec![(comment_id.clone(), comment.to_string())], "the comment must pull back as the same Markdown");
+
+    let edited = format!("{comment}\n\n1. numbered");
+    run(&jira, &other, &["comment", "set", &id, &comment_id, &edited, "--push"]);
+    run(&jira, &repo, &["pull", &id]);
+    assert_eq!(local_comments(&repo, &id), vec![(comment_id, edited)], "an edited rich comment must round-trip as well");
+}
