@@ -637,7 +637,7 @@ fn encode_cell(text: &str) -> String {
                     fence = None;
                 }
             }
-            None => match opening_fence(line.trim_start()) {
+            None => match fence_opening(line) {
                 Some(len) => {
                     fence = Some(len);
                     lines.push(escape_br(line));
@@ -673,6 +673,14 @@ fn escape_br_outside_code(text: &str) -> String {
     let mut segment = String::new();
     let mut i = 0;
     while i < chars.len() {
+        if chars[i] == '\\' && chars.get(i + 1).is_some_and(|c| c.is_ascii_punctuation()) {
+            out.push_str(&escape_br(&segment));
+            segment.clear();
+            out.push(chars[i]);
+            out.push(chars[i + 1]);
+            i += 2;
+            continue;
+        }
         if chars[i] == '`' {
             let run = chars[i..].iter().take_while(|c| **c == '`').count();
             if let Some(end) = find_backtick_run(&chars, i + run, run) {
@@ -688,6 +696,20 @@ fn escape_br_outside_code(text: &str) -> String {
     }
     out.push_str(&escape_br(&segment));
     out
+}
+
+fn fence_opening(line: &str) -> Option<usize> {
+    let mut rest = line.trim_start();
+    loop {
+        if let Some((indent, _, offset, _)) = list_marker(rest) {
+            rest = rest[indent + offset..].trim_start();
+        } else if let Some(quoted) = rest.strip_prefix('>') {
+            rest = quoted.trim_start();
+        } else {
+            break;
+        }
+    }
+    opening_fence(rest)
 }
 
 fn unescape_br(text: &str) -> String {
@@ -722,16 +744,23 @@ fn decode_cell(text: &str) -> String {
             line_start = false;
             let line_end = (i..chars.len()).find(|&j| chars[j..].starts_with(&br)).unwrap_or(chars.len());
             let line: String = chars[i..line_end].iter().collect();
-            match fence {
-                Some(len) if closes_fence(&line, len) => fence = None,
-                None => fence = opening_fence(line.trim_start()),
-                _ => {}
+            let closing = matches!(fence, Some(len) if closes_fence(&line, len));
+            if fence.is_none() {
+                fence = fence_opening(&line);
             }
             if fence.is_some() {
+                if closing {
+                    fence = None;
+                }
                 out.push_str(&unescape_br(&line));
                 i = line_end;
                 continue;
             }
+        }
+        if chars[i] == '\\' && chars.get(i + 1).is_some_and(|c| c.is_ascii_punctuation()) {
+            out.extend(&chars[i..i + 2]);
+            i += 2;
+            continue;
         }
         if chars[i] == '`' {
             let run = chars[i..].iter().take_while(|c| **c == '`').count();
@@ -1900,5 +1929,31 @@ mod tests {
         let adf = doc(vec![table(vec![row(vec![header("H")]), row(vec![cell(vec![para(vec![marked("k<br>v", &["code"])]), code])])])]);
         let md = adf_to_markdown(&adf);
         assert_eq!(markdown_to_adf(&md), adf, "{md}");
+    }
+
+    #[test]
+    fn test_cells_with_several_code_blocks_lists_and_escaped_backticks() {
+        let table = |rows: Vec<Value>| json!({"type": "table", "attrs": {"isNumberColumnEnabled": false, "layout": "default"}, "content": rows});
+        let row = |cells: Vec<Value>| json!({"type": "tableRow", "content": cells});
+        let header = |t: &str| json!({"type": "tableHeader", "attrs": {}, "content": [para(vec![text(t)])]});
+        let cell = |content: Vec<Value>| json!({"type": "tableCell", "attrs": {}, "content": content});
+        let code = |lang: Option<&str>, t: &str| {
+            let mut node = json!({"type": "codeBlock", "content": [text(t)]});
+            if let Some(lang) = lang {
+                node["attrs"] = json!({"language": lang});
+            }
+            node
+        };
+        let item = |content: Vec<Value>| json!({"type": "listItem", "content": content});
+        let list = |items: Vec<Value>| json!({"type": "bulletList", "content": items});
+
+        let two_blocks = cell(vec![code(None, "a"), code(None, "b")]);
+        let block_in_item = cell(vec![list(vec![item(vec![code(Some("python"), "first\nsecond")]), item(vec![para(vec![text("after")])])])]);
+        let escaped = cell(vec![para(vec![text("a ` b ` c")]), list(vec![item(vec![para(vec![text("x")])]), item(vec![para(vec![text("y")])])])]);
+        for content in [two_blocks, block_in_item, escaped] {
+            let adf = doc(vec![table(vec![row(vec![header("H")]), row(vec![content])])]);
+            let md = adf_to_markdown(&adf);
+            assert_eq!(markdown_to_adf(&md), adf, "{md}");
+        }
     }
 }
