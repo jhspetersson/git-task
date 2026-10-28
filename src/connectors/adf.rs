@@ -50,6 +50,18 @@ fn attr_str<'a>(node: &'a Value, name: &str) -> Option<&'a str> {
     node.get("attrs").and_then(|a| a.get(name)).and_then(Value::as_str)
 }
 
+/// The display text of a mention, or `@<id>` when Jira omitted it, so the
+/// account reference is never silently dropped from the Markdown.
+fn mention_text(node: &Value) -> String {
+    match attr_str(node, "text").filter(|t| !t.trim().is_empty()) {
+        Some(text) => text.to_string(),
+        None => match attr_str(node, "id").filter(|id| !id.trim().is_empty()) {
+            Some(id) => format!("@{id}"),
+            None => String::new(),
+        },
+    }
+}
+
 fn attr_u64(node: &Value, name: &str) -> Option<u64> {
     node.get("attrs").and_then(|a| a.get(name)).and_then(Value::as_u64)
 }
@@ -270,7 +282,8 @@ fn render_inline(nodes: &[Value]) -> String {
         match node_type(node) {
             "text" => push(node.get("text").and_then(Value::as_str).unwrap_or("").to_string(), marks_of(node)),
             "hardBreak" => push("\n".to_string(), plain.clone()),
-            "mention" | "status" | "placeholder" => push(attr_str(node, "text").unwrap_or("").to_string(), plain.clone()),
+            "mention" => push(mention_text(node), plain.clone()),
+            "status" | "placeholder" => push(attr_str(node, "text").unwrap_or("").to_string(), plain.clone()),
             "emoji" => push(attr_str(node, "shortName").or(attr_str(node, "text")).unwrap_or("").to_string(), plain.clone()),
             "inlineCard" => {
                 let data = node.get("attrs").and_then(|a| a.get("data"));
@@ -1626,6 +1639,30 @@ mod tests {
             json!({"type": "expand", "attrs": {"title": "More"}, "content": [para(vec![text("hidden")])]}),
         ]);
         assert_eq!(adf_to_markdown(&adf), "@Jane said :tada: see https://example.com\n\n> inside panel\n\n**More**\n\nhidden");
+    }
+
+    #[test]
+    fn test_mentions_without_display_text_keep_their_id() {
+        let id_only = json!({"type": "mention", "attrs": {"id": "5b10a2844c20165700ede21g"}});
+        let empty_text = json!({"type": "mention", "attrs": {"id": "712020:abc", "text": ""}});
+        let adf = doc(vec![
+            para(vec![text("Ask "), id_only.clone(), text(" to review.")]),
+            json!({"type": "bulletList", "content": [
+                json!({"type": "listItem", "content": [para(vec![text("cc "), empty_text.clone()])]}),
+            ]}),
+            json!({"type": "table", "content": [
+                json!({"type": "tableRow", "content": [
+                    json!({"type": "tableCell", "content": [para(vec![id_only])]}),
+                ]}),
+            ]}),
+        ]);
+        assert_eq!(
+            adf_to_markdown(&adf),
+            "Ask @5b10a2844c20165700ede21g to review.\n\n- cc @712020:abc\n\n| @5b10a2844c20165700ede21g |\n| --- |"
+        );
+        // A mention with neither text nor id still renders as nothing rather than panicking.
+        let bare = doc(vec![para(vec![text("a"), json!({"type": "mention", "attrs": {}}), text("b")])]);
+        assert_eq!(adf_to_markdown(&bare), "ab");
     }
 
     #[test]
