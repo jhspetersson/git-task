@@ -62,8 +62,20 @@ fn mention_text(node: &Value) -> String {
     }
 }
 
+/// A non-negative integral numeric attribute. ADF allows numbers to arrive as
+/// floats such as `2.0`, which `Value::as_u64` would reject, so those are
+/// accepted when they are finite and mathematically whole.
 fn attr_u64(node: &Value, name: &str) -> Option<u64> {
-    node.get("attrs").and_then(|a| a.get(name)).and_then(Value::as_u64)
+    let value = node.get("attrs")?.get(name)?;
+    if let Some(n) = value.as_u64() {
+        return Some(n);
+    }
+    let f = value.as_f64()?;
+    if f.is_finite() && f >= 0.0 && f.fract() == 0.0 && f <= u64::MAX as f64 {
+        Some(f as u64)
+    } else {
+        None
+    }
 }
 
 fn render_block(node: &Value) -> String {
@@ -100,8 +112,13 @@ fn render_block(node: &Value) -> String {
         "table" => render_table(children(node)),
         "expand" | "nestedExpand" => {
             let body = render_blocks(children(node));
-            match attr_str(node, "title").filter(|t| !t.is_empty()) {
-                Some(title) => format!("**{}**\n\n{body}", escape_text(title)),
+            // Go through the inline renderer so surrounding whitespace and
+            // line breaks in the title land outside the ** delimiters.
+            match attr_str(node, "title").filter(|t| !t.trim().is_empty()) {
+                Some(title) => {
+                    let heading = render_inline(&[json!({"type": "text", "text": title, "marks": [{"type": "strong"}]})]);
+                    format!("{}\n\n{body}", heading.trim())
+                }
                 None => body,
             }
         }
@@ -1663,6 +1680,61 @@ mod tests {
         // A mention with neither text nor id still renders as nothing rather than panicking.
         let bare = doc(vec![para(vec![text("a"), json!({"type": "mention", "attrs": {}}), text("b")])]);
         assert_eq!(adf_to_markdown(&bare), "ab");
+    }
+
+    #[test]
+    fn test_integral_floats_are_accepted_as_numeric_attributes() {
+        let adf = doc(vec![
+            json!({"type": "heading", "attrs": {"level": 2.0}, "content": [text("Title")]}),
+            json!({"type": "orderedList", "attrs": {"order": 3.0}, "content": [
+                json!({"type": "listItem", "content": [para(vec![text("three")])]}),
+                json!({"type": "listItem", "content": [para(vec![text("four")])]}),
+            ]}),
+            json!({"type": "table", "content": [
+                json!({"type": "tableRow", "content": [
+                    json!({"type": "tableCell", "attrs": {"colspan": 2.0}, "content": [para(vec![text("wide")])]}),
+                    json!({"type": "tableCell", "content": [para(vec![text("c")])]}),
+                ]}),
+                json!({"type": "tableRow", "content": [
+                    json!({"type": "tableCell", "content": [para(vec![text("a")])]}),
+                    json!({"type": "tableCell", "content": [para(vec![text("b")])]}),
+                    json!({"type": "tableCell", "content": [para(vec![text("c")])]}),
+                ]}),
+            ]}),
+        ]);
+        let float_md = adf_to_markdown(&adf);
+        assert!(float_md.starts_with("## Title\n\n3. three\n4. four\n\n"), "{float_md}");
+        // The same document with plain integers renders identically.
+        let mut int_adf = adf.clone();
+        int_adf["content"][0]["attrs"]["level"] = json!(2);
+        int_adf["content"][1]["attrs"]["order"] = json!(3);
+        int_adf["content"][2]["content"][0]["content"][0]["attrs"]["colspan"] = json!(2);
+        assert_eq!(float_md, adf_to_markdown(&int_adf));
+        // Non-integral, negative, and non-finite values fall back to the default.
+        for bad in [json!(2.5), json!(-2.0), json!(-2), json!("2")] {
+            let mut doc = adf.clone();
+            doc["content"][0]["attrs"]["level"] = bad;
+            assert!(adf_to_markdown(&doc).starts_with("# Title"));
+        }
+    }
+
+    #[test]
+    fn test_expand_titles_keep_whitespace_outside_the_delimiters() {
+        let expand = |title: &str| json!({"type": "expand", "attrs": {"title": title}, "content": [para(vec![text("hidden")])]});
+        assert_eq!(adf_to_markdown(&doc(vec![expand(" Details ")])), "**Details**\n\nhidden");
+        assert_eq!(adf_to_markdown(&doc(vec![expand("One\nTwo")])), "**One**\n**Two**\n\nhidden");
+        // A blank line inside the title is encoded the same way a paragraph encodes consecutive hard breaks.
+        assert_eq!(adf_to_markdown(&doc(vec![expand("One\n\nTwo")])), "**One**<br><br>**Two**\n\nhidden");
+        assert_eq!(adf_to_markdown(&doc(vec![expand("   ")])), "hidden");
+        let nested = json!({"type": "nestedExpand", "attrs": {"title": " Inner "}, "content": [para(vec![text("deep")])]});
+        assert_eq!(adf_to_markdown(&doc(vec![nested])), "**Inner**\n\ndeep");
+        // Every variant survives a pull/edit/push round trip without stray delimiters.
+        for title in [" Details ", "One\nTwo", "One\n\nTwo"] {
+            let md = adf_to_markdown(&doc(vec![expand(title)]));
+            assert_eq!(adf_to_markdown(&markdown_to_adf(&md)), md, "{title:?}");
+            assert!(!md.contains("** "), "{md}");
+            assert!(!md.contains(" **"), "{md}");
+        }
     }
 
     #[test]
