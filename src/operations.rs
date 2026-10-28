@@ -13,7 +13,7 @@ use regex::Regex;
 use evalexpr::{ContextWithMutableVariables, HashMapContext};
 use gittask::{Comment, Label, Subtask, Task};
 
-use crate::connectors::{get_matching_remote_connectors, status_names_match, RemoteConnector, RemoteTarget, RemoteTaskState};
+use crate::connectors::{get_matching_remote_connectors, status_names_match, RemoteConnector, RemoteTarget, RemoteTaskState, BUILT_IN_PROPERTIES};
 use crate::property::{PropertyManager, PropertyValueType};
 use crate::status::StatusManager;
 use crate::util::{capitalize, colorize_string, error_message, get_text_from_editor, parse_bool, parse_date, parse_ids, read_from_pipe, str_to_color, success_message};
@@ -1004,7 +1004,13 @@ fn push_task(
             (Some(local_project), Some(remote_project)) => local_project != remote_project,
             _ => false,
         };
-        if local_name != remote_name || local_text != remote_text || status_changed || labels_changed || project_changed {
+        // Custom properties (remote custom fields): a local value that differs from the
+        // remote one, or that the remote does not hold at all, needs to be pushed. A
+        // property missing locally leaves the remote field alone.
+        let properties_changed = local_task.get_all_properties().iter()
+            .filter(|(name, _)| !BUILT_IN_PROPERTIES.contains(&name.as_str()))
+            .any(|(name, local_value)| remote_task.get_property(name).map(String::as_str).unwrap_or("") != local_value);
+        if local_name != remote_name || local_text != remote_text || status_changed || labels_changed || project_changed || properties_changed {
             anything_synced = true;
             if status_changed {
                 println!("{}: {} -> {}", id, status_manager.format_status(remote_status, no_color), status_manager.format_status(local_status, no_color));
@@ -2269,6 +2275,58 @@ mod tests {
         assert_eq!(updates.len(), 1, "a label-only change must still update the remote task");
         let sent = updates[0].clone().unwrap_or_default().iter().map(|l| l.get_name()).collect::<Vec<_>>();
         assert_eq!(sent, vec!["bug".to_string()]);
+    }
+
+    #[test]
+    fn test_push_task_sends_property_only_changes() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap();
+        local.set_property("points", "8");
+        let local = gittask::create_task(local).unwrap();
+        let id = local.get_id().unwrap();
+        let mut remote = local.clone();
+        remote.set_property("points", "5");
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+
+        assert!(push_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, true, true, &StatusManager::new(), &statuses, true));
+
+        assert_eq!(fake.updates().len(), 1, "a change to a custom property must still update the remote task");
+    }
+
+    #[test]
+    fn test_push_task_sends_a_property_the_remote_does_not_hold_yet() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut local = gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap();
+        local.set_property("points", "8");
+        let local = gittask::create_task(local).unwrap();
+        let id = local.get_id().unwrap();
+        let mut remote = local.clone();
+        remote.delete_property("points");
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+
+        assert!(push_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, true, true, &StatusManager::new(), &statuses, true));
+
+        assert_eq!(fake.updates().len(), 1, "a property the remote field does not hold yet must be pushed");
+    }
+
+    #[test]
+    fn test_push_task_leaves_a_remote_property_alone_when_the_task_lacks_it() {
+        let _repo = gittask::testing::TestRepo::new();
+        let local = gittask::create_task(gittask::Task::new("Same".to_string(), "same".to_string(), "OPEN".to_string()).unwrap()).unwrap();
+        let id = local.get_id().unwrap();
+        let mut remote = local.clone();
+        remote.set_property("points", "5");
+        let fake = FakeConnector::leaked_with_lookup(2, Ok(Some(remote)));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let statuses = vec!["OPEN".to_string(), "CLOSED".to_string()];
+
+        assert!(push_task(&connector, &"u".to_string(), &"r".to_string(), &id, true, true, true, &StatusManager::new(), &statuses, true));
+
+        assert!(fake.updates().is_empty(), "a property missing locally must not trigger an update");
     }
 
     #[test]

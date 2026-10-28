@@ -480,12 +480,15 @@ fn push_creates_the_issue_once_and_adopts_its_number() {
     let repo = local_repo(&jira);
 
     run(&jira, &repo, &["create", &title, "Pushed description"]);
-    let out = run(&jira, &repo, &["push", "1"]);
+    // A fresh local task is number 1, which an existing issue of the project would also be.
+    run(&jira, &repo, &["set", "1", "id", "999999999"]);
+    let out = run(&jira, &repo, &["push", "999999999"]);
     assert!(out.contains("Created REMOTE task ID"), "the first push must create the issue: {out}");
 
     let ids = local_task_ids(&repo);
     assert_eq!(ids.len(), 1, "the local task must be renamed, not duplicated: {ids:?}");
     let number = &ids[0];
+    assert_ne!(number, "999999999", "the local task must adopt the issue number");
     assert!(number.chars().all(|c| c.is_ascii_digit()), "in single-project mode the local id is the issue number, got {number}");
     let key = format!("{}-{number}", jira.project);
     cleanup.track(&key);

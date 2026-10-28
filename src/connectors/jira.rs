@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use chrono::DateTime;
 use jira_v3_openapi::{apis::configuration::Configuration, apis::issues_api};
-use jira_v3_openapi::apis::{issue_comments_api, issue_fields_api, issue_search_api};
+use jira_v3_openapi::apis::{issue_comments_api, issue_fields_api, issue_search_api, projects_api};
 use jira_v3_openapi::models::IssueTransition;
 use regex::Regex;
 use tokio::runtime::Runtime;
@@ -374,7 +374,7 @@ impl RemoteConnector for JiraRemoteConnector {
                         None => Err("Failed to create issue: no key returned.".to_string())
                     }
                 },
-                Err(e) => Err(format!("Failed to create issue: {}", e))
+                Err(e) => Err(format!("Failed to create issue: {}", api_error(e)))
             }
         })
     }
@@ -896,18 +896,51 @@ async fn update_subtask(config: &Configuration, subtask_key: &str, subtask: &Sub
 }
 
 async fn create_subtask(config: &Configuration, project: &str, parent_key: &str, subtask: &Subtask) -> Result<String, String> {
+    let issue_type = subtask_issue_type(config, project).await?;
     let issue_details = jira_v3_openapi::models::IssueUpdateDetails {
         fields: Some(HashMap::from([
             ("project".to_string(), serde_json::json!({ "key": project })),
             ("parent".to_string(), serde_json::json!({ "key": parent_key })),
             ("summary".to_string(), serde_json::json!(subtask.get_name())),
-            ("issuetype".to_string(), serde_json::json!({ "name": "Sub-task" })),
+            ("issuetype".to_string(), serde_json::json!({ "id": issue_type })),
         ])),
         ..Default::default()
     };
     match issues_api::create_issue(config, issue_details, None).await {
         Ok(response) => response.key.ok_or_else(|| "Failed to create subtask: no key returned.".to_string()),
-        Err(e) => Err(format!("Failed to create subtask: {}", e)),
+        Err(e) => Err(format!("Failed to create subtask: {}", api_error(e))),
+    }
+}
+
+static SUBTASK_ISSUE_TYPES: LazyLock<std::sync::Mutex<HashMap<String, String>>> = LazyLock::new(Default::default);
+
+/// The id of the project's sub-task issue type. Its name is not fixed: company-managed
+/// projects call it "Sub-task", team-managed ones "Subtask", and both can be renamed,
+/// so the type flagged as a sub-task in the project is used. Looked up once per project.
+async fn subtask_issue_type(config: &Configuration, project: &str) -> Result<String, String> {
+    let cache_key = format!("{}#{project}", config.base_path);
+    if let Some(id) = SUBTASK_ISSUE_TYPES.lock().unwrap().get(&cache_key) {
+        return Ok(id.clone());
+    }
+    let details = projects_api::get_project(config, project, None, None)
+        .await
+        .map_err(|e| format!("Failed to get project {project}: {}", api_error(e)))?;
+    let id = details.issue_types.unwrap_or_default().into_iter()
+        .find(|t| t.subtask == Some(true))
+        .and_then(|t| t.id)
+        .ok_or_else(|| format!("Project {project} has no sub-task issue type"))?;
+    SUBTASK_ISSUE_TYPES.lock().unwrap().insert(cache_key, id.clone());
+    Ok(id)
+}
+
+/// The client's own error text drops the response body, which is where Jira explains
+/// what was wrong with a request.
+fn api_error<T>(error: jira_v3_openapi::apis::Error<T>) -> String {
+    match error {
+        jira_v3_openapi::apis::Error::ResponseError(content) if !content.content.trim().is_empty() => {
+            format!("status code {}: {}", content.status, content.content.trim())
+        }
+        other => other.to_string(),
     }
 }
 
@@ -1426,6 +1459,8 @@ mod tests {
 
     fn jira_subtask_flow(current_status: &'static str, transition_status: u16) -> impl Fn(&str, &str) -> (u16, String) + Send + 'static {
         move |method, path| match (method, path) {
+            // A team-managed project: the sub-task type is called "Subtask", not "Sub-task".
+            ("GET", "/rest/api/3/project/ABC") => (200, r#"{"id":"10000","key":"ABC","issueTypes":[{"id":"10001","name":"Task","subtask":false},{"id":"10003","name":"Subtask","subtask":true}]}"#.to_string()),
             ("POST", "/rest/api/3/issue") => (201, r#"{"id":"10002","key":"ABC-2"}"#.to_string()),
             ("GET", "/rest/api/3/issue/ABC-2") => (200, format!(r#"{{"fields":{{"status":{{"name":"{current_status}"}}}}}}"#)),
             ("PUT", "/rest/api/3/issue/ABC-2") => (204, String::new()),
@@ -1475,7 +1510,38 @@ mod tests {
         let result = RUNTIME.block_on(create_subtask(&config, "ABC", "ABC-1", &subtask_with_status("DONE")));
 
         assert_eq!(result, Ok("ABC-2".to_string()));
-        assert_eq!(requests.lock().unwrap().as_slice(), ["POST /rest/api/3/issue"], "the status is applied by the caller once the key is recorded, so a rejected transition cannot lose the key");
+        assert_eq!(requests.lock().unwrap().as_slice(), ["GET /rest/api/3/project/ABC", "POST /rest/api/3/issue"], "the status is applied by the caller once the key is recorded, so a rejected transition cannot lose the key");
+
+        // The sub-task issue type of the project is looked up once.
+        let result = RUNTIME.block_on(create_subtask(&config, "ABC", "ABC-1", &subtask_with_status("DONE")));
+        assert_eq!(result, Ok("ABC-2".to_string()));
+        assert_eq!(requests.lock().unwrap().iter().filter(|r| r.starts_with("GET /rest/api/3/project")).count(), 1);
+    }
+
+    #[test]
+    fn test_create_subtask_reports_a_project_without_a_subtask_type() {
+        let (config, requests) = stub_jira(|method, path| match (method, path) {
+            ("GET", "/rest/api/3/project/NOSUB") => (200, r#"{"id":"10000","key":"NOSUB","issueTypes":[{"id":"10001","name":"Sub-task","subtask":false}]}"#.to_string()),
+            _ => (404, String::new()),
+        });
+
+        let result = RUNTIME.block_on(create_subtask(&config, "NOSUB", "NOSUB-1", &subtask_with_status("DONE")));
+
+        assert_eq!(result, Err("Project NOSUB has no sub-task issue type".to_string()), "the type is found by its sub-task flag, not by its name");
+        assert!(!requests.lock().unwrap().contains(&"POST /rest/api/3/issue".to_string()), "nothing must be created without a type");
+    }
+
+    #[test]
+    fn test_api_errors_include_what_jira_said() {
+        let (config, _) = stub_jira(|method, path| match (method, path) {
+            ("GET", "/rest/api/3/project/ERR") => (400, r#"{"errorMessages":["Issue type is required"]}"#.to_string()),
+            _ => (404, String::new()),
+        });
+
+        let result = RUNTIME.block_on(create_subtask(&config, "ERR", "ERR-1", &subtask_with_status("DONE")));
+
+        let error = result.unwrap_err();
+        assert!(error.contains("400") && error.contains("Issue type is required"), "the response body must be part of the error: {error}");
     }
 
     #[test]
