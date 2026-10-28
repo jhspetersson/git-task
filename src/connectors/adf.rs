@@ -106,6 +106,7 @@ fn render_block(node: &Value) -> String {
             format!("{fence}{language}\n{code}\n{fence}")
         }
         "blockquote" | "panel" => render_blocks(children(node)).lines()
+            .map(unescape_quoted_task_marker)
             .map(|l| if l.is_empty() { ">".to_string() } else { format!("> {l}") })
             .collect::<Vec<_>>().join("\n"),
         "rule" => "---".to_string(),
@@ -132,6 +133,21 @@ fn render_block(node: &Value) -> String {
             }
         }
     }
+}
+
+/// A task list inside a quote is pushed as bullets whose text starts with `[x]` or
+/// `[ ]`, since ADF allows no task list there. Rendering that text as a real checkbox
+/// is unambiguous inside a quote, where parsing a checkbox yields the same bullets
+/// again, so the quote round-trips unchanged instead of growing escapes on each pull.
+fn unescape_quoted_task_marker(line: &str) -> String {
+    let indent = line.len() - line.trim_start().len();
+    let (lead, rest) = line.split_at(indent);
+    for (escaped, plain) in [("- \\[x\\]", "- [x]"), ("- \\[X\\]", "- [X]"), ("- \\[ \\]", "- [ ]")] {
+        if let Some(tail) = rest.strip_prefix(escaped) && (tail.is_empty() || tail.starts_with(' ')) {
+            return format!("{lead}{plain}{tail}");
+        }
+    }
+    line.to_string()
 }
 
 fn is_inline(node: &Value) -> bool {
@@ -2540,10 +2556,18 @@ b")]}]});
         assert_eq!(nested[1]["content"], json!([para(vec![text("[ ] "), marked("bold todo", &["strong"])])]));
         assert_eq!(items[2]["content"], json!([para(vec![text("[x] First paragraph")]), para(vec![text("Second paragraph")])]));
         assert_eq!(items[3]["content"], json!([para(vec![text("[ ]")])]));
-        // The markers are escaped on the way back out so they read as text, not as a task list.
+        // Inside a quote the markers render as checkboxes again, so a second pull
+        // gives the same text and a second push finds nothing to send.
         let repulled = adf_to_markdown(&pushed);
-        assert_eq!(repulled, "> - \\[x\\] Finished\n> - \\[ \\] Remaining\n>   - \\[x\\] Nested done\n>   - \\[ \\] **bold todo**\n> - \\[x\\] First paragraph\n>\n>   Second paragraph\n> - \\[ \\]");
+        assert_eq!(repulled, pulled);
         assert_eq!(markdown_to_adf(&repulled), pushed);
+        // Outside a quote a bullet that merely starts with a checkbox-looking text stays escaped,
+        // otherwise it would turn into a task list on the next push.
+        let top_level = doc(vec![json!({"type": "bulletList", "content": [
+            json!({"type": "listItem", "content": [para(vec![text("[x] looks done")])]}),
+        ]})]);
+        assert_eq!(adf_to_markdown(&top_level), "- \\[x\\] looks done");
+        assert_eq!(markdown_to_adf(&adf_to_markdown(&top_level)), top_level);
 
         // The same holds for a panel inside a table cell and inside an expand.
         let cell_doc = doc(vec![json!({"type": "table", "content": [json!({"type": "tableRow", "content": [
@@ -2551,10 +2575,10 @@ b")]}]});
         ]})]})]);
         let cell_md = adf_to_markdown(&cell_doc);
         let cell_pushed = markdown_to_adf(&cell_md);
-        assert!(adf_to_markdown(&cell_pushed).contains("\\[x\\] In cell"), "{cell_md}");
+        assert!(adf_to_markdown(&cell_pushed).contains("- [x] In cell"), "{cell_md}");
         let expand_doc = doc(vec![json!({"type": "expand", "attrs": {"title": "More"}, "content": [panel(vec![task_list(vec![task("TODO", vec![text("In expand")])])])]})]);
         let expand_pushed = markdown_to_adf(&adf_to_markdown(&expand_doc));
-        assert!(adf_to_markdown(&expand_pushed).contains("\\[ \\] In expand"));
+        assert!(adf_to_markdown(&expand_pushed).contains("- [ ] In expand"));
     }
 
     #[test]

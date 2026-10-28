@@ -1096,7 +1096,8 @@ impl Jira {
 
 /// Pushes `markdown` as the description of a new issue and returns its key.
 fn push_description(jira: &Jira, repo: &TestRepo, title: &str, markdown: &str) -> String {
-    run(jira, repo, &["create", title, markdown]);
+    // `--` keeps a description that starts with a list marker from being read as an option.
+    run(jira, repo, &["create", "--", title, markdown]);
     let local_id = local_task_ids(repo).into_iter().max_by_key(|id| id.parse::<u64>().unwrap_or(0)).expect("the created task");
     let placeholder = format!("99999{local_id}");
     run(jira, repo, &["set", &local_id, "id", &placeholder]);

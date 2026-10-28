@@ -1147,6 +1147,16 @@ fn sync_local_subtasks(
         };
         let is_done = status_manager.is_done(subtask.get_status());
         if remote_ids.contains(&local_id) {
+            // An unchanged subtask is left alone, so a push with nothing new reports
+            // nothing to sync. Statuses are compared by name the way the remote spells them.
+            let unchanged = remote_subtasks.iter().any(|remote| {
+                remote.get_id().as_deref() == Some(local_id.as_str())
+                    && remote.get_name() == subtask.get_name()
+                    && status_names_match(remote.get_status(), subtask.get_status())
+            });
+            if unchanged {
+                continue;
+            }
             if let Err(e) = connector.update_remote_subtask(user, repo, task_id, subtask, is_done) {
                 eprintln!("ERROR syncing REMOTE subtask {local_id}: {e}");
                 *success = false;
@@ -2464,6 +2474,35 @@ mod tests {
 
         assert!(success);
         assert_eq!(subtask_ids(&id), vec![("A".to_string(), "2".to_string()), ("B".to_string(), "3".to_string())], "the retry must only create B, never A again");
+    }
+
+    #[test]
+    fn test_sync_local_subtasks_leaves_unchanged_subtasks_alone() {
+        let _repo = gittask::testing::TestRepo::new();
+        let mut task = gittask::Task::new("Parent".to_string(), "".to_string(), "OPEN".to_string()).unwrap();
+        task.add_subtask(Some("10".to_string()), "Same child".to_string(), "CLOSED".to_string(), HashMap::new()).unwrap();
+        task.add_subtask(Some("11".to_string()), "Renamed child".to_string(), "OPEN".to_string(), HashMap::new()).unwrap();
+        let task = gittask::create_task(task).unwrap();
+        let id = task.get_id().unwrap();
+        let fake = FakeConnector::leaked_with_lookup(20, Err("not used".to_string()));
+        // The remote spells the done status its own way, which still counts as unchanged.
+        fake.created_subtasks.lock().unwrap().push(Subtask::new(Some("10".to_string()), "Same child".to_string(), "Closed".to_string(), HashMap::new()));
+        fake.created_subtasks.lock().unwrap().push(Subtask::new(Some("11".to_string()), "Old name".to_string(), "OPEN".to_string(), HashMap::new()));
+        let connector: Box<&'static dyn RemoteConnector> = Box::new(fake);
+        let mut success = true;
+
+        let synced = sync_local_subtasks(&connector, &"u".to_string(), &"r".to_string(), &id, &task, &StatusManager::new(), &vec!["OPEN".to_string(), "CLOSED".to_string()], &mut success);
+
+        assert!(success);
+        assert!(synced, "the renamed subtask must be pushed");
+        assert_eq!(*fake.subtask_updates.lock().unwrap(), vec!["11".to_string()], "only the subtask that differs may be updated");
+        assert_eq!(fake.created_subtasks.lock().unwrap().len(), 2, "nothing must be created");
+
+        fake.subtask_updates.lock().unwrap().clear();
+        fake.created_subtasks.lock().unwrap()[1] = Subtask::new(Some("11".to_string()), "Renamed child".to_string(), "OPEN".to_string(), HashMap::new());
+        let synced = sync_local_subtasks(&connector, &"u".to_string(), &"r".to_string(), &id, &task, &StatusManager::new(), &vec!["OPEN".to_string(), "CLOSED".to_string()], &mut success);
+        assert!(!synced, "once everything matches there is nothing to sync");
+        assert!(fake.subtask_updates.lock().unwrap().is_empty());
     }
 
     #[test]
