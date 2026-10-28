@@ -597,16 +597,30 @@ fn starts_block(line: &str) -> bool {
 // markdown -> ADF
 // ---------------------------------------------------------------------------
 
-/// How deep quotes, lists and table cells may nest before the rest is kept as
-/// plain text. Every level costs a recursive call, so hostile input such as
-/// thousands of `>` markers must not be followed all the way down.
-const MAX_BLOCK_DEPTH: usize = 64;
+/// The deepest JSON nesting a generated document may have. serde_json refuses to
+/// read anything nested beyond 128 levels, and Jira wraps the document in a few
+/// more when it answers a pull, so the budget leaves that room. Nesting is
+/// bounded by the JSON it produces rather than by Markdown levels: a list costs
+/// four layers per level, a quote two, a table six, and a paragraph with marked
+/// text five at the leaf. Past the budget the rest is kept as plain text, which
+/// also keeps the recursive parser off the stack for thousands of `>` markers.
+const MAX_JSON_DEPTH: usize = 96;
+/// `doc` and its `content` array.
+const DOC_DEPTH: usize = 2;
+/// `blockquote` and its `content`.
+const QUOTE_DEPTH: usize = 2;
+/// A list, its `content`, an item and the item's `content`.
+const LIST_DEPTH: usize = 4;
+/// A table, its rows, a row, its cells, a cell and the cell's `content`.
+const TABLE_DEPTH: usize = 6;
+/// A paragraph, its `content`, a text node, its `marks` and one mark.
+const LEAF_DEPTH: usize = 5;
 
 /// How deep link labels may nest inside one another before `[` is literal.
 const MAX_INLINE_DEPTH: usize = 32;
 
 fn parse_blocks(lines: &[&str]) -> Vec<Value> {
-    parse_blocks_at(lines, 0)
+    parse_blocks_at(lines, DOC_DEPTH)
 }
 
 /// Past the nesting limit the lines become one paragraph of inline text instead
@@ -617,7 +631,9 @@ fn literal_paragraph(lines: &[&str]) -> Vec<Value> {
 }
 
 fn parse_blocks_at(lines: &[&str], depth: usize) -> Vec<Value> {
-    if depth >= MAX_BLOCK_DEPTH && lines.iter().any(|l| !l.trim().is_empty()) {
+    // `depth` is the number of JSON layers already open above these blocks. Any
+    // block that could start here, with a leaf under it, must fit in the budget.
+    if depth + TABLE_DEPTH + LEAF_DEPTH > MAX_JSON_DEPTH && lines.iter().any(|l| !l.trim().is_empty()) {
         return literal_paragraph(lines);
     }
     let mut blocks = vec![];
@@ -655,7 +671,7 @@ fn parse_blocks_at(lines: &[&str], depth: usize) -> Vec<Value> {
                 inner.push(l);
                 i += 1;
             }
-            blocks.push(json!({"type": "blockquote", "content": quote_content(parse_blocks_at(&inner, depth + 1))}));
+            blocks.push(json!({"type": "blockquote", "content": quote_content(parse_blocks_at(&inner, depth + QUOTE_DEPTH))}));
         } else if trimmed.starts_with('|') && i + 1 < lines.len() && is_table_separator(lines[i + 1]) {
             let mut rows = vec![];
             rows.push(table_cells(lines[i]));
@@ -664,9 +680,9 @@ fn parse_blocks_at(lines: &[&str], depth: usize) -> Vec<Value> {
                 rows.push(table_cells(lines[i]));
                 i += 1;
             }
-            blocks.push(table_node(rows, depth + 1));
+            blocks.push(table_node(rows, depth + TABLE_DEPTH));
         } else if list_marker(line).is_some() {
-            let (node, consumed) = parse_list(&lines[i..], depth + 1);
+            let (node, consumed) = parse_list(&lines[i..], depth + LIST_DEPTH);
             blocks.push(node);
             i += consumed;
         } else {
@@ -1825,6 +1841,44 @@ mod tests {
         let adf = markdown_to_adf(&nested_cells);
         assert_eq!(adf["type"], "doc");
         assert!(adf_to_markdown(&adf).contains("cell"));
+    }
+
+    fn json_depth(value: &Value) -> usize {
+        match value {
+            Value::Object(map) => 1 + map.values().map(json_depth).max().unwrap_or(0),
+            Value::Array(items) => 1 + items.iter().map(json_depth).max().unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn test_generated_documents_stay_within_the_json_depth_limit() {
+        // Each case nests far deeper in Markdown than serde_json can read back as ADF.
+        let cases = [
+            format!("{}x", "- ".repeat(32)),
+            format!("{}x", "- ".repeat(200)),
+            (0..64).map(|k| format!("{}- [ ] task {k}", "  ".repeat(k))).collect::<Vec<_>>().join("\n"),
+            (0..200).map(|k| format!("{}1. step {k}", "   ".repeat(k))).collect::<Vec<_>>().join("\n"),
+            format!("{}x", "> ".repeat(200)),
+            format!("{}| {}cell |\n| --- |", "> ".repeat(40), "- ".repeat(40)),
+            (0..100).map(|k| format!("{}- > - **deep** [l](u)", "    ".repeat(k))).collect::<Vec<_>>().join("\n"),
+        ];
+        for markdown in &cases {
+            let adf = markdown_to_adf(markdown);
+            let depth = json_depth(&adf);
+            assert!(depth <= MAX_JSON_DEPTH, "depth {depth} exceeds the budget for {:?}", &markdown[..markdown.len().min(60)]);
+            // What Jira sends back on a pull must be readable with the default limits.
+            let wrapped = format!("{{\"expand\":\"\",\"fields\":{{\"description\":{},\"comment\":{{\"comments\":[{{\"body\":{}}}]}}}}}}", adf, adf);
+            assert!(serde_json::from_str::<Value>(&wrapped).is_ok(), "the wrapped document must deserialize for {:?}", &markdown[..markdown.len().min(60)]);
+            let md = adf_to_markdown(&adf);
+            assert!(md.contains('x') || md.contains("task 63") || md.contains("step 199") || md.contains("cell") || md.contains("deep"), "content must be kept: {md}");
+            assert!(strip_ids(&markdown_to_adf(&md)) == strip_ids(&adf), "the bounded document must be stable for {:?}", &markdown[..markdown.len().min(60)]);
+        }
+        // Moderate nesting is untouched: sixteen real list levels, with the text at the bottom.
+        let sixteen = format!("{}x", "- ".repeat(16));
+        let adf = markdown_to_adf(&sixteen);
+        assert_eq!(json_depth(&adf), DOC_DEPTH + 16 * LIST_DEPTH + 3, "every level must be a real list");
+        assert!(markdown_to_adf(&adf_to_markdown(&adf)) == adf);
     }
 
     #[test]
