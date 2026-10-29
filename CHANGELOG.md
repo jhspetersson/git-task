@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-29
+
 ### Added
 
 - Subtasks with their own ID, name, status and properties, synchronized with GitHub sub-issues, Jira sub-tasks and Redmine parent issues
@@ -142,12 +144,3 @@
 - Configurable task ref with data migration
 - Git color settings and `NO_COLOR` support
 
-[Unreleased]: https://github.com/jhspetersson/git-task/compare/0.2.4...HEAD
-[0.2.4]: https://github.com/jhspetersson/git-task/compare/0.2.3...0.2.4
-[0.2.3]: https://github.com/jhspetersson/git-task/compare/0.2.2...0.2.3
-[0.2.2]: https://github.com/jhspetersson/git-task/compare/0.2.1...0.2.2
-[0.2.1]: https://github.com/jhspetersson/git-task/compare/0.2.0...0.2.1
-[0.2.0]: https://github.com/jhspetersson/git-task/compare/0.1.2...0.2.0
-[0.1.2]: https://github.com/jhspetersson/git-task/compare/0.1.1...0.1.2
-[0.1.1]: https://github.com/jhspetersson/git-task/compare/0.1.0...0.1.1
-[0.1.0]: https://github.com/jhspetersson/git-task/releases/tag/0.1.0
